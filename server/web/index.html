@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Voice AI</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #0e1116; color: #e6e8eb;
+    }
+    main { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+    .row { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+    label { font-size: .85rem; color: #8b949e; }
+    input[type=password], input[type=text] {
+      flex: 1; padding: .6rem .75rem; border: 1px solid #30363d;
+      background: #161b22; color: #e6e8eb; border-radius: .4rem; font-size: .95rem;
+    }
+    button.rec {
+      width: 100%; padding: 2rem; font-size: 1.4rem; font-weight: 600;
+      border: 0; border-radius: 1rem; cursor: pointer;
+      background: #2da44e; color: white; transition: background .15s;
+      -webkit-tap-highlight-color: transparent; user-select: none;
+    }
+    button.rec.recording { background: #cf222e; }
+    button.rec:disabled { background: #444c56; cursor: wait; }
+    .status { margin: 1rem 0; min-height: 1.4em; color: #8b949e; }
+    .panel {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: .5rem; padding: .9rem 1rem; margin-top: 1rem;
+    }
+    .panel h2 { margin: 0 0 .4rem; font-size: .8rem; color: #8b949e;
+      text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    .panel p { margin: 0; line-height: 1.4; }
+    .timings { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .8rem; color: #8b949e; }
+    audio { width: 100%; margin-top: .8rem; }
+    .err { color: #ff7b72; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Voice AI</h1>
+
+  <div class="row">
+    <label style="min-width: 5em;">API key:</label>
+    <input id="apiKey" type="password" placeholder="optional, sent as X-API-Key" autocomplete="off">
+  </div>
+
+  <button id="rec" class="rec">Tap to talk</button>
+  <div id="status" class="status">Ready.</div>
+
+  <div id="result" style="display:none;">
+    <div class="panel"><h2>You said</h2><p id="transcript"></p></div>
+    <div class="panel"><h2>Reply</h2><p id="reply"></p></div>
+    <div class="panel"><h2>Routing & timings</h2><p id="meta" class="timings"></p></div>
+    <audio id="player" controls autoplay></audio>
+  </div>
+</main>
+
+<script>
+const recBtn = document.getElementById('rec');
+const status = document.getElementById('status');
+const result = document.getElementById('result');
+const transcriptEl = document.getElementById('transcript');
+const replyEl = document.getElementById('reply');
+const metaEl = document.getElementById('meta');
+const player = document.getElementById('player');
+const apiKeyInput = document.getElementById('apiKey');
+
+apiKeyInput.value = localStorage.getItem('apiKey') || '';
+apiKeyInput.addEventListener('change', () => localStorage.setItem('apiKey', apiKeyInput.value));
+
+let mediaRecorder = null;
+let chunks = [];
+let mediaStream = null;
+
+async function startRecording() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  } catch (err) {
+    status.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
+    return false;
+  }
+  chunks = [];
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+  mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime })
+                       : new MediaRecorder(mediaStream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = handleStop;
+  mediaRecorder.start();
+  recBtn.classList.add('recording');
+  recBtn.textContent = 'Tap to send';
+  status.textContent = 'Recording… speak then tap again.';
+  return true;
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  recBtn.classList.remove('recording');
+  recBtn.disabled = true;
+  recBtn.textContent = 'Sending…';
+  status.textContent = 'Sending to /converse…';
+}
+
+async function handleStop() {
+  const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+  const ext = (blob.type.includes('mp4') ? '.m4a' : '.webm');
+
+  const fd = new FormData();
+  fd.append('audio', blob, `rec${ext}`);
+  fd.append('play_locally', 'false');  // play on this phone, not the workstation
+
+  const headers = {};
+  const key = apiKeyInput.value.trim();
+  if (key) headers['X-API-Key'] = key;
+
+  const t0 = performance.now();
+  let r;
+  try {
+    r = await fetch('/converse', { method: 'POST', body: fd, headers });
+  } catch (err) {
+    finishWithError(`Network error: ${err.message}`);
+    return;
+  }
+  const wallS = (performance.now() - t0) / 1000;
+
+  if (!r.ok) {
+    let msg;
+    try { msg = (await r.json()).error || r.statusText; } catch { msg = r.statusText; }
+    finishWithError(`Server ${r.status}: ${msg}`);
+    return;
+  }
+  const d = await r.json();
+  showResult(d, wallS);
+  resetButton();
+}
+
+function finishWithError(msg) {
+  status.innerHTML = `<span class="err">${msg}</span>`;
+  resetButton();
+}
+
+function resetButton() {
+  recBtn.disabled = false;
+  recBtn.classList.remove('recording');
+  recBtn.textContent = 'Tap to talk';
+}
+
+function showResult(d, wallS) {
+  result.style.display = 'block';
+  transcriptEl.textContent = d.transcript;
+  replyEl.textContent = d.reply_text;
+  const t = d.timings;
+  metaEl.textContent =
+    `route=${d.route} (${d.model})\n` +
+    `stt=${t.stt.toFixed(2)}s  route=${t.route.toFixed(3)}s  ` +
+    `llm=${t.llm.toFixed(2)}s  tts=${t.tts.toFixed(2)}s  ` +
+    `total=${t.total.toFixed(2)}s  http_wall=${wallS.toFixed(2)}s`;
+
+  // Decode base64 WAV and play
+  const bin = atob(d.audio_base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const audioBlob = new Blob([bytes], { type: 'audio/wav' });
+  player.src = URL.createObjectURL(audioBlob);
+  player.play().catch(() => { /* autoplay blocked; user can press play */ });
+  status.textContent = 'Done.';
+}
+
+recBtn.addEventListener('click', async () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+models/
+samples/_*.wav
+.claude/
+.vscode/
+.idea/
+*.log
+
