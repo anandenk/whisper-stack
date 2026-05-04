@@ -1,7 +1,13 @@
-"""Stage 10 verification: /converse/stream SSE skeleton (Phase 3A).
+"""Stage 10 verification: /converse/stream SSE wire format.
 
-Phase 3A ships only the wiring — real STT + router, fake LLM text deltas,
-single non-streaming TTS call. No real LLM streaming yet (that's 3B+).
+Originally written for Phase 3A (the stubbed-LLM skeleton). After Phase 3B
+the LLM is real (ClaudeLLM.chat_stream); this test now validates the
+wire format end-to-end without asserting stub-specific behavior. The
+fixture is a non-tool query ("capital of France") so the response stays
+in a single round and `final.reply_text` equals the joined text deltas
+— that invariant breaks for tool-using queries (intermediate "thinking
+text" doesn't end up in final.reply), which is what stage10_stream_tools
+exercises.
 
 This test:
 - synthesizes a short fixture utterance via Piper (same trick as stage 7)
@@ -158,14 +164,12 @@ def main() -> int:
     for k in ("route", "force_routed", "auto_escalated", "model", "router_scores"):
         must(k in route_ev, f"route event missing {k!r}: {route_ev}")
     must(route_ev["route"] in ("simple", "complex"), f"bad route: {route_ev['route']}")
-    must(route_ev["model"] == "phase-3a-stub",
-         f"3A skeleton must report stub model, got {route_ev['model']!r}")
+    must(isinstance(route_ev["model"], str) and len(route_ev["model"]) > 0,
+         f"route.model must be a non-empty string, got {route_ev['model']!r}")
 
     text_deltas = [d["delta"] for e, d in events if e == "text"]
     joined = "".join(text_deltas)
-    must(len(joined) > 20, f"joined text too short: {joined!r}")
-    must("phase 3b" in joined.lower(),
-         f"3A stub reply should mention phase 3B, got: {joined!r}")
+    must(len(joined) > 5, f"joined text too short: {joined!r}")
 
     audio_ev = next(d for e, d in events if e == "audio")
     must("sample_rate" in audio_ev and audio_ev["sample_rate"] > 8000,
@@ -178,8 +182,13 @@ def main() -> int:
     final = next(d for e, d in events if e == "final")
     for k in ("reply_text", "audio_duration_s", "timings", "tools_used", "llm_tokens"):
         must(k in final, f"final event missing {k!r}: {final}")
-    must(final["reply_text"] == joined,
-         "final.reply_text must equal the joined text deltas (skeleton invariant)")
+    # For a non-tool query the LLM runs in a single round, so the joined
+    # text deltas equal final.reply_text modulo leading/trailing whitespace
+    # (chat_stream strips the final reply). Tool-using queries can break
+    # this — see stage10_stream_tools.
+    must(final["reply_text"].strip() == joined.strip(),
+         f"final.reply_text != joined deltas (single-round invariant):\n"
+         f"  reply_text: {final['reply_text']!r}\n  joined: {joined!r}")
     for tk in ("stt", "route", "llm", "tts", "total"):
         must(tk in final["timings"], f"final.timings missing {tk!r}")
     must(final["audio_duration_s"] > 0.1,

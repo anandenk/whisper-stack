@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Iterator
 
 import requests
 
@@ -163,6 +164,22 @@ class OllamaLLM:
         if tools_used:
             result["tools_used"] = tools_used
         return result
+
+    def chat_stream(self, message: str, max_tokens: int = 512,
+                    system_prompt: str | None = None,
+                    history: list[dict] | None = None,
+                    tools: list[Tool] | None = None) -> Iterator[dict]:
+        """Stub — Phase 3C wires real /api/chat NDJSON streaming into this
+        method. Until then, route handlers detect this NotImplementedError
+        and fall back to chat()."""
+        raise NotImplementedError(
+            "OllamaLLM.chat_stream is implemented in Phase 3C of the "
+            "voice-agent plan. Fall back to chat() until then."
+        )
+        # Make this a generator function so the exception is raised on
+        # first iteration (not at call time). Otherwise calling
+        # `chat_stream(...)` itself raises, which is the wrong shape.
+        yield  # pragma: no cover
 
     def warmup(self) -> None:
         """Trigger model load so first user simple-route call isn't a cold start."""

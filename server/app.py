@@ -96,14 +96,6 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _fake_text_deltas(text: str, chunk_len: int = 24) -> Iterator[str]:
-    """Phase 3A: chunk a fixed reply into small deltas so the client sees
-    the same shape it will see when ClaudeLLM.chat_stream() lands in 3B.
-    """
-    for i in range(0, len(text), chunk_len):
-        yield text[i:i + chunk_len]
-
-
 @app.before_request
 def _gate_protected_routes():
     if not config.API_KEY:
@@ -426,13 +418,19 @@ def converse():
 def converse_stream():
     """SSE-streamed converse pipeline.
 
-    Phase 3A skeleton: real STT + real router, but the LLM is stubbed with a
-    fixed reply chunked into fake `text` deltas, and TTS runs ONCE
-    (non-streaming) over the whole reply emitted as a single `audio` event.
-    The wire format matches what phases 3B-3D will fill in with real LLM
-    streaming and per-sentence TTS chunks. Inputs mirror /converse —
-    multipart audio + optional force_route + session_id + play_locally —
-    so the client can be a near drop-in switch.
+    Phase 3B: real STT + router + LLM streaming. Tool calls inside the
+    LLM surface as tool_call/tool_result SSE events. Backends without
+    streaming (currently OllamaLLM, until Phase 3C) raise
+    NotImplementedError on first iteration; this route catches that and
+    falls back to non-streaming chat() with the whole reply emitted as
+    a single text delta.
+
+    TTS still runs ONCE (non-streaming) over the final reply — Phase 3D
+    swaps that for sentence-boundary streaming so audio arrives while
+    the model is still generating. Session persistence already works:
+    the turn is appended on `final.reply` (last-round text), matching
+    /converse's semantic of dropping intermediate "thinking" text from
+    the stored conversation.
     """
     if "audio" not in request.files:
         return jsonify({"error": "missing 'audio' file in multipart form"}), 400
@@ -501,15 +499,13 @@ def converse_stream():
                 route = "complex"
                 auto_escalated = True
 
-            # We DON'T call get_llm(route) yet — that would force a backend
-            # to load and add real latency the skeleton is meant to avoid.
-            # The model name reported is the stub label so clients can tell
-            # 3A traffic apart from 3B-and-later real streams.
+            llm = modes.get_llm(route)
+
             yield _sse_event("route", {
                 "route": route,
                 "force_routed": force_routed,
                 "auto_escalated": auto_escalated,
-                "model": "phase-3a-stub",
+                "model": getattr(llm, "model", "unknown"),
                 "router_scores": {
                     "simple": decision["score_simple"],
                     "complex": decision["score_complex"],
@@ -518,15 +514,98 @@ def converse_stream():
                 },
             })
 
-            reply_text = (
-                f"This is a streaming skeleton reply. You said: {transcript.strip()} "
-                f"Real LLM streaming arrives in phase 3B."
-            )
+            # Load conversation history if a session_id was supplied. Mirrors
+            # /converse: window of recent turns becomes the LLM's `history`,
+            # and the new turn is appended on `final` (using last-round text,
+            # not joined deltas — see ClaudeLLM.chat_stream docstring).
+            session: Session | None = None
+            history: list[dict] | None = None
+            if session_id is not None:
+                session = _session_store().active_or_new(session_id)
+                window = session.recent_window(config.SESSION_WINDOW_TURNS)
+                history = [m for turn in window for m in turn.to_message_pair()]
+
+            # Tools complex-route-only — same rationale as /chat and /converse:
+            # Llama 3.1 8B (simple) misbehaves with tools mid-conversation, and
+            # auto-escalation has already moved tool-likely queries to Sonnet.
+            tool_list = (all_tools() or None) if route == "complex" else None
+
+            reply_text = ""
+            llm_input_tokens = 0
+            llm_output_tokens = 0
+            tools_used: list[dict] = []
 
             t = time.perf_counter()
-            for delta in _fake_text_deltas(reply_text):
-                yield _sse_event("text", {"delta": delta})
+            try:
+                stream_iter = llm.chat_stream(
+                    transcript,
+                    max_tokens=config.CONVERSE_MAX_TOKENS,
+                    system_prompt=config.VOICE_SYSTEM_PROMPT,
+                    history=history,
+                    tools=tool_list,
+                )
+                for ev in stream_iter:
+                    etype = ev.get("type")
+                    if etype == "text":
+                        yield _sse_event("text", {"delta": ev["delta"]})
+                    elif etype == "tool_call":
+                        yield _sse_event("tool_call", {
+                            "id": ev.get("id"),
+                            "name": ev["name"],
+                            "input": ev.get("input", {}),
+                            "round": ev.get("round"),
+                        })
+                    elif etype == "tool_result":
+                        yield _sse_event("tool_result", {
+                            "id": ev.get("id"),
+                            "name": ev["name"],
+                            "output_chars": ev.get("output_chars"),
+                            "latency_s": ev.get("latency_s"),
+                            "round": ev.get("round"),
+                        })
+                    elif etype == "final":
+                        reply_text = ev.get("reply", "")
+                        llm_input_tokens = int(ev.get("input_tokens") or 0)
+                        llm_output_tokens = int(ev.get("output_tokens") or 0)
+                        tools_used = ev.get("tools_used") or []
+            except NotImplementedError:
+                # Backend hasn't implemented streaming yet (Ollama until 3C).
+                # Fall back to non-streaming chat() and synthesize a single
+                # text delta from the whole reply so the SSE shape stays
+                # consistent for clients.
+                result = llm.chat(
+                    transcript,
+                    max_tokens=config.CONVERSE_MAX_TOKENS,
+                    system_prompt=config.VOICE_SYSTEM_PROMPT,
+                    history=history,
+                    tools=tool_list,
+                )
+                reply_text = result["reply"]
+                llm_input_tokens = int(result.get("input_tokens") or 0)
+                llm_output_tokens = int(result.get("output_tokens") or 0)
+                tools_used = result.get("tools_used") or []
+                if reply_text:
+                    yield _sse_event("text", {"delta": reply_text})
             timings["llm"] = time.perf_counter() - t
+
+            # Persist the turn BEFORE TTS, same ordering as /converse — if
+            # synth or playback crashes, conversation memory still moves
+            # forward. Store final.reply (last-round text), not the joined
+            # text deltas: the chat_stream contract drops "thinking text"
+            # from earlier rounds for voice purposes.
+            if session is not None:
+                session.append_turn(
+                    user_text=transcript,
+                    reply_text=reply_text,
+                    route=route,
+                    model=getattr(llm, "model", "unknown"),
+                    latency_s=timings["llm"],
+                    input_tokens=llm_input_tokens,
+                    output_tokens=llm_output_tokens,
+                    auto_escalated=auto_escalated,
+                    tools_used=tools_used or None,
+                )
+                _maybe_autotitle(session, transcript, reply_text)
 
             t = time.perf_counter()
             speakable_text = markdown.to_speakable_text(reply_text)
@@ -539,13 +618,16 @@ def converse_stream():
             })
 
             timings["total"] = time.perf_counter() - t_total
-            yield _sse_event("final", {
+            final_payload = {
                 "reply_text": reply_text,
                 "audio_duration_s": (len(raw_pcm) // 2) / sample_rate if sample_rate else 0.0,
                 "timings": timings,
-                "tools_used": [],
-                "llm_tokens": {"input": None, "output": None},
-            })
+                "tools_used": tools_used,
+                "llm_tokens": {"input": llm_input_tokens, "output": llm_output_tokens},
+            }
+            if session is not None:
+                final_payload["session_file"] = session.path.name
+            yield _sse_event("final", final_payload)
         except Exception as exc:
             traceback.print_exc()
             yield _sse_event("error", {"error": f"converse stream failed: {exc!r}"})

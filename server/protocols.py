@@ -12,7 +12,7 @@ existing code already does (no point introducing dataclasses for this migration)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Iterator, Protocol
 
 import numpy as np
 
@@ -56,6 +56,37 @@ class LLM(Protocol):
         tools are exposed and `chat()` behaves identically to today.
         Returns also include an optional `tools_used: list[dict]` describing
         what got called.
+        """
+        ...
+
+    def chat_stream(self, message: str, max_tokens: int = 1024,
+                    system_prompt: str | None = None,
+                    history: list[dict] | None = None,
+                    tools: list | None = None) -> Iterator[dict]:
+        """Streaming variant of chat(). Yields a sequence of event dicts and
+        terminates with a single 'final' event carrying the same fields
+        chat() returns.
+
+        Event shapes:
+          - {"type": "text", "delta": str}
+              A chunk of generated text. Multiple events per round; clients
+              concatenate to display the model's output as it forms.
+          - {"type": "tool_call", "id": str, "name": str, "input": dict, "round": int}
+              Yielded BEFORE the handler runs.
+          - {"type": "tool_result", "id": str, "name": str, "output_chars": int,
+             "latency_s": float, "round": int}
+              Yielded AFTER the handler runs.
+          - {"type": "final", "reply": str, "model": str, "latency_s": float,
+             "input_tokens": int, "output_tokens": int, "stop_reason": str,
+             "tools_used": list[dict] | absent}
+              Always the last event. `reply` is the LAST round's text only
+              — text from earlier rounds (before tool_use) is "thinking"
+              that the model didn't intend as the final answer. Voice
+              callers should TTS `final.reply`, not the concatenation of
+              all `text` deltas.
+
+        Backends that don't support streaming yet raise NotImplementedError
+        on first iteration; route handlers fall back to chat().
         """
         ...
 
