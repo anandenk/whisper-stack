@@ -85,6 +85,11 @@ CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "96"))
 # from billing forever. Each round is one Anthropic / Ollama call.
 TOOL_MAX_ROUNDS = int(os.environ.get("TOOL_MAX_ROUNDS", "5"))
 
+# [both] web search via Tavily (https://tavily.com). Free tier covers 1k
+# queries/mo. When unset, the web_search tool is NOT registered — the model
+# simply doesn't see it as an option, so it can't try and fail.
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
+
 # Multi-turn session memory (see notes/sessions-plan.md).
 # - SESSION_DIR is REPO_ROOT-relative unless an absolute path is given.
 #   On a Fly.io VM this should point at a mounted volume so redeploys don't wipe history.

@@ -34,5 +34,7 @@ def get_tool(name: str) -> Tool:
 
 
 # Side-effect imports register the default tools. Order = display order in
-# /health-style listings; doesn't affect model behavior.
+# /health-style listings; doesn't affect model behavior. `search` registers
+# itself ONLY if TAVILY_API_KEY is set — see search.py for the rationale.
 from server.tools import time as _time  # noqa: F401, E402
+from server.tools import search as _search  # noqa: F401, E402
