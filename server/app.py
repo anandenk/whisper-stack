@@ -341,6 +341,17 @@ def converse():
 
 def main():
     print(f"MODE={config.MODE}", flush=True)
+    # One-shot session prune at boot when SESSION_TTL_DAYS is configured.
+    # No background daemon — files just stop accumulating between restarts.
+    if config.SESSION_TTL_DAYS is not None:
+        try:
+            deleted = _session_store().prune_older_than(config.SESSION_TTL_DAYS)
+            if deleted:
+                print(f"Pruned {len(deleted)} session file(s) older than "
+                      f"{config.SESSION_TTL_DAYS} days.", flush=True)
+        except Exception as exc:
+            # Pruning is best-effort; never block boot on it.
+            print(f"WARNING: session prune failed: {exc!r}", flush=True)
     if config.WARMUP:
         # STT warmup takes the longest (Whisper PTX JIT on cold start). Print
         # specific labels so a user can tell which stage is slow if boot stalls.

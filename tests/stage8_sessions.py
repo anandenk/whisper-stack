@@ -251,6 +251,48 @@ def test_malformed_block_skipped(tmp: Path) -> None:
     print("  OK")
 
 
+def test_prune_older_than(tmp: Path) -> None:
+    print("[10] prune_older_than removes stale files; spares fresh + malformed")
+    store = SessionStore(tmp, idle_timeout=timedelta(minutes=10))
+    t_now = datetime(2026, 5, 4, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Three real sessions: 30d old, 5d old, fresh.
+    s_old = store.active_or_new("dev-prune", now=t_now - timedelta(days=30))
+    s_old.append_turn(
+        user_text="ancient", reply_text="ok",
+        route="simple", model="m", latency_s=0.1, input_tokens=1, output_tokens=1,
+        now=t_now - timedelta(days=30),
+    )
+    s_mid = store.active_or_new("dev-prune", now=t_now - timedelta(days=5))
+    s_mid.append_turn(
+        user_text="recent-ish", reply_text="ok",
+        route="simple", model="m", latency_s=0.1, input_tokens=1, output_tokens=1,
+        now=t_now - timedelta(days=5),
+    )
+    s_new = store.active_or_new("dev-prune", now=t_now)
+    s_new.append_turn(
+        user_text="now", reply_text="ok",
+        route="simple", model="m", latency_s=0.1, input_tokens=1, output_tokens=1,
+        now=t_now,
+    )
+
+    # Bonus: a malformed file that has no parseable last_turn header. Should
+    # be left alone.
+    malformed = tmp / "dev-prune-malformed.md"
+    malformed.write_text("# Session dev-prune-malformed\n(this file is corrupt)\n",
+                         encoding="utf-8")
+
+    deleted = store.prune_older_than(days=14, now=t_now)
+    must(s_old.path in deleted, "30d-old session should be pruned")
+    must(s_mid.path not in deleted, "5d-old session should be kept")
+    must(s_new.path not in deleted, "fresh session should be kept")
+    must(malformed not in deleted, "malformed file should NOT be deleted")
+    must(not s_old.path.exists(), "pruned file still on disk")
+    must(s_mid.path.exists() and s_new.path.exists(), "kept files vanished")
+    must(malformed.exists(), "malformed file got deleted")
+    print("  OK")
+
+
 def test_multiline_text(tmp: Path) -> None:
     print("[9] multi-line user_text and reply_text round-trip cleanly")
     store = SessionStore(tmp, idle_timeout=timedelta(minutes=10))
@@ -282,6 +324,7 @@ def main() -> int:
         test_invalid_stream_id(tmp)
         test_malformed_block_skipped(tmp)
         test_multiline_text(tmp)
+        test_prune_older_than(tmp)
 
     print("\n" + "=" * 64)
     print("  All Phase A (sessions.py) checks passed.")

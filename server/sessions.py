@@ -288,6 +288,36 @@ class SessionStore:
         """Sorted oldest -> newest. Cheap; just a glob + sort."""
         return sorted(self.root.glob(f"{stream_id}-*.md"))
 
+    def prune_older_than(self, days: float, now: datetime | None = None) -> list[Path]:
+        """Delete every session file whose last_turn is older than `days`.
+
+        Uses the in-file `last_turn:` header, NOT mtime — matches the idle
+        check's source-of-truth so backups/rsync/antivirus touching mtime
+        can't rescue (or condemn) sessions. Files with unreadable or
+        missing headers are skipped, never deleted; an unparseable file is
+        more useful as a forensic record than as dropped state.
+
+        Returns the list of paths that were deleted.
+        """
+        if days < 0:
+            raise ValueError(f"days must be >= 0, got {days}")
+        now = now or _utcnow()
+        threshold = now - timedelta(days=days)
+        deleted: list[Path] = []
+        for path in self.root.glob("*.md"):
+            last_turn = _peek_last_turn(path)
+            if last_turn is None:
+                continue
+            if last_turn < threshold:
+                try:
+                    path.unlink()
+                    deleted.append(path)
+                except OSError:
+                    # Best-effort cleanup — a permission error on one file
+                    # shouldn't take down the rest of the prune pass.
+                    continue
+        return deleted
+
 
 def _peek_last_turn(path: Path) -> datetime | None:
     """Read just the file header to grab the last_turn timestamp.

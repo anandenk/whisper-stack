@@ -82,6 +82,11 @@ _session_dir_path = Path(_session_dir_raw)
 SESSION_DIR = _session_dir_path if _session_dir_path.is_absolute() else (REPO_ROOT / _session_dir_path)
 SESSION_IDLE_TIMEOUT_MIN = float(os.environ.get("SESSION_IDLE_TIMEOUT_MIN", "10"))
 SESSION_WINDOW_TURNS = int(os.environ.get("SESSION_WINDOW_TURNS", "30"))
+# Optional TTL: if set, sessions older than N days are deleted at server boot.
+# Unset / empty = never prune. Disk cost is trivial for one user, but on a
+# Fly.io volume (cloud mode) this caps growth without a daemon.
+_session_ttl_raw = os.environ.get("SESSION_TTL_DAYS", "").strip()
+SESSION_TTL_DAYS: float | None = float(_session_ttl_raw) if _session_ttl_raw else None
 
 # System prompt prepended to LLM calls from /converse. Targets two failure modes:
 # (1) markdown formatting (asterisks, bullets) read literally by the TTS engine,
