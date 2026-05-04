@@ -22,6 +22,45 @@ from server import config
 from server.tools.base import Tool
 
 
+def _serialize_assistant_content(content) -> list[dict]:
+    """Build the `content` array we send back to Anthropic when continuing a
+    tool-using conversation. We can't just call `model_dump()` on each block
+    because the SDK attaches non-API fields that Anthropic's request validator
+    rejects:
+
+      * streaming responses add `parsed_output: None` to text blocks
+        (-> Anthropic 400: "messages.N.content.0.text.parsed_output: Extra
+        inputs are not permitted")
+      * tool_use blocks pick up `caller` from the SDK helper layer
+
+    Whitelisting the known wire-format fields per block type avoids both.
+    Unknown block types fall through to model_dump() so a future block type
+    we haven't accounted for (e.g. extended-thinking) doesn't silently drop;
+    if Anthropic later rejects those it'll be obvious in the error.
+    """
+    out: list[dict] = []
+    for b in content:
+        btype = getattr(b, "type", None)
+        if btype == "text":
+            out.append({"type": "text", "text": b.text})
+        elif btype == "tool_use":
+            out.append({
+                "type": "tool_use",
+                "id": b.id,
+                "name": b.name,
+                "input": b.input,
+            })
+        else:
+            # Unknown block type — fall back to model_dump and hope Anthropic
+            # accepts the shape. If they don't, the error message will name
+            # the field and we can extend the whitelist.
+            try:
+                out.append(b.model_dump())
+            except Exception:
+                pass
+    return out
+
+
 class ClaudeLLM:
     def __init__(self, model: str | None = None) -> None:
         self.model = model or config.ANTHROPIC_MODEL
@@ -95,7 +134,10 @@ class ClaudeLLM:
                 break
 
             # Tool calls present → run handlers, append result messages, loop.
-            messages.append({"role": "assistant", "content": [b.model_dump() for b in msg.content]})
+            messages.append({
+                "role": "assistant",
+                "content": _serialize_assistant_content(msg.content),
+            })
 
             tool_results = []
             for tc in tool_calls:
@@ -217,7 +259,7 @@ class ClaudeLLM:
             # run handlers and append tool_result blocks.
             messages.append({
                 "role": "assistant",
-                "content": [b.model_dump() for b in final_msg.content],
+                "content": _serialize_assistant_content(final_msg.content),
             })
 
             tool_results = []
