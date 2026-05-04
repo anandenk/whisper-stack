@@ -454,9 +454,11 @@ def converse_stream():
     if sid_err:
         return jsonify({"error": sid_err}), 400
 
-    # play_locally is parsed and acknowledged but not yet wired — Phase 3D
-    # adds true streaming local playback. The skeleton always emits the
-    # PCM via SSE so the client can play it.
+    # play_locally is parsed and echoed back in the `ready` event but
+    # unused server-side: /converse/stream emits PCM only via SSE and
+    # leaves playback to the client (the web client uses Web Audio).
+    # Workstation callers that want the workstation to speak the reply
+    # should keep using the non-streaming /converse endpoint.
     play_locally = request.form.get("play_locally", "true").strip().lower() != "false"
 
     # Persist the upload to a tempfile we can hand to STT. We must save
