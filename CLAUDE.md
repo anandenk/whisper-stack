@@ -1,9 +1,13 @@
 # Voice AI Server
 
 Workstation backend for a future ESP-32 + INMP441 voice device. Pipeline:
-**audio → faster-whisper STT → router → Llama 3.1 8B (local) or Claude API → Piper TTS → Bose BT speaker + ESP-32 OLED**.
+**audio → STT → router → simple-LLM or complex-LLM → TTS → speaker + ESP-32 OLED**.
 
-Full plan with all 7 stages: see [plan.md](plan.md).
+The seven local-mode stages all shipped (see "Stage status" below). The
+codebase is now split into a backend abstraction so a single `MODE` env
+var picks the implementation set at process boot (see "MODE: local vs
+cloud"). Original 7-stage plan: [plan.md](plan.md). Two-mode refactor
+plan: [notes/two-mode-plan.md](notes/two-mode-plan.md).
 
 ## Environment
 
@@ -70,7 +74,7 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
        for _bin in _nvidia_root.glob("*/bin"):
            os.add_dll_directory(str(_bin))
    ```
-   Pattern is already in `tests/stage1_whisper.py` — reuse it in `server/stt.py` when stage 4 lands.
+   Pattern lives at the top of `server/backends/stt_whisper.py` — it MUST stay at module top, not inside the class init, so it runs before `from faster_whisper import WhisperModel`.
 
 2. **Cold-start penalty ~6s on whisper** due to `sm_120` PTX JIT compile. Stage 4 server needs a warmup call at startup.
 
@@ -85,17 +89,37 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
 ## Layout
 
 ```
-.venv/                  Python 3.13 virtualenv
-samples/jfk.wav         11s public-domain STT fixture
-tests/stageN_*.py       per-stage standalone smoke tests
-server/                 config.py, stt.py, llm.py, app.py (router.py + tts.py land at stages 5/6)
-notes/                  (empty until stage 5) — router-design.md goes here first, before code
-plan.md                 full 7-stage plan
+.venv/                       Python 3.13 virtualenv
+samples/jfk.wav              11s public-domain STT fixture
+models/piper/                Piper voice .onnx + .json (local-mode TTS)
+tests/stageN_*.py            per-stage local-mode smoke tests
+tests/cloud_*.py             cloud-backend smoke tests (Phase 5/6/7/8)
+tests/talk.py                push-to-talk client
+server/
+├── app.py                   Flask routes; main() warms each backend via modes
+├── config.py                env loading + MODE validation
+├── modes.py                 factory: get_stt/get_llm/get_tts/get_embedder
+├── protocols.py             STT / LLM / TTS / Embedder Protocols
+├── router.py                embedding-similarity classifier; embedder injected
+├── markdown.py              to_speakable_text (markdown/LaTeX stripper)
+├── audio.py                 pcm_to_wav, synth_to_wav (mode-independent)
+├── audio_out.py             local sounddevice playback; cloud no-op
+├── web/index.html           browser/phone client
+└── backends/
+    ├── stt_whisper.py       local — WhisperLocalSTT (+ DLL bootstrap)
+    ├── llm_ollama.py        local-simple — OllamaLLM
+    ├── llm_claude.py        both — ClaudeLLM(model=Sonnet | Haiku)
+    ├── tts_piper.py         local — PiperTTS
+    ├── embed_ollama.py      local — OllamaEmbedder (nomic-embed-text)
+    └── embed_st.py          cloud — SentenceTransformerEmbedder (MiniLM-L6)
+plan.md                      original 7-stage build plan
+notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
+requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
 ```
 
 ## TODO when audio setup is finalized
 
-Stage 6 ships using the **system default output device** (currently Razer USB Sound Card). When the speaker setup is finalized — Bose paired and set as default, or a specific device chosen — pin the device by name in `.env` so playback doesn't accidentally route to whatever is default at the moment (e.g. headphones plugging in). Mechanism: `sd.default.device = (None, "<substring of name>")` set from a `TTS_OUTPUT_DEVICE` env var in `server/config.py` and applied in `server/tts.py`. Avoid Hands-Free Bluetooth profiles (`Headset (...)` entries) — they run at 8 kHz and sound terrible for TTS. Use A2DP/stereo profile.
+Stage 6 ships using the **system default output device** (currently Razer USB Sound Card). When the speaker setup is finalized — Bose paired and set as default, or a specific device chosen — pin the device by name in `.env` so playback doesn't accidentally route to whatever is default at the moment (e.g. headphones plugging in). Mechanism: `sd.default.device = (None, "<substring of name>")` set from a `TTS_OUTPUT_DEVICE` env var in `server/config.py` and applied at the top of `server/audio_out.py` (the local-mode playback module). Avoid Hands-Free Bluetooth profiles (`Headset (...)` entries) — they run at 8 kHz and sound terrible for TTS. Use A2DP/stereo profile.
 
 ## Running the server
 
@@ -112,7 +136,9 @@ Routes:
 - `POST /speak` — JSON `{text}` → synth + blocking play through default output
 - `POST /converse` — multipart `audio` (+ optional `force_route` form field) → STT → router → LLM → TTS → JSON with `transcript`, `route`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, plus non-blocking local playback
 
-`CONVERSE_MAX_TOKENS=192` caps voice replies so they don't turn into 30s monologues. Tune via env.
+`CONVERSE_MAX_TOKENS=96` caps voice replies so they don't turn into 30s monologues. Tune via env.
+
+`/health` includes `mode` (`local`|`cloud`) and `models_loaded` (per-backend `is_loaded()` snapshot).
 
 ## Talking to it (push-to-talk client)
 
