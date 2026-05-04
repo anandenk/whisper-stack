@@ -31,6 +31,16 @@ plan: [notes/two-mode-plan.md](notes/two-mode-plan.md).
 
 Each stage leaves a re-runnable smoke test in `tests/`.
 
+## Plans (read these before starting work)
+
+Each plan is a self-contained doc with its own decisions, phases, and
+risks. Don't merge them — they reflect distinct chunks of work at
+different statuses.
+
+- [plan.md](plan.md) — original 7-stage local-mode build. **Shipped.**
+- [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor (one codebase, two deploy shapes). **Phases 1, 2, 3, 4, 6, 8 shipped; 5 (Deepgram STT), 7 (OpenAI TTS), 9 (Fly.io deploy) queued behind cloud signups.**
+- [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **Not yet started.**
+
 ## MODE: local vs cloud
 
 The server picks one backend set at process boot via the `MODE` env var

@@ -1,5 +1,7 @@
 # Two-mode refactor — `MODE=local` vs `MODE=cloud`
 
+> **Sequel:** [notes/sessions-plan.md](sessions-plan.md) — server-side multi-turn memory, idle-bounded markdown sessions. Not yet started.
+
 > Note: the user requested this be written to `notes/two-mode-plan.md`. Plan-mode constraints route the file here first; on approval it gets copied to `notes/two-mode-plan.md` as the first implementation step.
 
 ## Context
