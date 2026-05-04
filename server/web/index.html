@@ -72,6 +72,14 @@
     </label>
   </div>
 
+  <div class="row">
+    <label style="min-width: 5em;">Continuous:</label>
+    <label style="flex:1;display:flex;align-items:center;gap:.5em;cursor:pointer;">
+      <input id="continuousMode" type="checkbox">
+      <span style="color:#8b949e;font-size:.85rem;">Talk back-and-forth (forces VAD on, button becomes Start/End conversation)</span>
+    </label>
+  </div>
+
   <button id="rec" class="rec">Tap to talk</button>
   <div id="status" class="status">Ready.</div>
 
@@ -99,6 +107,7 @@ const toolsEl = document.getElementById('tools');
 const apiKeyInput = document.getElementById('apiKey');
 const sessionInput = document.getElementById('sessionId');
 const vadCheckbox = document.getElementById('vadEnabled');
+const continuousCheckbox = document.getElementById('continuousMode');
 const sessionPanel = document.getElementById('sessionPanel');
 const sessionFileEl = document.getElementById('sessionFile');
 
@@ -115,6 +124,17 @@ vadCheckbox.addEventListener('change', () => {
   localStorage.setItem('vadEnabled', vadCheckbox.checked ? '1' : '0');
 });
 
+// Continuous mode toggle — opt-in (defaults off). Persisted independently;
+// flipping it while a conversation is active doesn't end the conversation
+// (you have to tap the End button), but the next IDLE state will reflect
+// the new setting via updateButtonForMode().
+const _contStored = localStorage.getItem('continuousMode');
+continuousCheckbox.checked = _contStored === '1';
+continuousCheckbox.addEventListener('change', () => {
+  localStorage.setItem('continuousMode', continuousCheckbox.checked ? '1' : '0');
+  updateButtonForMode();
+});
+
 // VAD tuning constants — tweak here if speech is being clipped or background
 // noise auto-stops too eagerly. Threshold is in Uint8 deviation-from-center
 // units returned by AnalyserNode.getByteTimeDomainData (0..128). Quiet rooms
@@ -122,6 +142,11 @@ vadCheckbox.addEventListener('change', () => {
 // dwell time below threshold (after speech has started) before auto-stop.
 const VAD_PEAK_THRESHOLD = 6;
 const VAD_SILENCE_MS = 1500;
+// Small gap between SPEAKING ending and the next LISTENING starting in
+// continuous mode — gives the user a beat of silence to react before the
+// mic re-opens (otherwise the very tail of the assistant's last syllable
+// can re-trigger VAD via speaker-bleed).
+const CONTINUOUS_TURN_GAP_MS = 250;
 
 let mediaRecorder = null;
 let recChunks = [];
@@ -136,6 +161,31 @@ let vadMicSource = null;      // MediaStreamAudioSourceNode wrapping the recordi
 let vadRafHandle = 0;         // requestAnimationFrame handle for the silence-watch loop
 let vadSpeechStarted = false; // True once peak crosses VAD_PEAK_THRESHOLD this turn
 let vadSilenceStartMs = 0;    // performance.now() when continuous silence started (0 = not silent)
+
+// Phase 5A continuous-mode state. continuousActive is the "user has tapped
+// Start conversation and not End" flag, distinct from the persisted toggle:
+// the toggle just configures intent, the flag drives the auto-restart loop.
+let continuousActive = false;
+
+function vadShouldRun() {
+  // Continuous mode REQUIRES VAD (otherwise turns can't end). Manual VAD
+  // toggle still respected outside continuous mode.
+  return continuousActive || vadCheckbox.checked;
+}
+
+function updateButtonForMode() {
+  // IDLE label only — recording/sending labels are managed by start/stop.
+  if (continuousActive) {
+    recBtn.textContent = 'End conversation';
+    recBtn.classList.remove('recording');
+  } else if (mediaRecorder && mediaRecorder.state === 'recording') {
+    recBtn.textContent = 'Tap to send';
+  } else {
+    recBtn.textContent = continuousCheckbox.checked
+      ? 'Start conversation'
+      : 'Tap to talk';
+  }
+}
 
 function ensureAudioCtx() {
   // AudioContext creation/resume must follow a user gesture — recBtn click qualifies.
@@ -199,6 +249,21 @@ function enqueuePcm(pcmBytes, sampleRate) {
       speaking = false;
       statusEl.classList.remove('speaking');
       statusEl.textContent = 'Done.';
+      // Phase 5A continuous: assistant just finished speaking; if the user
+      // hasn't ended the conversation, kick off the next listening turn.
+      // Small gap so the speaker tail can settle before the mic re-opens
+      // (otherwise speaker-bleed can re-trigger VAD via the new mic).
+      if (continuousActive) {
+        setTimeout(() => {
+          if (continuousActive && (!mediaRecorder || mediaRecorder.state !== 'recording')) {
+            startRecording().catch(err => {
+              console.warn('continuous restart failed:', err);
+              continuousActive = false;
+              updateButtonForMode();
+            });
+          }
+        }, CONTINUOUS_TURN_GAP_MS);
+      }
     }
   };
 
@@ -234,10 +299,20 @@ async function startRecording() {
   mediaRecorder.onstop = handleStop;
   mediaRecorder.start();
   recBtn.classList.add('recording');
-  recBtn.textContent = 'Tap to send';
-  if (vadCheckbox.checked) {
+  if (continuousActive) {
+    // In continuous mode the button stays "End conversation" so the user
+    // can bail at any point. No "Tap to send" label flip.
+    recBtn.textContent = 'End conversation';
+  } else {
+    recBtn.textContent = 'Tap to send';
+  }
+  if (vadShouldRun()) {
     startVad();
-    statusEl.textContent = 'Recording… auto-stops on silence (or tap to send).';
+    if (continuousActive) {
+      statusEl.textContent = 'Listening… auto-sends on silence. Tap End to stop.';
+    } else {
+      statusEl.textContent = 'Recording… auto-stops on silence (or tap to send).';
+    }
   } else {
     statusEl.textContent = 'Recording… speak then tap again.';
   }
@@ -513,6 +588,11 @@ function showFinalSummary(d, wallS) {
 
 function finishWithError(msg) {
   statusEl.innerHTML = `<span class="err">${msg}</span>`;
+  // Auto-loop on errors would just spam the server. End the conversation
+  // and let the user re-engage manually after they've seen the error.
+  if (continuousActive) {
+    continuousActive = false;
+  }
   resetButton();
   replyEl.classList.remove('streaming');
 }
@@ -520,16 +600,56 @@ function finishWithError(msg) {
 function resetButton() {
   recBtn.disabled = false;
   recBtn.classList.remove('recording');
-  recBtn.textContent = 'Tap to talk';
+  updateButtonForMode();
+}
+
+function endContinuousConversation() {
+  continuousActive = false;
+  abortInflight();
+  stopVad();
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    // The MediaRecorder.onstop -> handleStop path would normally fire
+    // /converse/stream; we don't want that here. Detach the handler
+    // first so a partial recording from the abandoned turn doesn't
+    // upload.
+    try { mediaRecorder.onstop = null; } catch {}
+    try { mediaRecorder.stop(); } catch {}
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  resetButton();
+  statusEl.textContent = 'Conversation ended.';
 }
 
 recBtn.addEventListener('click', async () => {
+  // Continuous mode handling is structurally different — Start/End is a
+  // session-level toggle, not a per-turn one. The single-turn flow is
+  // unchanged.
+  if (continuousCheckbox.checked) {
+    if (continuousActive) {
+      endContinuousConversation();
+    } else {
+      continuousActive = true;
+      updateButtonForMode();
+      const ok = await startRecording();
+      if (!ok) {
+        continuousActive = false;
+        updateButtonForMode();
+      }
+    }
+    return;
+  }
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     stopRecording();
   } else {
     await startRecording();
   }
 });
+
+// Reflect the persisted continuous-mode toggle in the button label on load.
+updateButtonForMode();
 </script>
 </body>
 </html>
