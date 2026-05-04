@@ -25,7 +25,8 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server import tts
+from server import config  # noqa: F401  -- triggers .env load so API_KEY is in os.environ
+from server.audio import synth_to_wav
 
 BASE = "http://127.0.0.1:5000"
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
@@ -65,7 +66,7 @@ def wait_for_health(timeout_s: float = 60.0) -> dict:
 
 
 def synth_fixture(text: str, dest: Path) -> None:
-    wav_bytes = tts.synth_to_wav(text)
+    wav_bytes = synth_to_wav(text)
     dest.write_bytes(wav_bytes)
 
 

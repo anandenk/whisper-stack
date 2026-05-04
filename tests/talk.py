@@ -25,8 +25,8 @@ import numpy as np
 import requests
 import sounddevice as sd
 
-# Importing tts triggers config.load_dotenv(...), so API_KEY shows up in os.environ.
-from server import tts as _tts_unused  # noqa: F401
+# Importing config triggers load_dotenv(...), so API_KEY shows up in os.environ.
+from server import config as _config_unused  # noqa: F401
 
 BASE = os.environ.get("VOICE_AI_BASE", "http://127.0.0.1:5000")
 API_KEY = os.environ.get("API_KEY", "").strip()

@@ -1,8 +1,6 @@
 """Mode-independent audio helpers: raw int16 PCM <-> WAV bytes.
 
-`synth_to_wav` lazily routes through the active TTS backend; in Phase 1 it
-imports `server.tts` (which still wraps Piper). Phase 3 swaps that to
-`modes.get_tts()` so cloud-mode TTS backends work the same way.
+`synth_to_wav` routes through whichever TTS backend the active MODE selected.
 """
 
 from __future__ import annotations
@@ -23,7 +21,8 @@ def pcm_to_wav(raw: bytes, sample_rate: int) -> bytes:
 
 
 def synth_to_wav(text: str) -> bytes:
-    """Returns full WAV file bytes (mono, 16-bit PCM) for the given text."""
-    from server import tts  # lazy to avoid import cycle (tts re-exports from here)
-    raw, sr = tts.synth(text)
+    """Returns full WAV file bytes (mono, 16-bit PCM) for the given text,
+    using the active TTS backend."""
+    from server import modes  # lazy: keep config import-time cheap
+    raw, sr = modes.get_tts().synth(text)
     return pcm_to_wav(raw, sr)

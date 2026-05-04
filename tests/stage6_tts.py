@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import sounddevice as sd
 
-from server import tts
+from server.audio_out import synth_and_play
 
 TEST_PHRASE = (
     "Stage six test successful. "
@@ -35,7 +35,7 @@ def main() -> int:
     print("(first call also loads the voice model, ~1s)")
     print()
 
-    result = tts.synth_and_play(TEST_PHRASE)
+    result = synth_and_play(TEST_PHRASE)
     rtf = result["duration_s"] / result["synth_s"] if result["synth_s"] > 0 else float("inf")
 
     print("=" * 64)

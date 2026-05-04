@@ -15,11 +15,28 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env", override=True)
 
+# Selects the backend set instantiated at process boot. One process serves
+# one mode — no runtime switching. Validated here so a typo fails fast.
+MODE = os.environ.get("MODE", "local").strip().lower()
+if MODE not in ("local", "cloud"):
+    raise SystemExit(f"MODE must be 'local' or 'cloud', got {MODE!r}")
+
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16")
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# Cloud-mode simple-route model. The bare alias may need to be the dated form
+# (e.g. claude-haiku-4-5-20251001); Phase 6 verifies and updates if needed.
+ANTHROPIC_HAIKU_MODEL = os.environ.get("ANTHROPIC_HAIKU_MODEL", "claude-haiku-4-5")
+
+# [cloud] STT — Deepgram nova-3
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "").strip()
+
+# [cloud] TTS — OpenAI tts-1 (PCM)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1")
+OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "alloy")
 
 # Use 127.0.0.1 not 'localhost' on Windows — DNS/IPv6 fallback adds ~2s per request.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")

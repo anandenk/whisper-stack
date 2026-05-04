@@ -16,8 +16,7 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request
 
-from server import config, llm, router, stt, tts
-from server.backends.embed_ollama import OllamaEmbedder
+from server import audio, audio_out, config, markdown, modes, router
 
 app = Flask(__name__)
 
@@ -50,13 +49,19 @@ def index():
 @app.get("/health")
 def health():
     gpu_available = (Path(sys.prefix) / "Lib" / "site-packages" / "nvidia").exists()
+    # Touch each backend without forcing a load — get_*() returns the cached
+    # singleton if the factory has already run, but is_loaded() reflects whether
+    # the underlying model has actually been instantiated.
+    stt_backend = modes.get_stt()
+    tts_backend = modes.get_tts()
     return jsonify({
         "status": "ok",
+        "mode": config.MODE,
         "gpu_available": gpu_available,
         "models_loaded": {
-            "whisper": stt.is_loaded(),
+            "stt": stt_backend.is_loaded(),
             "router": router.is_loaded(),
-            "tts": tts.is_loaded(),
+            "tts": tts_backend.is_loaded(),
         },
     })
 
@@ -76,7 +81,7 @@ def transcribe():
 
     try:
         f.save(tmp_path)
-        result = stt.transcribe(tmp_path)
+        result = modes.get_stt().transcribe(tmp_path)
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"transcription failed: {exc!r}"}), 500
@@ -105,10 +110,7 @@ def chat():
         route = force_route if force_route is not None else decision["route"]
         force_routed = force_route is not None
 
-        if route == "simple":
-            llm_result = llm.chat_ollama(message)
-        else:
-            llm_result = llm.chat_claude(message)
+        llm_result = modes.get_llm(route).chat(message)
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"chat failed: {exc!r}"}), 500
@@ -137,7 +139,7 @@ def speak():
         return jsonify({"error": "'text' must be a non-empty string"}), 400
 
     try:
-        result = tts.synth_and_play(text)
+        result = audio_out.synth_and_play(text)
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"speak failed: {exc!r}"}), 500
@@ -175,7 +177,7 @@ def converse():
         f.save(tmp_path)
 
         t = time.perf_counter()
-        stt_result = stt.transcribe(tmp_path)
+        stt_result = modes.get_stt().transcribe(tmp_path)
         timings["stt"] = time.perf_counter() - t
         transcript = stt_result["transcript"]
 
@@ -189,30 +191,23 @@ def converse():
         force_routed = force_route is not None
 
         t = time.perf_counter()
-        if route == "simple":
-            llm_result = llm.chat_ollama(
-                transcript,
-                max_tokens=config.CONVERSE_MAX_TOKENS,
-                system_prompt=config.VOICE_SYSTEM_PROMPT,
-            )
-        else:
-            llm_result = llm.chat_claude(
-                transcript,
-                max_tokens=config.CONVERSE_MAX_TOKENS,
-                system_prompt=config.VOICE_SYSTEM_PROMPT,
-            )
+        llm_result = modes.get_llm(route).chat(
+            transcript,
+            max_tokens=config.CONVERSE_MAX_TOKENS,
+            system_prompt=config.VOICE_SYSTEM_PROMPT,
+        )
         timings["llm"] = time.perf_counter() - t
         reply_text = llm_result["reply"]
-        speakable_text = tts.to_speakable_text(reply_text)
+        speakable_text = markdown.to_speakable_text(reply_text)
 
         t = time.perf_counter()
         if play_locally:
-            raw_pcm, sample_rate, _ = tts.synth_play_nonblock(speakable_text)
+            raw_pcm, sample_rate, _ = audio_out.synth_play_nonblock(speakable_text)
         else:
-            raw_pcm, sample_rate = tts.synth(speakable_text)
+            raw_pcm, sample_rate = modes.get_tts().synth(speakable_text)
         timings["tts"] = time.perf_counter() - t
 
-        wav_bytes = tts.pcm_to_wav(raw_pcm, sample_rate)
+        wav_bytes = audio.pcm_to_wav(raw_pcm, sample_rate)
         audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
     except Exception as exc:
         traceback.print_exc()
@@ -246,16 +241,21 @@ def converse():
 
 
 def main():
+    print(f"MODE={config.MODE}", flush=True)
     if config.WARMUP:
-        print("Warming up Whisper (cold start ~10s on Blackwell sm_120)...", flush=True)
-        stt.warmup()
+        # STT warmup takes the longest (Whisper PTX JIT on cold start). Print
+        # specific labels so a user can tell which stage is slow if boot stalls.
+        print("Warming up STT...", flush=True)
+        modes.get_stt().warmup()
         print("Warming up router (embedding example sets)...", flush=True)
-        router.attach_embedder(OllamaEmbedder())
+        router.attach_embedder(modes.get_embedder())
         router.warmup()
-        print("Warming up Ollama (loads Llama into VRAM)...", flush=True)
-        llm.warmup_ollama()
-        print("Warming up Piper TTS...", flush=True)
-        tts.warmup()
+        print("Warming up simple-route LLM...", flush=True)
+        modes.get_llm("simple").warmup()
+        print("Warming up complex-route LLM...", flush=True)
+        modes.get_llm("complex").warmup()
+        print("Warming up TTS...", flush=True)
+        modes.get_tts().warmup()
         print("Warmup complete.", flush=True)
     print(f"Listening on http://{config.HOST}:{config.PORT}", flush=True)
     app.run(host=config.HOST, port=config.PORT, debug=False, use_reloader=False)
