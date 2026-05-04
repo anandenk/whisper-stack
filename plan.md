@@ -1,5 +1,7 @@
 # Voice AI Server: Local-First Pipeline
 
+> **Sequel:** [notes/two-mode-plan.md](notes/two-mode-plan.md) — refactoring this server to support a cloud-mode deployment alongside local.
+
 ## Context
 
 Building the workstation-side server for a future ESP-32 voice device. End-to-end pipeline: **ESP-32 (INMP441 mic) → workstation (faster-whisper STT → router → local Llama 3.1 8B *or* Claude API → Piper TTS) → Bose Bluetooth speaker (system audio out) + ESP-32 OLED text display.**
