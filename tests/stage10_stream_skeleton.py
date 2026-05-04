@@ -130,25 +130,36 @@ def main() -> int:
         print(f"    {ev:<10} {snippet}")
     print()
 
-    # The expected event sequence for Phase 3A on a non-empty utterance:
-    #   ready, transcript, route, text (>=1), audio, final
+    # Expected event sequence on a non-empty utterance after Phase 3D:
+    #   ready, transcript, route, then text/audio events interleaved
+    #   (sentence-boundary streaming TTS), final last.
     types = [ev for ev, _ in events]
     must(types[0] == "ready", f"first event must be 'ready', got {types[0]!r}")
     must("transcript" in types, "missing 'transcript' event")
     must("route" in types, "missing 'route' event")
     must(types.count("text") >= 1, f"expected >=1 'text' events, got {types.count('text')}")
-    must(types.count("audio") == 1, f"expected exactly 1 'audio' event, got {types.count('audio')}")
+    must(types.count("audio") >= 1, f"expected >=1 'audio' event, got {types.count('audio')}")
     must(types[-1] == "final", f"last event must be 'final', got {types[-1]!r}")
     must("error" not in types, f"unexpected error event: {[d for e,d in events if e=='error']}")
 
-    # Order: ready < transcript < route < text* < audio < final
-    pos = {ev: i for i, (ev, _) in enumerate(events)}
-    first_text = next(i for i, (e, _) in enumerate(events) if e == "text")
-    last_text = max(i for i, (e, _) in enumerate(events) if e == "text")
-    must(pos["ready"] < pos["transcript"] < pos["route"] < first_text,
+    # Order constraints:
+    #   - header events (ready/transcript/route) precede the first text/audio
+    #   - first text comes before any audio (a sentence must complete before
+    #     it can be synthesized)
+    #   - all audio events precede `final`
+    pos_first = {}
+    for i, (e, _) in enumerate(events):
+        pos_first.setdefault(e, i)
+    first_text = pos_first["text"]
+    first_audio = pos_first["audio"]
+    last_audio = max(i for i, (e, _) in enumerate(events) if e == "audio")
+    final_pos = pos_first["final"]
+    must(pos_first["ready"] < pos_first["transcript"] < pos_first["route"] < first_text,
          "events out of order before text deltas")
-    must(last_text < pos["audio"] < pos["final"],
-         "audio/final must come after all text deltas")
+    must(first_text < first_audio,
+         f"first text ({first_text}) must precede first audio ({first_audio})")
+    must(last_audio < final_pos,
+         f"last audio ({last_audio}) must precede final ({final_pos})")
 
     # Shape checks per event
     ready = next(d for e, d in events if e == "ready")
@@ -171,13 +182,22 @@ def main() -> int:
     joined = "".join(text_deltas)
     must(len(joined) > 5, f"joined text too short: {joined!r}")
 
-    audio_ev = next(d for e, d in events if e == "audio")
-    must("sample_rate" in audio_ev and audio_ev["sample_rate"] > 8000,
-         f"audio event sample_rate looks wrong: {audio_ev.get('sample_rate')}")
-    must("pcm_b64" in audio_ev, "audio event missing pcm_b64")
-    pcm = base64.b64decode(audio_ev["pcm_b64"])
-    must(len(pcm) > 0 and len(pcm) % 2 == 0,
-         f"PCM payload bad length: {len(pcm)} bytes")
+    # Per-chunk shape + cross-chunk consistency: every audio event has a
+    # sample_rate, all events agree on it, and the concatenated PCM length
+    # matches the announced final.audio_duration_s.
+    audio_events = [d for e, d in events if e == "audio"]
+    sample_rates = {a["sample_rate"] for a in audio_events}
+    must(len(sample_rates) == 1,
+         f"all audio events should share one sample_rate, got {sample_rates}")
+    sr = next(iter(sample_rates))
+    must(sr > 8000, f"audio sample_rate looks wrong: {sr}")
+    total_pcm_len = 0
+    for a in audio_events:
+        must("pcm_b64" in a, f"audio event missing pcm_b64: {a}")
+        pcm = base64.b64decode(a["pcm_b64"])
+        must(len(pcm) > 0 and len(pcm) % 2 == 0,
+             f"PCM chunk bad length: {len(pcm)} bytes")
+        total_pcm_len += len(pcm)
 
     final = next(d for e, d in events if e == "final")
     for k in ("reply_text", "audio_duration_s", "timings", "tools_used", "llm_tokens"):
@@ -194,16 +214,17 @@ def main() -> int:
     must(final["audio_duration_s"] > 0.1,
          f"reply audio too short: {final['audio_duration_s']:.2f}s")
 
-    # Sanity: announced PCM duration matches the announced sample_rate
-    expected_dur = (len(pcm) // 2) / audio_ev["sample_rate"]
+    # Sanity: announced PCM duration across ALL audio chunks matches final.
+    expected_dur = (total_pcm_len // 2) / sr
     must(abs(expected_dur - final["audio_duration_s"]) < 0.01,
          f"audio_duration_s mismatch: header={final['audio_duration_s']:.3f} "
-         f"computed={expected_dur:.3f}")
+         f"computed-from-chunks={expected_dur:.3f}")
 
     print("=" * 64)
-    print("  Phase 3A (/converse/stream SSE skeleton) verified.")
+    print("  Phase 3D (/converse/stream SSE skeleton) verified.")
     print(f"  events: {len(events)}  text_deltas: {len(text_deltas)}  "
-          f"pcm: {len(pcm)} B @ {audio_ev['sample_rate']} Hz  "
+          f"audio_chunks: {len(audio_events)}  "
+          f"pcm: {total_pcm_len} B @ {sr} Hz  "
           f"({final['audio_duration_s']:.2f}s)  total: {final['timings']['total']:.2f}s")
     print("=" * 64)
     return 0

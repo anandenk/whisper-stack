@@ -12,7 +12,7 @@ existing code already does (no point introducing dataclasses for this migration)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Iterable, Iterator, Protocol
 
 import numpy as np
 
@@ -104,6 +104,24 @@ class TTS(Protocol):
         PCM. We standardize on int16 mono so `pcm_to_wav` and sounddevice
         playback work without per-backend special cases. Sample rate may
         differ (Piper 22050, OpenAI tts-1 24000) — callers must not hardcode it.
+        """
+        ...
+
+    def synth_stream(self, text_iter: Iterable[str]) -> Iterator[tuple[bytes, int]]:
+        """Streaming counterpart to synth(). Caller passes an iterable of
+        complete sentences; impl yields (pcm_chunk, sample_rate_hz)
+        tuples as PCM becomes available.
+
+        "Per sentence" is loose — implementations MAY further chunk audio
+        within a sentence to keep first-byte latency low (Piper's
+        `voice.synthesize()` already yields multiple chunks per input,
+        which we forward directly). Sample rate is reported per chunk
+        for symmetry with synth(); within a single backend instance it
+        is constant.
+
+        The text_iter is consumed lazily — pull-driven, so the caller
+        can interleave text generation and audio emission without
+        buffering the full reply.
         """
         ...
 

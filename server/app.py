@@ -23,6 +23,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 from server import audio, audio_out, config, markdown, modes, router, titler
 from server.sessions import Session, SessionStore
+from server.streaming import SentenceChunker
 from server.tools import all_tools
 
 # HTTP-facing stream IDs are stricter than the SessionStore's filesystem-safety
@@ -418,19 +419,26 @@ def converse():
 def converse_stream():
     """SSE-streamed converse pipeline.
 
-    Phase 3B: real STT + router + LLM streaming. Tool calls inside the
-    LLM surface as tool_call/tool_result SSE events. Backends without
-    streaming (currently OllamaLLM, until Phase 3C) raise
-    NotImplementedError on first iteration; this route catches that and
-    falls back to non-streaming chat() with the whole reply emitted as
-    a single text delta.
+    Phase 3D: real STT + router + LLM streaming + sentence-boundary
+    streaming TTS. Text deltas land in a SentenceChunker; complete
+    sentences are handed to TTS.synth_stream as they arrive, and
+    resulting PCM chunks ship as `audio` SSE events. Audio interleaves
+    with text — the user starts hearing the reply while the model is
+    still generating.
 
-    TTS still runs ONCE (non-streaming) over the final reply — Phase 3D
-    swaps that for sentence-boundary streaming so audio arrives while
-    the model is still generating. Session persistence already works:
-    the turn is appended on `final.reply` (last-round text), matching
-    /converse's semantic of dropping intermediate "thinking" text from
-    the stored conversation.
+    Tool calls remain inside the LLM call. tool_call / tool_result SSE
+    events fire around handler runs. The chunker is reset on tool_call
+    so any partial sentence buffered from "thinking text" before the
+    call is dropped (audio chunks already emitted for completed
+    sentences in that round can't be unspoken — Sonnet under
+    VOICE_SYSTEM_PROMPT typically goes straight to tool_use without
+    preamble, so this rarely actually fires).
+
+    Backends without streaming raise NotImplementedError on first
+    iteration; this route catches that and falls back to non-streaming
+    chat() with the whole reply emitted as a single text delta and
+    one synth() call. (After 3C, both ClaudeLLM and OllamaLLM stream,
+    so the fallback is dead code in practice — kept as a safety net.)
     """
     if "audio" not in request.files:
         return jsonify({"error": "missing 'audio' file in multipart form"}), 400
@@ -535,6 +543,48 @@ def converse_stream():
             llm_output_tokens = 0
             tools_used: list[dict] = []
 
+            chunker = SentenceChunker()
+            tts_backend = modes.get_tts()
+            # `tts_total_pcm_bytes` and `audio_sample_rate` are accumulated
+            # across all per-sentence synth_stream() calls so the final
+            # event can report a single audio_duration_s. `tts_total_s`
+            # sums the wall-clock time of each synth_stream() invocation
+            # — preserves the meaning of timings.tts as "total time spent
+            # synthesizing", even though synth is no longer one
+            # contiguous block.
+            tts_total_pcm_bytes = 0
+            audio_sample_rate: int | None = None
+            tts_total_s = 0.0
+
+            def synth_and_emit(sentences: list[str]):
+                """Synth a list of sentences and yield SSE audio events.
+
+                Markdown is stripped per sentence; sentences that strip to
+                empty are skipped (a stray flush of e.g. a bullet marker
+                shouldn't fire a zero-length voice call). PCM bytes and
+                sample rate are accumulated into the surrounding closure
+                for the final audio_duration_s report.
+                """
+                nonlocal tts_total_pcm_bytes, audio_sample_rate, tts_total_s
+                if not sentences:
+                    return
+                speakable: list[str] = []
+                for s in sentences:
+                    stripped = markdown.to_speakable_text(s)
+                    if stripped.strip():
+                        speakable.append(stripped)
+                if not speakable:
+                    return
+                synth_t0 = time.perf_counter()
+                for pcm_chunk, sr in tts_backend.synth_stream(iter(speakable)):
+                    audio_sample_rate = sr
+                    tts_total_pcm_bytes += len(pcm_chunk)
+                    yield _sse_event("audio", {
+                        "sample_rate": sr,
+                        "pcm_b64": base64.b64encode(pcm_chunk).decode("ascii"),
+                    })
+                tts_total_s += time.perf_counter() - synth_t0
+
             t = time.perf_counter()
             try:
                 stream_iter = llm.chat_stream(
@@ -547,8 +597,19 @@ def converse_stream():
                 for ev in stream_iter:
                     etype = ev.get("type")
                     if etype == "text":
-                        yield _sse_event("text", {"delta": ev["delta"]})
+                        delta = ev["delta"]
+                        yield _sse_event("text", {"delta": delta})
+                        sentences = chunker.feed(delta)
+                        if sentences:
+                            yield from synth_and_emit(sentences)
                     elif etype == "tool_call":
+                        # The round that emitted this tool_call ends here —
+                        # any partial sentence in the chunker was "thinking
+                        # text" the model didn't intend as the final reply.
+                        # Drop it. (Already-emitted audio for completed
+                        # sentences in this round can't be unspoken; see
+                        # docstring.)
+                        chunker.reset()
                         yield _sse_event("tool_call", {
                             "id": ev.get("id"),
                             "name": ev["name"],
@@ -564,15 +625,19 @@ def converse_stream():
                             "round": ev.get("round"),
                         })
                     elif etype == "final":
+                        # Flush the trailing fragment (last sentence often
+                        # has no terminating punctuation+space).
+                        yield from synth_and_emit(chunker.flush())
                         reply_text = ev.get("reply", "")
                         llm_input_tokens = int(ev.get("input_tokens") or 0)
                         llm_output_tokens = int(ev.get("output_tokens") or 0)
                         tools_used = ev.get("tools_used") or []
             except NotImplementedError:
-                # Backend hasn't implemented streaming yet (Ollama until 3C).
-                # Fall back to non-streaming chat() and synthesize a single
-                # text delta from the whole reply so the SSE shape stays
-                # consistent for clients.
+                # Backend hasn't implemented streaming. Both shipped
+                # backends (ClaudeLLM, OllamaLLM) do as of 3C, so this
+                # is a safety-net path for any backend added later
+                # without streaming. Fall back to non-streaming chat()
+                # and a single synth() over the whole reply.
                 result = llm.chat(
                     transcript,
                     max_tokens=config.CONVERSE_MAX_TOKENS,
@@ -586,13 +651,15 @@ def converse_stream():
                 tools_used = result.get("tools_used") or []
                 if reply_text:
                     yield _sse_event("text", {"delta": reply_text})
+                    yield from synth_and_emit([reply_text])
             timings["llm"] = time.perf_counter() - t
+            timings["tts"] = tts_total_s
 
-            # Persist the turn BEFORE TTS, same ordering as /converse — if
-            # synth or playback crashes, conversation memory still moves
-            # forward. Store final.reply (last-round text), not the joined
-            # text deltas: the chat_stream contract drops "thinking text"
-            # from earlier rounds for voice purposes.
+            # Persist the turn BEFORE the final SSE event, same ordering
+            # as /converse — if anything below this crashes, conversation
+            # memory still moves forward. Store final.reply (last-round
+            # text), not joined text deltas: chat_stream drops "thinking
+            # text" from earlier rounds for voice purposes.
             if session is not None:
                 session.append_turn(
                     user_text=transcript,
@@ -607,20 +674,14 @@ def converse_stream():
                 )
                 _maybe_autotitle(session, transcript, reply_text)
 
-            t = time.perf_counter()
-            speakable_text = markdown.to_speakable_text(reply_text)
-            raw_pcm, sample_rate = modes.get_tts().synth(speakable_text)
-            timings["tts"] = time.perf_counter() - t
-
-            yield _sse_event("audio", {
-                "sample_rate": sample_rate,
-                "pcm_b64": base64.b64encode(raw_pcm).decode("ascii"),
-            })
-
             timings["total"] = time.perf_counter() - t_total
+            audio_duration_s = (
+                (tts_total_pcm_bytes // 2) / audio_sample_rate
+                if audio_sample_rate else 0.0
+            )
             final_payload = {
                 "reply_text": reply_text,
-                "audio_duration_s": (len(raw_pcm) // 2) / sample_rate if sample_rate else 0.0,
+                "audio_duration_s": audio_duration_s,
                 "timings": timings,
                 "tools_used": tools_used,
                 "llm_tokens": {"input": llm_input_tokens, "output": llm_output_tokens},
