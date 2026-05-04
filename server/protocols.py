@@ -36,7 +36,8 @@ class STT(Protocol):
 class LLM(Protocol):
     def chat(self, message: str, max_tokens: int = 1024,
              system_prompt: str | None = None,
-             history: list[dict] | None = None) -> dict:
+             history: list[dict] | None = None,
+             tools: list | None = None) -> dict:
         """Returns {reply, model, latency_s, input_tokens, output_tokens, stop_reason}.
 
         `tps` (tokens-per-second) is optional — present when the backend
@@ -47,6 +48,14 @@ class LLM(Protocol):
         empty, behaves identically to a stateless one-shot. Both backends
         pass-through the same shape — Anthropic's messages array and Ollama's
         /api/chat both accept it natively.
+
+        `tools` is a list of `server.tools.Tool` instances the model is
+        allowed to call during this request. The backend runs the tool loop
+        internally — request emerges from `chat()` only when the model
+        produces a final text reply. When `tools` is None or empty, no
+        tools are exposed and `chat()` behaves identically to today.
+        Returns also include an optional `tools_used: list[dict]` describing
+        what got called.
         """
         ...
 

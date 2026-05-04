@@ -26,7 +26,12 @@ class OllamaLLM:
 
     def chat(self, message: str, max_tokens: int = 512,
              system_prompt: str | None = None,
-             history: list[dict] | None = None) -> dict:
+             history: list[dict] | None = None,
+             tools: list | None = None) -> dict:
+        # Phase 2A: tools= accepted but ignored. The actual tool loop lands
+        # in Phase 2C; for now this guarantees callers can pass tools= without
+        # an error and existing behavior is preserved exactly.
+        del tools  # noqa
         # /api/chat takes a messages array. System prompt is a `system` role
         # entry at the front (NOT a top-level field — that's /api/generate's
         # convention). History is already alternating user/assistant pairs;

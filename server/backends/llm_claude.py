@@ -29,7 +29,12 @@ class ClaudeLLM:
 
     def chat(self, message: str, max_tokens: int = 1024,
              system_prompt: str | None = None,
-             history: list[dict] | None = None) -> dict:
+             history: list[dict] | None = None,
+             tools: list | None = None) -> dict:
+        # Phase 2A: tools= accepted but ignored. The actual tool loop lands
+        # in Phase 2B; for now this guarantees callers can pass tools= without
+        # an error and existing behavior is preserved exactly.
+        del tools  # noqa
         client = self._get_client()
         t0 = time.perf_counter()
         # Anthropic expects messages to alternate user/assistant and end on

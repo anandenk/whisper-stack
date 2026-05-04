@@ -11,6 +11,11 @@ requests
 numpy
 anthropic
 
+# tools/time.py uses zoneinfo + IANA tz database. Linux usually ships these
+# at the OS level; this Python package is the cross-platform fallback (also
+# required on Windows venvs). 350 KB.
+tzdata
+
 # audio_out.py imports sounddevice unconditionally. On Linux this needs the
 # system libportaudio2 package available at runtime (Dockerfile installs it).
 # The actual sd.play() calls become no-ops in cloud mode via
