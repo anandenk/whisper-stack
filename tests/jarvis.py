@@ -1,0 +1,418 @@
+"""Wake-word workstation client — say "hey jarvis" to talk.
+
+Phase 6A: passive wake-word listening; on detection, plays a chime and
+runs a single VAD-bounded recording through /converse, then returns to
+wake-word listening. No tap, no Enter.
+
+(Phase 6B layers continuous-mode-after-wake on top of this.)
+
+UX:
+    1. python tests/jarvis.py     # in another terminal alongside the server
+    2. say "hey jarvis"           # mic listens passively
+    3. (chime plays)              # confirmation that wake-word fired
+    4. ask your question          # VAD-bounded; auto-stops on silence
+    5. server speaks the reply through the workstation default output
+    6. back to wake-word listening
+
+Setup (one-time):
+    .venv/Scripts/python.exe -m pip install openwakeword
+    .venv/Scripts/python.exe -c "import openwakeword; openwakeword.utils.download_models()"
+
+Tunable env vars (all optional):
+    WAKEWORD_MODEL                  default "hey_jarvis"
+    WAKEWORD_THRESHOLD              default 0.5; lower = more sensitive
+    WAKEWORD_CHIME                  path to confirmation WAV;
+                                    falls back to a synthetic beep if missing
+    VAD_PEAK_THRESHOLD              int16 abs floor for "speech" (default 600)
+    VAD_SILENCE_MS                  silence dwell before auto-stop (default 1500)
+    VOICE_AI_BASE                   server URL (default http://127.0.0.1:5000)
+    VOICE_AI_SESSION_ID             multi-turn session id (default stateless)
+    API_KEY                         X-API-Key header value (default unset)
+
+Requires the server to be running:
+    python -m server.app
+"""
+
+from __future__ import annotations
+
+import io
+import os
+import queue
+import sys
+import threading
+import time
+import wave
+from pathlib import Path
+
+import numpy as np
+import requests
+import sounddevice as sd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Importing config triggers .env load AND surfaces all the WAKEWORD_* knobs.
+from server import config
+
+BASE = os.environ.get("VOICE_AI_BASE", "http://127.0.0.1:5000")
+API_KEY = os.environ.get("API_KEY", "").strip()
+SESSION_ID = os.environ.get("VOICE_AI_SESSION_ID", "").strip()
+
+# VAD knobs — same defaults as talk.py / index.html so all three clients
+# agree on what counts as silence.
+VAD_PEAK_THRESHOLD = int(os.environ.get("VAD_PEAK_THRESHOLD", "600"))
+VAD_SILENCE_MS = int(os.environ.get("VAD_SILENCE_MS", "1500"))
+
+# openWakeWord operates on int16 mono 16 kHz frames in multiples of 1280
+# samples (80 ms). That's also a friendly InputStream blocksize — keeps
+# wake-word inference latency bounded.
+WAKEWORD_SAMPLE_RATE = 16000
+WAKEWORD_FRAME_SAMPLES = 1280
+
+
+# ---------------------------------------------------------------------------
+# small helpers reused across the listen / record / send pipeline
+# ---------------------------------------------------------------------------
+
+def _auth_headers() -> dict:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
+
+
+def _health() -> dict | None:
+    try:
+        r = requests.get(f"{BASE}/health", timeout=3)
+        if r.status_code == 200:
+            return r.json()
+    except requests.exceptions.RequestException:
+        pass
+    return None
+
+
+def _pcm_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(audio.tobytes())
+    return buf.getvalue()
+
+
+def _play_chime() -> None:
+    """Confirmation sound on wake-word detection. Uses WAKEWORD_CHIME if it
+    exists, else generates a brief synthetic beep so the user ALWAYS gets
+    auditory feedback. Blocks until the chime is done so the recording phase
+    doesn't capture the chime itself."""
+    chime_path = config.WAKEWORD_CHIME
+    try:
+        if chime_path.exists():
+            with wave.open(str(chime_path), "rb") as wf:
+                sr = wf.getframerate()
+                n_frames = wf.getnframes()
+                raw = wf.readframes(n_frames)
+                dtype = np.int16 if wf.getsampwidth() == 2 else np.uint8
+                audio = np.frombuffer(raw, dtype=dtype)
+                if wf.getnchannels() > 1:
+                    audio = audio.reshape(-1, wf.getnchannels()).mean(axis=1).astype(dtype)
+                sd.play(audio, sr)
+                sd.wait()
+                return
+    except Exception as exc:
+        print(f"  (chime file failed: {exc!r}; falling back to synthetic beep)")
+
+    # Synthetic two-tone "ding" — short and unobtrusive.
+    sr = 22050
+    duration_s = 0.18
+    n = int(sr * duration_s)
+    t = np.linspace(0, duration_s, n, endpoint=False)
+    beep = 0.25 * (np.sin(2 * np.pi * 880 * t) + 0.5 * np.sin(2 * np.pi * 1320 * t))
+    # Quick fade-in/out so it doesn't click.
+    n_fade = max(8, int(sr * 0.01))
+    fade = np.linspace(0.0, 1.0, n_fade)
+    beep[:n_fade] *= fade
+    beep[-n_fade:] *= fade[::-1]
+    audio = (beep * 32000).astype(np.int16)
+    sd.play(audio, sr)
+    sd.wait()
+
+
+# ---------------------------------------------------------------------------
+# wake-word listener
+# ---------------------------------------------------------------------------
+
+def listen_for_wakeword(model, stop_event: threading.Event) -> bool:
+    """Block until the wake-word fires, returns True. Returns False if
+    `stop_event` is set first (used by Ctrl+C path / future continuous-mode
+    handoff in 6B).
+
+    Uses sd.InputStream at 16 kHz mono int16 with blocksize=1280; each
+    callback gives openWakeWord exactly the chunk shape it likes. Frames
+    are queued and drained on the main thread so the audio driver doesn't
+    block on inference.
+    """
+    frame_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
+
+    def cb(indata, frames, time_info, status):
+        # indata is shape (frames, channels). We requested mono; flatten.
+        try:
+            frame_q.put_nowait(indata.copy().flatten())
+        except queue.Full:
+            # Drop on overflow — wake-word is not safety-critical, and
+            # building up a 5-second backlog of frames hurts detection
+            # responsiveness more than skipping a few.
+            pass
+
+    threshold = config.WAKEWORD_THRESHOLD
+    model_name = config.WAKEWORD_MODEL
+
+    print(f"  Listening for \"{model_name.replace('_', ' ')}\" "
+          f"(threshold={threshold:.2f}, Ctrl+C to quit)...")
+
+    with sd.InputStream(samplerate=WAKEWORD_SAMPLE_RATE, channels=1,
+                        dtype="int16", blocksize=WAKEWORD_FRAME_SAMPLES,
+                        callback=cb):
+        last_print = 0.0
+        peak_score = 0.0
+        while not stop_event.is_set():
+            try:
+                frame = frame_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            scores = model.predict(frame)
+            score = float(scores.get(model_name, 0.0))
+            if score > peak_score:
+                peak_score = score
+            if score >= threshold:
+                # Drain the queue so post-detection silence isn't fed
+                # back into the next predict() and re-trigger.
+                while not frame_q.empty():
+                    try: frame_q.get_nowait()
+                    except queue.Empty: break
+                model.reset()
+                print(f"  >>> wake word detected (score={score:.3f}) <<<")
+                return True
+            now = time.perf_counter()
+            if now - last_print > 5.0:
+                # Periodic heartbeat so the user can tell the listener is alive
+                # and how loud their environment looks to the model. Helps tune
+                # WAKEWORD_THRESHOLD.
+                print(f"  ...still listening (peak score so far: {peak_score:.3f})")
+                last_print = now
+                peak_score = 0.0
+    return False
+
+
+# ---------------------------------------------------------------------------
+# VAD-bounded recording (lifted shape from talk.py; standalone copy so
+# importing this module doesn't drag talk.py's stdin reader in)
+# ---------------------------------------------------------------------------
+
+def find_input_config() -> tuple[int, int]:
+    """Probe the default input device for an opener-friendly (sr, channels)."""
+    in_dev = sd.query_devices(sd.default.device[0])
+    native_sr = int(in_dev["default_samplerate"])
+    max_ch = max(1, int(in_dev["max_input_channels"]))
+    candidates: list[tuple[int, int]] = []
+    for sr in (16000, native_sr):
+        for ch in (1, 2):
+            if ch <= max_ch and (sr, ch) not in candidates:
+                candidates.append((sr, ch))
+    last_err: Exception | None = None
+    for sr, ch in candidates:
+        try:
+            with sd.InputStream(samplerate=sr, channels=ch, dtype="int16"):
+                pass
+            return sr, ch
+        except Exception as exc:
+            last_err = exc
+    raise RuntimeError(f"Could not open default input device. Last error: {last_err!r}")
+
+
+def record_with_vad(sr: int, channels: int) -> tuple[np.ndarray, str]:
+    """Record from the mic, auto-stop on silence-after-speech via VAD.
+
+    Returns (int16 mono PCM, stop_reason). stop_reason is "vad" on normal
+    auto-stop or "timeout" if no speech ever crossed the threshold within
+    a generous initial window (15s) — protects against the user tapping
+    the wake word and walking away.
+    """
+    chunks: list[np.ndarray] = []
+    stop = threading.Event()
+    stop_reason = ["timeout"]
+    speech_started = [False]
+    last_voice_t = [0.0]
+    start_t = time.perf_counter()
+    INITIAL_TIMEOUT_S = 15.0
+
+    def cb(indata, frames, time_info, status):
+        chunks.append(indata.copy())
+        if stop.is_set():
+            return
+        peak = int(np.abs(indata).max()) if indata.size else 0
+        now = time.perf_counter()
+        if peak >= VAD_PEAK_THRESHOLD:
+            speech_started[0] = True
+            last_voice_t[0] = now
+        elif speech_started[0]:
+            silent_ms = (now - last_voice_t[0]) * 1000.0
+            if silent_ms > VAD_SILENCE_MS:
+                stop_reason[0] = "vad"
+                stop.set()
+        elif now - start_t > INITIAL_TIMEOUT_S:
+            # User never spoke. Bail so we don't sit forever.
+            stop_reason[0] = "timeout"
+            stop.set()
+
+    with sd.InputStream(samplerate=sr, channels=channels, dtype="int16", callback=cb):
+        stop.wait()
+
+    if not chunks:
+        return np.array([], dtype=np.int16), stop_reason[0]
+    audio = np.concatenate(chunks)
+    if channels > 1:
+        audio = audio.mean(axis=1).astype(np.int16)
+    else:
+        audio = audio.flatten()
+    return audio, stop_reason[0]
+
+
+# ---------------------------------------------------------------------------
+# /converse round-trip (server plays the reply locally)
+# ---------------------------------------------------------------------------
+
+def post_converse(wav_bytes: bytes) -> dict | None:
+    """POST audio to /converse; returns response dict or None on error.
+    play_locally defaults to true server-side, so the workstation speakers
+    speak the reply automatically — same UX as talk.py."""
+    form: dict[str, str] = {}
+    if SESSION_ID:
+        form["session_id"] = SESSION_ID
+    try:
+        r = requests.post(
+            f"{BASE}/converse",
+            files={"audio": ("user.wav", wav_bytes, "audio/wav")},
+            data=form,
+            headers=_auth_headers(),
+            timeout=180,
+        )
+    except requests.exceptions.RequestException as exc:
+        print(f"  request failed: {exc}")
+        return None
+    if r.status_code != 200:
+        try: err = r.json().get("error", r.text)
+        except Exception: err = r.text
+        print(f"  server {r.status_code}: {err}")
+        return None
+    return r.json()
+
+
+# ---------------------------------------------------------------------------
+# main loop
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    h = _health()
+    if h is None:
+        print(f"ERROR: cannot reach server at {BASE}")
+        print("Run `python -m server.app` in another terminal first.")
+        return 1
+
+    # Lazy-import openwakeword so an install-missing case produces a clear
+    # error instead of a top-of-module ImportError on `python tests/jarvis.py`.
+    try:
+        from openwakeword.model import Model
+    except ImportError as exc:
+        print(f"ERROR: openwakeword not installed ({exc}).")
+        print("Run: .venv/Scripts/python.exe -m pip install openwakeword")
+        print("Then download the bundled models:")
+        print("  .venv/Scripts/python.exe -c \"import openwakeword; "
+              "openwakeword.utils.download_models()\"")
+        return 2
+
+    print("Loading wake-word model...", flush=True)
+    try:
+        model = Model(wakeword_models=[config.WAKEWORD_MODEL])
+    except Exception as exc:
+        print(f"ERROR: failed to load wake-word model {config.WAKEWORD_MODEL!r}: {exc!r}")
+        print("Did you run download_models() after install? See top of file.")
+        return 3
+
+    try:
+        rec_sr, rec_ch = find_input_config()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        return 4
+
+    print(f"Server: {BASE}  auth={'on' if API_KEY else 'off'}  "
+          f"session={SESSION_ID or '(stateless)'}  "
+          f"models={h.get('models_loaded', {})}")
+    print(f"Wake:   {config.WAKEWORD_MODEL}  threshold={config.WAKEWORD_THRESHOLD}")
+    print(f"Mic:    record at {rec_sr} Hz / {rec_ch} ch  "
+          f"(wake-word listens at {WAKEWORD_SAMPLE_RATE} Hz mono)")
+    print(f"VAD:    peak>{VAD_PEAK_THRESHOLD} silence>{VAD_SILENCE_MS}ms")
+    print()
+    print("=" * 60)
+    print("  Say \"hey jarvis\" to begin. Ctrl+C to quit.")
+    print("=" * 60)
+    print()
+
+    stop_event = threading.Event()
+    while True:
+        try:
+            woke = listen_for_wakeword(model, stop_event)
+        except KeyboardInterrupt:
+            print("\nbye.")
+            return 0
+        if not woke:
+            return 0
+
+        try:
+            _play_chime()
+        except Exception as exc:
+            print(f"  chime failed (non-fatal): {exc!r}")
+
+        print("  recording...")
+        try:
+            audio, stop_reason = record_with_vad(rec_sr, rec_ch)
+        except KeyboardInterrupt:
+            print("\nbye.")
+            return 0
+        except Exception as exc:
+            print(f"  recording failed: {exc!r}")
+            continue
+
+        duration = len(audio) / rec_sr if rec_sr > 0 else 0.0
+        peak = int(np.abs(audio).max()) if audio.size else 0
+        print(f"  captured {duration:.1f}s  peak={peak}  stop={stop_reason}")
+
+        if stop_reason == "timeout":
+            print("  (no speech detected; back to wake-word listening)")
+            print()
+            continue
+        if duration < 0.3 or peak < 400:
+            print("  (recording too short/quiet; back to wake-word listening)")
+            print()
+            continue
+
+        wav = _pcm_to_wav_bytes(audio, rec_sr)
+        print(f"  sending {len(wav)/1024:.0f} KB to /converse...")
+        t0 = time.perf_counter()
+        d = post_converse(wav)
+        wall = time.perf_counter() - t0
+        if d is None:
+            print()
+            continue
+
+        t = d.get("timings", {})
+        print(f"  you said: {d.get('transcript', '')!r}")
+        print(f"  reply:    {d.get('reply_text', '')}")
+        print(f"  route={d.get('route')} model={d.get('model')} "
+              f"stt={t.get('stt', 0):.2f} llm={t.get('llm', 0):.2f} "
+              f"tts={t.get('tts', 0):.2f} total={t.get('total', 0):.2f} "
+              f"http={wall:.2f}")
+        if "session_file" in d:
+            print(f"  session:  {d['session_file']}")
+        print()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
