@@ -50,6 +50,11 @@
     <input id="apiKey" type="password" placeholder="optional, sent as X-API-Key" autocomplete="off">
   </div>
 
+  <div class="row">
+    <label style="min-width: 5em;">Session:</label>
+    <input id="sessionId" type="text" placeholder="optional — leave blank for stateless" autocomplete="off">
+  </div>
+
   <button id="rec" class="rec">Tap to talk</button>
   <div id="status" class="status">Ready.</div>
 
@@ -57,6 +62,9 @@
     <div class="panel"><h2>You said</h2><p id="transcript"></p></div>
     <div class="panel"><h2>Reply</h2><p id="reply"></p></div>
     <div class="panel"><h2>Routing & timings</h2><p id="meta" class="timings"></p></div>
+    <div class="panel" id="sessionPanel" style="display:none;">
+      <h2>Session</h2><p id="sessionFile" class="timings"></p>
+    </div>
     <audio id="player" controls autoplay></audio>
   </div>
 </main>
@@ -70,9 +78,15 @@ const replyEl = document.getElementById('reply');
 const metaEl = document.getElementById('meta');
 const player = document.getElementById('player');
 const apiKeyInput = document.getElementById('apiKey');
+const sessionInput = document.getElementById('sessionId');
+const sessionPanel = document.getElementById('sessionPanel');
+const sessionFileEl = document.getElementById('sessionFile');
 
 apiKeyInput.value = localStorage.getItem('apiKey') || '';
 apiKeyInput.addEventListener('change', () => localStorage.setItem('apiKey', apiKeyInput.value));
+
+sessionInput.value = localStorage.getItem('sessionId') || '';
+sessionInput.addEventListener('change', () => localStorage.setItem('sessionId', sessionInput.value.trim()));
 
 let mediaRecorder = null;
 let chunks = [];
@@ -121,6 +135,8 @@ async function handleStop() {
   const fd = new FormData();
   fd.append('audio', blob, `rec${ext}`);
   fd.append('play_locally', 'false');  // play on this phone, not the workstation
+  const sid = sessionInput.value.trim();
+  if (sid) fd.append('session_id', sid);
 
   const headers = {};
   const key = apiKeyInput.value.trim();
@@ -168,6 +184,13 @@ function showResult(d, wallS) {
     `stt=${t.stt.toFixed(2)}s  route=${t.route.toFixed(3)}s  ` +
     `llm=${t.llm.toFixed(2)}s  tts=${t.tts.toFixed(2)}s  ` +
     `total=${t.total.toFixed(2)}s  http_wall=${wallS.toFixed(2)}s`;
+
+  if (d.session_file) {
+    sessionPanel.style.display = '';
+    sessionFileEl.textContent = d.session_file;
+  } else {
+    sessionPanel.style.display = 'none';
+  }
 
   // Decode base64 WAV and play
   const bin = atob(d.audio_base64);

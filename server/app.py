@@ -226,6 +226,10 @@ def converse():
     if force_route is not None and force_route not in ("simple", "complex"):
         return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
 
+    session_id, sid_err = _validated_session_id(request.form.get("session_id"))
+    if sid_err:
+        return jsonify({"error": sid_err}), 400
+
     # Phone/web clients want to play the reply audio themselves and don't want
     # the workstation playing it through its speakers. Default true preserves
     # the ESP-32-style behavior where the workstation IS the speaker.
@@ -256,14 +260,40 @@ def converse():
         route = force_route if force_route is not None else decision["route"]
         force_routed = force_route is not None
 
+        # Load conversation history if a session_id is in play. We append the
+        # turn AFTER the LLM call but BEFORE TTS — that way if TTS or playback
+        # crashes, the conversation state still persists.
+        session = None
+        history: list[dict] | None = None
+        if session_id is not None:
+            session = _session_store().active_or_new(session_id)
+            window = session.recent_window(config.SESSION_WINDOW_TURNS)
+            history = [m for turn in window for m in turn.to_message_pair()]
+
         t = time.perf_counter()
         llm_result = modes.get_llm(route).chat(
             transcript,
             max_tokens=config.CONVERSE_MAX_TOKENS,
             system_prompt=config.VOICE_SYSTEM_PROMPT,
+            history=history,
         )
         timings["llm"] = time.perf_counter() - t
         reply_text = llm_result["reply"]
+
+        # Persist the turn while it's fresh — store the raw reply, NOT the
+        # markdown-stripped version. Strip is a TTS concern; future turns
+        # benefit from seeing the reply as the model actually produced it.
+        if session is not None:
+            session.append_turn(
+                user_text=transcript,
+                reply_text=reply_text,
+                route=route,
+                model=llm_result["model"],
+                latency_s=float(llm_result["latency_s"]),
+                input_tokens=int(llm_result.get("input_tokens") or 0),
+                output_tokens=int(llm_result.get("output_tokens") or 0),
+            )
+
         speakable_text = markdown.to_speakable_text(reply_text)
 
         t = time.perf_counter()
@@ -283,7 +313,7 @@ def converse():
 
     timings["total"] = time.perf_counter() - t_total
 
-    return jsonify({
+    body = {
         "transcript": transcript,
         "route": route,
         "force_routed": force_routed,
@@ -303,7 +333,10 @@ def converse():
             "input": llm_result.get("input_tokens"),
             "output": llm_result.get("output_tokens"),
         },
-    })
+    }
+    if session is not None:
+        body["session_file"] = session.path.name
+    return jsonify(body)
 
 
 def main():

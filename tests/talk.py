@@ -32,6 +32,8 @@ from server import config as _config_unused  # noqa: F401
 
 BASE = os.environ.get("VOICE_AI_BASE", "http://127.0.0.1:5000")
 API_KEY = os.environ.get("API_KEY", "").strip()
+# Set VOICE_AI_SESSION_ID=<id> to opt into multi-turn memory. Empty = stateless.
+SESSION_ID = os.environ.get("VOICE_AI_SESSION_ID", "").strip()
 LAST_RECORDING_PATH = Path(__file__).resolve().parent.parent / "samples" / "_last_recording.wav"
 QUIET_PEAK_THRESHOLD = 500  # int16 abs max; below this, mic is effectively silent
 
@@ -146,7 +148,9 @@ def main() -> int:
 
     print(f"Mic:    [{in_idx}] {in_name}")
     print(f"Recording: {sr} Hz, {ch} channel(s)" + ("  -> downmixed to mono" if ch > 1 else ""))
-    print(f"Server: {BASE}  auth={'on' if API_KEY else 'off'}  models={h.get('models_loaded', {})}")
+    print(f"Server: {BASE}  auth={'on' if API_KEY else 'off'}  "
+          f"session={SESSION_ID or '(stateless)'}  "
+          f"models={h.get('models_loaded', {})}")
     print()
     print("=" * 60)
     print("  PUSH-TO-TALK LOOP:")
@@ -197,11 +201,16 @@ def main() -> int:
 
         print(f"  Sending {len(wav)/1024:.0f} KB to /converse...")
 
+        form_data: dict[str, str] = {}
+        if SESSION_ID:
+            form_data["session_id"] = SESSION_ID
+
         t0 = time.perf_counter()
         try:
             r = requests.post(
                 f"{BASE}/converse",
                 files={"audio": ("user.wav", wav, "audio/wav")},
+                data=form_data,
                 headers=_auth_headers(),
                 timeout=180,
             )
@@ -226,6 +235,8 @@ def main() -> int:
         print(f"  Reply:     {d['reply_text']}")
         print(f"  Timings:   stt={t['stt']:.2f}  route={t['route']:.3f}  "
               f"llm={t['llm']:.2f}  tts={t['tts']:.2f}  total={t['total']:.2f}  http={http_wall:.2f}")
+        if "session_file" in d:
+            print(f"  Session:   {d['session_file']}")
         print(f"  (Reply audio playing through the server's default output)")
         print()
 
