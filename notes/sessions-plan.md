@@ -1,5 +1,7 @@
 # Multi-turn session memory — plan
 
+> **Sequel:** [notes/voice-agent-plan.md](voice-agent-plan.md) — tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word, auto-titling. Not yet started.
+
 ## Context
 
 `/converse` and `/chat` are stateless today. Every request is independent;
