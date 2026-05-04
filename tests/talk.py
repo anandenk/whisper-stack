@@ -25,6 +25,8 @@ import numpy as np
 import requests
 import sounddevice as sd
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 # Importing config triggers load_dotenv(...), so API_KEY shows up in os.environ.
 from server import config as _config_unused  # noqa: F401
 
