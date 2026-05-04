@@ -195,10 +195,12 @@ def chat():
             window = session.recent_window(config.SESSION_WINDOW_TURNS)
             history = [m for turn in window for m in turn.to_message_pair()]
 
-        # Tools list — empty if none registered. all_tools() is the public
-        # registry from server.tools; tools self-register at import time
-        # (search.py only when TAVILY_API_KEY is set).
-        tools = all_tools() or None
+        # Tools flow ONLY to the complex route. Auto-escalation already moved
+        # tool-likely queries there; the simple route (Llama 3.1 8B) becomes
+        # confused when given tools for non-tool conversation — it'll call
+        # tools spontaneously on greetings or output raw JSON tool-call
+        # syntax mid-conversation. Don't tempt it.
+        tools = (all_tools() or None) if route == "complex" else None
 
         llm_result = modes.get_llm(route).chat(message, history=history, tools=tools)
 
@@ -211,6 +213,8 @@ def chat():
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
+                auto_escalated=auto_escalated,
+                tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, message, llm_result["reply"])
     except Exception as exc:
@@ -302,6 +306,15 @@ def converse():
         route = force_route if force_route is not None else decision["route"]
         force_routed = force_route is not None
 
+        # Auto-escalate "tool-likely" simple-route queries to complex (Sonnet)
+        # — same logic as /chat. Voice users asking "what's the weather"
+        # benefit just like text users do.
+        auto_escalated = False
+        if (not force_routed) and route == "simple" and router.is_tool_likely(transcript):
+            route = "complex"
+            auto_escalated = True
+        decision["auto_escalated"] = auto_escalated
+
         # Load conversation history if a session_id is in play. We append the
         # turn AFTER the LLM call but BEFORE TTS — that way if TTS or playback
         # crashes, the conversation state still persists.
@@ -312,12 +325,17 @@ def converse():
             window = session.recent_window(config.SESSION_WINDOW_TURNS)
             history = [m for turn in window for m in turn.to_message_pair()]
 
+        # Tools complex-route-only. See /chat for the rationale — Llama 3.1 8B
+        # (simple route) misbehaves when handed a tool list mid-conversation.
+        tools = (all_tools() or None) if route == "complex" else None
+
         t = time.perf_counter()
         llm_result = modes.get_llm(route).chat(
             transcript,
             max_tokens=config.CONVERSE_MAX_TOKENS,
             system_prompt=config.VOICE_SYSTEM_PROMPT,
             history=history,
+            tools=tools,
         )
         timings["llm"] = time.perf_counter() - t
         reply_text = llm_result["reply"]
@@ -334,6 +352,8 @@ def converse():
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
+                auto_escalated=auto_escalated,
+                tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, transcript, reply_text)
 
@@ -360,6 +380,7 @@ def converse():
         "transcript": transcript,
         "route": route,
         "force_routed": force_routed,
+        "auto_escalated": decision.get("auto_escalated", False),
         "model": llm_result["model"],
         "reply_text": reply_text,
         "audio_base64": audio_b64,
@@ -377,6 +398,8 @@ def converse():
             "output": llm_result.get("output_tokens"),
         },
     }
+    if llm_result.get("tools_used"):
+        body["tools_used"] = llm_result["tools_used"]
     if session is not None:
         body["session_file"] = session.path.name
     return jsonify(body)

@@ -55,9 +55,14 @@ _ASSISTANT_META_RE = re.compile(
     r"model=(?P<model>\S+)\s+"
     r"latency=(?P<latency>\S+)s\s+"
     r"in=(?P<in_tokens>\d+)\s+"
-    r"out=(?P<out_tokens>\d+)\s*$",
+    r"out=(?P<out_tokens>\d+)"
+    r"(?P<extras>[^\n]*)$",  # tolerates trailing extras like 'escalated=true'
     re.MULTILINE,
 )
+# `**tools:** name(k=v, ...); name2(...)` — optional one-liner appended after
+# the reply text when the turn used any tools. Used for human-grep + future
+# session inspection UIs; NOT replayed to the model on history reload.
+_TOOLS_LINE_RE = re.compile(r"^\*\*tools:\*\*\s*(?P<calls>[^\n]+)$", re.MULTILINE)
 
 
 def _utcnow() -> datetime:
@@ -76,6 +81,55 @@ def _parse_infile_ts(s: str) -> datetime:
     """Tolerate the trailing 'Z' (Python <3.11 strptime won't take it)."""
     s = s.rstrip("Z")
     return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+
+
+def _parse_tools_line(s: str) -> list[dict]:
+    """Inverse of _format_tools_line. Lossy but tolerant — recovers
+    [{"name": str, "input": dict[str, str]}] from
+    `name(k=v, k=v); name2(k=v)`. Args are returned as strings (no type
+    coercion); callers that need typed args should reach for the
+    structured `tools_used` from the live response, not the file.
+    """
+    out: list[dict] = []
+    for chunk in (s or "").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        # Try to peel off `name(args)` shape.
+        name = chunk
+        args_str = ""
+        if "(" in chunk and chunk.endswith(")"):
+            name, _, rest = chunk.partition("(")
+            args_str = rest[:-1]
+            name = name.strip()
+        args: dict[str, str] = {}
+        for kv in args_str.split(","):
+            kv = kv.strip()
+            if not kv or "=" not in kv:
+                continue
+            k, _, v = kv.partition("=")
+            args[k.strip()] = v.strip()
+        out.append({"name": name, "input": args})
+    return out
+
+
+def _format_tools_line(tools_used: list[dict]) -> str:
+    """Render `[{name, input, ...}]` as 'name(k=v, k=v); name2(...)'.
+
+    Plain text by design — easy to grep, no quotes/escapes. Voice-style
+    tool inputs rarely contain `=` or `;`; if they ever do, this format
+    is lossy on round-trip. Acceptable for an observability-only field.
+    """
+    parts: list[str] = []
+    for call in tools_used:
+        name = str(call.get("name") or "?")
+        inp = call.get("input") or {}
+        if isinstance(inp, dict) and inp:
+            args = ", ".join(f"{k}={v}" for k, v in inp.items())
+            parts.append(f"{name}({args})")
+        else:
+            parts.append(f"{name}()")
+    return "; ".join(parts)
 
 
 def _slugify(text: str, max_len: int = _SLUG_MAX_LEN) -> str:
@@ -104,6 +158,10 @@ class Turn:
     latency_s: float
     input_tokens: int
     output_tokens: int
+    auto_escalated: bool = False
+    # Compact summary of tool calls made during this turn (for observability;
+    # NOT replayed to the model). Each entry: {"name": str, "input": dict}.
+    tools_used: list[dict] | None = None
 
     def to_message_pair(self) -> list[dict]:
         """Render as the Anthropic/Ollama messages-array shape:
@@ -225,6 +283,8 @@ class Session:
         latency_s: float,
         input_tokens: int,
         output_tokens: int,
+        auto_escalated: bool = False,
+        tools_used: list[dict] | None = None,
         now: datetime | None = None,
     ) -> Turn:
         """Append a turn and bump the last_turn header. Returns the Turn record."""
@@ -240,14 +300,22 @@ class Session:
             latency_s=latency_s,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            auto_escalated=auto_escalated,
+            tools_used=tools_used,
         )
 
+        meta_extra = " escalated=true" if auto_escalated else ""
+        tools_line = ""
+        if tools_used:
+            tools_line = f"**tools:** {_format_tools_line(tools_used)}\n"
         block = (
             f"## turn {turn.index} — {_fmt_infile_ts(now)}\n"
             f"**user:** {user_text}\n"
             f"**assistant** route={route} model={model} "
-            f"latency={latency_s:.2f}s in={input_tokens} out={output_tokens}\n"
-            f"{reply_text}\n\n"
+            f"latency={latency_s:.2f}s in={input_tokens} out={output_tokens}"
+            f"{meta_extra}\n"
+            f"{reply_text}\n"
+            f"{tools_line}\n"
         )
 
         # Read full file, append the new block, rewrite the last_turn header.
@@ -301,7 +369,24 @@ def _parse_turns(text: str) -> list[Turn]:
         user_end = assistant_match.start()
         user_text = body[user_start:user_end].strip()
 
-        reply_text = body[assistant_match.end():].strip("\n")
+        reply_chunk = body[assistant_match.end():]
+
+        # Pull out the optional `**tools:**` line. It always lives after the
+        # reply text; strip it before storing reply_text so it doesn't end up
+        # being read back as part of the model's response.
+        tools_used: list[dict] | None = None
+        tools_match = _TOOLS_LINE_RE.search(reply_chunk)
+        if tools_match:
+            tools_used = _parse_tools_line(tools_match.group("calls"))
+            reply_chunk = (
+                reply_chunk[:tools_match.start()] + reply_chunk[tools_match.end():]
+            )
+
+        reply_text = reply_chunk.strip("\n").strip()
+
+        # Parse the optional `escalated=true` extra from the assistant meta line.
+        extras = assistant_match.group("extras") or ""
+        auto_escalated = "escalated=true" in extras
 
         turns.append(Turn(
             index=idx,
@@ -313,6 +398,8 @@ def _parse_turns(text: str) -> list[Turn]:
             latency_s=float(assistant_match.group("latency")),
             input_tokens=int(assistant_match.group("in_tokens")),
             output_tokens=int(assistant_match.group("out_tokens")),
+            auto_escalated=auto_escalated,
+            tools_used=tools_used,
         ))
 
     return turns
