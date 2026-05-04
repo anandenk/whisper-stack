@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request
 
 from server import config, llm, router, stt, tts
+from server.backends.embed_ollama import OllamaEmbedder
 
 app = Flask(__name__)
 
@@ -249,6 +250,7 @@ def main():
         print("Warming up Whisper (cold start ~10s on Blackwell sm_120)...", flush=True)
         stt.warmup()
         print("Warming up router (embedding example sets)...", flush=True)
+        router.attach_embedder(OllamaEmbedder())
         router.warmup()
         print("Warming up Ollama (loads Llama into VRAM)...", flush=True)
         llm.warmup_ollama()

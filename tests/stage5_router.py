@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import router
+from server.backends.embed_ollama import OllamaEmbedder
 
 # (query, expected_route)  -- TODO: re-label borderline group to taste
 FIXTURE: list[tuple[str, str]] = [
@@ -85,6 +86,7 @@ def confusion(pairs: list[tuple[str, str]]) -> dict:
 def main() -> int:
     print(f"Warming router (loads {router.config.EMBED_MODEL} into Ollama, embeds {len(router.SIMPLE_EXAMPLES) + len(router.COMPLEX_EXAMPLES)} examples)...")
     t0 = time.perf_counter()
+    router.attach_embedder(OllamaEmbedder())
     router.warmup()
     print(f"Warmup done in {time.perf_counter() - t0:.2f}s\n")
 

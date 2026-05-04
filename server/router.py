@@ -1,16 +1,21 @@
 """Embedding-based query router.
 
-Classifies a query as 'simple' (-> Ollama) or 'complex' (-> Claude) using
-cosine similarity to curated example sets per class.
+Classifies a query as 'simple' (-> simple-route LLM) or 'complex' (-> complex-route
+LLM) using cosine similarity to curated example sets per class.
 
 Decision rule:
     s_simple  = max cosine(query, example) over SIMPLE_EXAMPLES
     s_complex = max cosine(query, example) over COMPLEX_EXAMPLES
     route = "simple" iff (s_simple - s_complex) > MARGIN_S, else "complex"
 
-Asymmetric: ties go to complex, because under-routing (Llama answers a
-question it can't handle) costs the user a lot more than over-routing
-(Claude answers a trivial query and we burn a fraction of a cent).
+Asymmetric: ties go to complex, because under-routing (the simple model
+answers a question it can't handle) costs the user a lot more than
+over-routing (the strong model answers a trivial query and we burn a
+fraction of a cent).
+
+The embedder is injected via attach_embedder() so the router stays
+mode-independent. The Phase 3 factory wires either OllamaEmbedder
+(local) or SentenceTransformerEmbedder (cloud).
 
 Examples below are a starting draft. Re-label / re-curate against the
 test fixture in tests/stage5_router.py — that fixture is also editable.
@@ -22,9 +27,9 @@ import time
 from typing import Literal
 
 import numpy as np
-import requests
 
 from server import config
+from server.protocols import Embedder
 
 SIMPLE_EXAMPLES: list[str] = [
     "What's the capital of France?",
@@ -56,20 +61,16 @@ COMPLEX_EXAMPLES: list[str] = [
     "Write me a poem in the style of Robert Frost about climate change.",
 ]
 
+_embedder: Embedder | None = None
 _simple_vecs: np.ndarray | None = None  # (n, dim), L2-normalized
 _complex_vecs: np.ndarray | None = None
 
 
-def _embed(texts: list[str]) -> np.ndarray:
-    """One round trip to /api/embed. Returns (n, dim) float32 array."""
-    r = requests.post(
-        config.OLLAMA_EMBED_URL,
-        json={"model": config.EMBED_MODEL, "input": texts},
-        timeout=60,
-    )
-    r.raise_for_status()
-    data = r.json()
-    return np.asarray(data["embeddings"], dtype=np.float32)
+def attach_embedder(embedder: Embedder) -> None:
+    """Inject the embedder used by warmup() / classify(). Call once at boot,
+    before warmup()."""
+    global _embedder
+    _embedder = embedder
 
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -79,13 +80,16 @@ def _normalize(v: np.ndarray) -> np.ndarray:
 
 
 def warmup() -> None:
-    """Embed and cache example vectors. Call once at server startup.
+    """Embed and cache example vectors. Call once at server startup AFTER
+    attach_embedder().
 
-    Single batch call covers nomic-embed-text load + all 24 example embeddings.
+    Single batch call covers embed-model load + all example embeddings.
     """
     global _simple_vecs, _complex_vecs
+    if _embedder is None:
+        raise RuntimeError("router.warmup() called before attach_embedder()")
     all_examples = SIMPLE_EXAMPLES + COMPLEX_EXAMPLES
-    vecs = _embed(all_examples)
+    vecs = _embedder.embed(all_examples)
     vecs = _normalize(vecs)
     _simple_vecs = vecs[: len(SIMPLE_EXAMPLES)]
     _complex_vecs = vecs[len(SIMPLE_EXAMPLES):]
@@ -108,7 +112,7 @@ def classify(query: str, margin_s: float | None = None) -> dict:
         margin_s = config.ROUTER_MARGIN_S
 
     t0 = time.perf_counter()
-    q = _normalize(_embed([query]))[0]
+    q = _normalize(_embedder.embed([query]))[0]
     s_simple = float(np.max(_simple_vecs @ q))
     s_complex = float(np.max(_complex_vecs @ q))
     elapsed = time.perf_counter() - t0
