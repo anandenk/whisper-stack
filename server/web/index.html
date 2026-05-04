@@ -142,6 +142,15 @@ continuousCheckbox.addEventListener('change', () => {
 // dwell time below threshold (after speech has started) before auto-stop.
 const VAD_PEAK_THRESHOLD = 6;
 const VAD_SILENCE_MS = 1500;
+// Phase 5B: interrupt detection while the assistant is speaking. Threshold
+// is HIGHER than VAD_PEAK_THRESHOLD so speaker-bleed from the assistant's
+// own audio (which leaks through the mic even with echo cancellation) is
+// less likely to trigger an unintended interrupt. We also require the
+// peak to stay above threshold for VAD_INTERRUPT_FRAMES consecutive
+// analyser ticks — single-frame spikes from background sounds get
+// debounced out.
+const VAD_INTERRUPT_THRESHOLD = 14;
+const VAD_INTERRUPT_FRAMES = 3;
 // Small gap between SPEAKING ending and the next LISTENING starting in
 // continuous mode — gives the user a beat of silence to react before the
 // mic re-opens (otherwise the very tail of the assistant's last syllable
@@ -156,16 +165,24 @@ let audioCtx = null;          // Lazily created on first user gesture
 let nextPlayTime = 0;         // audioCtx.currentTime when the next PCM chunk should start
 let activeSources = [];       // Currently scheduled BufferSources, so we can stop them on abort
 let speaking = false;         // Tracks whether at least one audio chunk has been queued
-let vadAnalyser = null;       // AnalyserNode reading the mic stream while recording
-let vadMicSource = null;      // MediaStreamAudioSourceNode wrapping the recording stream
-let vadRafHandle = 0;         // requestAnimationFrame handle for the silence-watch loop
+let vadAnalyser = null;       // AnalyserNode reading the mic stream
+let vadMicSource = null;      // MediaStreamAudioSourceNode wrapping the mic stream
+let vadRafHandle = 0;         // requestAnimationFrame handle for the watcher loop
+let vadMode = 'off';          // 'off' | 'silence' | 'interrupt' — see vadTick
 let vadSpeechStarted = false; // True once peak crosses VAD_PEAK_THRESHOLD this turn
 let vadSilenceStartMs = 0;    // performance.now() when continuous silence started (0 = not silent)
+let vadInterruptFrames = 0;   // consecutive frames over VAD_INTERRUPT_THRESHOLD this turn
 
 // Phase 5A continuous-mode state. continuousActive is the "user has tapped
 // Start conversation and not End" flag, distinct from the persisted toggle:
 // the toggle just configures intent, the flag drives the auto-restart loop.
 let continuousActive = false;
+// Phase 5B: in continuous mode the mediaStream and analyser persist across
+// LISTENING / THINKING / SPEAKING transitions so we never tear down/re-acquire
+// the mic — and so VAD can run during SPEAKING to detect interrupts.
+// In single-turn mode these stay null and a fresh per-recording stream is
+// used (legacy 4A path).
+let persistentStream = null;
 
 function vadShouldRun() {
   // Continuous mode REQUIRES VAD (otherwise turns can't end). Manual VAD
@@ -271,6 +288,11 @@ function enqueuePcm(pcmBytes, sampleRate) {
     speaking = true;
     statusEl.classList.add('speaking');
     statusEl.textContent = 'Speaking';
+    // Phase 5B: in continuous mode, watch the persistent mic for an interrupt
+    // (user talking over the assistant) while audio is playing.
+    if (continuousActive) {
+      setVadMode('interrupt');
+    }
   }
 }
 
@@ -282,13 +304,39 @@ function b64ToUint8(b64) {
 }
 
 async function startRecording() {
-  try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
-  } catch (err) {
-    statusEl.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
-    return false;
+  // In continuous mode the mediaStream persists across turns (Phase 5B);
+  // acquire it on the first turn of a conversation and reuse it after.
+  // In single-turn mode every recording gets a fresh stream.
+  ensureAudioCtx();  // prime the audio context on user gesture
+  if (continuousActive) {
+    if (!persistentStream) {
+      try {
+        persistentStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,    // critical: keeps assistant audio out of mic for interrupt VAD
+            noiseSuppression: true,
+            autoGainControl: false,    // AGC fights with our peak threshold
+          },
+        });
+      } catch (err) {
+        statusEl.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
+        return false;
+      }
+      attachVadToStream(persistentStream);
+    }
+    mediaStream = persistentStream;
+  } else {
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (err) {
+      statusEl.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
+      return false;
+    }
+    attachVadToStream(mediaStream);
   }
-  ensureAudioCtx();  // prime the audio context on user gesture, before first audio event
   recChunks = [];
   const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
@@ -299,72 +347,37 @@ async function startRecording() {
   mediaRecorder.onstop = handleStop;
   mediaRecorder.start();
   recBtn.classList.add('recording');
-  if (continuousActive) {
-    // In continuous mode the button stays "End conversation" so the user
-    // can bail at any point. No "Tap to send" label flip.
-    recBtn.textContent = 'End conversation';
-  } else {
-    recBtn.textContent = 'Tap to send';
-  }
+  recBtn.textContent = continuousActive ? 'End conversation' : 'Tap to send';
   if (vadShouldRun()) {
-    startVad();
-    if (continuousActive) {
-      statusEl.textContent = 'Listening… auto-sends on silence. Tap End to stop.';
-    } else {
-      statusEl.textContent = 'Recording… auto-stops on silence (or tap to send).';
-    }
+    setVadMode('silence');
+    statusEl.textContent = continuousActive
+      ? 'Listening… auto-sends on silence. Tap End to stop.'
+      : 'Recording… auto-stops on silence (or tap to send).';
   } else {
+    setVadMode('off');
     statusEl.textContent = 'Recording… speak then tap again.';
   }
   return true;
 }
 
-function startVad() {
-  // Wire a MediaStreamAudioSource -> AnalyserNode (NOT connected to destination,
-  // so the mic isn't echoed). Read peak amplitude per frame; once speech has
-  // crossed the threshold at least once, dwell-time below threshold counts
-  // toward auto-stop. The "speech started" gate keeps the timer from firing
-  // before the user has actually spoken.
-  if (!audioCtx || !mediaStream) return;
-  vadSpeechStarted = false;
-  vadSilenceStartMs = 0;
+function attachVadToStream(stream) {
+  // Wire a MediaStreamAudioSource -> AnalyserNode (NOT connected to
+  // destination, so the mic isn't echoed). Idempotent: skips if already
+  // attached. The analyser is read by vadTick under whatever mode the
+  // route handler has set via setVadMode.
+  if (!stream || vadAnalyser) return;
+  if (!audioCtx) ensureAudioCtx();
   try {
-    vadMicSource = audioCtx.createMediaStreamSource(mediaStream);
+    vadMicSource = audioCtx.createMediaStreamSource(stream);
     vadAnalyser = audioCtx.createAnalyser();
     vadAnalyser.fftSize = 1024;
     vadMicSource.connect(vadAnalyser);
   } catch (err) {
-    console.warn('VAD setup failed; continuing in manual-only mode:', err);
-    return;
+    console.warn('VAD attach failed; continuing without VAD:', err);
   }
-  const buf = new Uint8Array(vadAnalyser.fftSize);
-  const tick = () => {
-    if (!vadAnalyser || !mediaRecorder || mediaRecorder.state !== 'recording') return;
-    vadAnalyser.getByteTimeDomainData(buf);
-    let peak = 0;
-    for (let i = 0; i < buf.length; i++) {
-      const dev = buf[i] >= 128 ? buf[i] - 128 : 128 - buf[i];
-      if (dev > peak) peak = dev;
-    }
-    const now = performance.now();
-    if (peak >= VAD_PEAK_THRESHOLD) {
-      vadSpeechStarted = true;
-      vadSilenceStartMs = 0;
-    } else if (vadSpeechStarted) {
-      if (vadSilenceStartMs === 0) {
-        vadSilenceStartMs = now;
-      } else if (now - vadSilenceStartMs > VAD_SILENCE_MS) {
-        // Auto-fire stop. The same path the manual tap takes.
-        stopRecording();
-        return;
-      }
-    }
-    vadRafHandle = requestAnimationFrame(tick);
-  };
-  vadRafHandle = requestAnimationFrame(tick);
 }
 
-function stopVad() {
+function detachVad() {
   if (vadRafHandle) {
     cancelAnimationFrame(vadRafHandle);
     vadRafHandle = 0;
@@ -374,18 +387,105 @@ function stopVad() {
     vadMicSource = null;
   }
   vadAnalyser = null;
+  setVadMode('off');
+}
+
+function setVadMode(mode) {
+  // mode: 'off' | 'silence' (during LISTENING) | 'interrupt' (during SPEAKING)
+  // Always reset per-mode counters so a state transition starts clean.
+  vadMode = mode;
   vadSpeechStarted = false;
   vadSilenceStartMs = 0;
+  vadInterruptFrames = 0;
+  if (mode !== 'off' && vadAnalyser && !vadRafHandle) {
+    vadRafHandle = requestAnimationFrame(vadTick);
+  }
+}
+
+function vadTick() {
+  vadRafHandle = 0;
+  if (!vadAnalyser || vadMode === 'off') return;
+  const buf = new Uint8Array(vadAnalyser.fftSize);
+  vadAnalyser.getByteTimeDomainData(buf);
+  let peak = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const dev = buf[i] >= 128 ? buf[i] - 128 : 128 - buf[i];
+    if (dev > peak) peak = dev;
+  }
+  const now = performance.now();
+
+  if (vadMode === 'silence') {
+    // LISTENING — end the recording on silence-after-speech.
+    if (peak >= VAD_PEAK_THRESHOLD) {
+      vadSpeechStarted = true;
+      vadSilenceStartMs = 0;
+    } else if (vadSpeechStarted) {
+      if (vadSilenceStartMs === 0) {
+        vadSilenceStartMs = now;
+      } else if (now - vadSilenceStartMs > VAD_SILENCE_MS) {
+        stopRecording();  // setVadMode('off') happens inside
+        return;
+      }
+    }
+  } else if (vadMode === 'interrupt') {
+    // SPEAKING — abort current reply if user starts talking. Higher
+    // threshold + N-frame debounce so speaker-bleed and single-frame
+    // background spikes don't cut the assistant off.
+    if (peak >= VAD_INTERRUPT_THRESHOLD) {
+      vadInterruptFrames++;
+      if (vadInterruptFrames >= VAD_INTERRUPT_FRAMES) {
+        triggerInterrupt();
+        return;
+      }
+    } else {
+      vadInterruptFrames = 0;
+    }
+  }
+  vadRafHandle = requestAnimationFrame(vadTick);
+}
+
+function triggerInterrupt() {
+  // User started talking while the assistant was speaking. Stop scheduled
+  // audio + abort the in-flight SSE, then start a fresh recording on the
+  // already-open persistent stream. The new utterance becomes the next
+  // turn of the conversation; the previous (interrupted) reply is
+  // dropped from the audio side, but its session turn — if any — was
+  // already persisted server-side at `final` time.
+  if (!continuousActive || !persistentStream) return;
+  abortInflight();
+  setVadMode('silence');
+  statusEl.textContent = 'Interrupted — listening to you…';
+  // Fresh recorder on the persistent stream. attachVadToStream is a no-op
+  // because the analyser is already attached.
+  recChunks = [];
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+  mediaRecorder = mime ? new MediaRecorder(persistentStream, { mimeType: mime })
+                       : new MediaRecorder(persistentStream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+  mediaRecorder.onstop = handleStop;
+  mediaRecorder.start();
+  recBtn.classList.add('recording');
+  recBtn.textContent = 'End conversation';
+  recBtn.disabled = false;
 }
 
 function stopRecording() {
-  stopVad();
+  setVadMode('off');
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
+  if (continuousActive) {
+    // Keep the persistent stream + analyser alive so VAD can flip to
+    // 'interrupt' when the assistant starts speaking. mediaStream stays
+    // pointing at persistentStream; only the MediaRecorder ends here.
+  } else {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+    detachVad();
   }
   recBtn.classList.remove('recording');
   recBtn.disabled = true;
@@ -606,7 +706,7 @@ function resetButton() {
 function endContinuousConversation() {
   continuousActive = false;
   abortInflight();
-  stopVad();
+  detachVad();
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     // The MediaRecorder.onstop -> handleStop path would normally fire
     // /converse/stream; we don't want that here. Detach the handler
@@ -615,10 +715,11 @@ function endContinuousConversation() {
     try { mediaRecorder.onstop = null; } catch {}
     try { mediaRecorder.stop(); } catch {}
   }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
+  if (persistentStream) {
+    persistentStream.getTracks().forEach(t => t.stop());
+    persistentStream = null;
   }
+  mediaStream = null;
   resetButton();
   statusEl.textContent = 'Conversation ended.';
 }
