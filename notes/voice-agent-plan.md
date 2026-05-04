@@ -634,6 +634,21 @@ client is a prototype for the eventual ESP-32 firmware behavior.
 
 ---
 
+## Footnote — premium TTS voice (deferred)
+
+Local default is now Piper `en_GB-alan-medium` (British male) — modest
+upgrade over the original `en_US-amy-medium`, no code change. Still
+recognizably Piper.
+
+For a genuinely Jarvis-quality voice, add a third TTS backend at some
+point: **ElevenLabs Flash v2** (`server/backends/tts_elevenlabs.py`),
+selectable via a new `TTS_BACKEND` env var that overrides the MODE
+default. Would slot in cleanly before Milestone 3 so streaming TTS
+uses it natively (Flash v2 streams PCM with ~150ms first-chunk latency,
+faster than Piper). Cost: ~$5/mo for typical solo use. Optional, not
+in scope here. The "Brian" stock voice or any community Jarvis voice
+gets the right sound without venturing into voice cloning.
+
 ## Out of scope
 
 - **Custom wake word training.** openWakeWord supports it but training a
