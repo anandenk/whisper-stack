@@ -1,18 +1,21 @@
 """Wake-word workstation client — say "hey jarvis" to talk.
 
-Phase 6A: passive wake-word listening; on detection, plays a chime and
-runs a single VAD-bounded recording through /converse, then returns to
-wake-word listening. No tap, no Enter.
-
-(Phase 6B layers continuous-mode-after-wake on top of this.)
+Listens passively for "hey jarvis" via openWakeWord; on detection, plays a
+chime and enters a continuous conversation loop (Phase 6B). Each turn is a
+VAD-bounded recording posted to /converse; the server speaks the reply
+through the workstation default output. After
+WAKEWORD_CONVERSATION_TIMEOUT_S seconds of initial silence on a turn
+(no speech crossed the threshold), drops back to passive wake-word
+listening. No tap, no Enter.
 
 UX:
     1. python tests/jarvis.py     # in another terminal alongside the server
     2. say "hey jarvis"           # mic listens passively
     3. (chime plays)              # confirmation that wake-word fired
-    4. ask your question          # VAD-bounded; auto-stops on silence
+    4. ask a question             # VAD-bounded; auto-stops on silence
     5. server speaks the reply through the workstation default output
-    6. back to wake-word listening
+    6. ask another (no wake-word needed for ~30s of silence)
+    7. ... or just stay quiet for 30s -> back to wake-word listening
 
 Setup (one-time):
     .venv/Scripts/python.exe -m pip install openwakeword
@@ -227,13 +230,20 @@ def find_input_config() -> tuple[int, int]:
     raise RuntimeError(f"Could not open default input device. Last error: {last_err!r}")
 
 
-def record_with_vad(sr: int, channels: int) -> tuple[np.ndarray, str]:
+def record_with_vad(sr: int, channels: int,
+                    initial_timeout_s: float = 15.0) -> tuple[np.ndarray, str]:
     """Record from the mic, auto-stop on silence-after-speech via VAD.
 
-    Returns (int16 mono PCM, stop_reason). stop_reason is "vad" on normal
-    auto-stop or "timeout" if no speech ever crossed the threshold within
-    a generous initial window (15s) — protects against the user tapping
-    the wake word and walking away.
+    Returns (int16 mono PCM, stop_reason).
+      - "vad"     normal silence-after-speech auto-stop
+      - "timeout" no speech ever crossed VAD_PEAK_THRESHOLD within
+                  initial_timeout_s (e.g., user walked away after wake;
+                  Phase 6B uses this longer to drop out of continuous
+                  mode after WAKEWORD_CONVERSATION_TIMEOUT_S of silence)
+
+    initial_timeout_s only protects against the no-speech case; once
+    speech has started the recording continues until VAD_SILENCE_MS of
+    silence has dwelled.
     """
     chunks: list[np.ndarray] = []
     stop = threading.Event()
@@ -241,7 +251,6 @@ def record_with_vad(sr: int, channels: int) -> tuple[np.ndarray, str]:
     speech_started = [False]
     last_voice_t = [0.0]
     start_t = time.perf_counter()
-    INITIAL_TIMEOUT_S = 15.0
 
     def cb(indata, frames, time_info, status):
         chunks.append(indata.copy())
@@ -257,8 +266,7 @@ def record_with_vad(sr: int, channels: int) -> tuple[np.ndarray, str]:
             if silent_ms > VAD_SILENCE_MS:
                 stop_reason[0] = "vad"
                 stop.set()
-        elif now - start_t > INITIAL_TIMEOUT_S:
-            # User never spoke. Bail so we don't sit forever.
+        elif now - start_t > initial_timeout_s:
             stop_reason[0] = "timeout"
             stop.set()
 
@@ -349,9 +357,12 @@ def main() -> int:
     print(f"Mic:    record at {rec_sr} Hz / {rec_ch} ch  "
           f"(wake-word listens at {WAKEWORD_SAMPLE_RATE} Hz mono)")
     print(f"VAD:    peak>{VAD_PEAK_THRESHOLD} silence>{VAD_SILENCE_MS}ms")
+    conv_timeout = config.WAKEWORD_CONVERSATION_TIMEOUT_S
     print()
     print("=" * 60)
-    print("  Say \"hey jarvis\" to begin. Ctrl+C to quit.")
+    print(f"  Say \"hey jarvis\" to begin. After each reply, the mic stays")
+    print(f"  open for {conv_timeout:.0f}s of silence before falling back to")
+    print(f"  wake-word listening. Ctrl+C to quit.")
     print("=" * 60)
     print()
 
@@ -370,48 +381,65 @@ def main() -> int:
         except Exception as exc:
             print(f"  chime failed (non-fatal): {exc!r}")
 
-        print("  recording...")
-        try:
-            audio, stop_reason = record_with_vad(rec_sr, rec_ch)
-        except KeyboardInterrupt:
-            print("\nbye.")
-            return 0
-        except Exception as exc:
-            print(f"  recording failed: {exc!r}")
-            continue
+        # Continuous-mode inner loop: each turn uses a longer initial
+        # timeout (the conversation-timeout) so a thinking pause doesn't
+        # drop the user back to wake-word. The very first post-wake turn
+        # still uses a short initial timeout (15s) — if the user said
+        # the wake word by accident, we want to bail quickly. After a
+        # successful turn the loop switches to conv_timeout.
+        first_turn = True
+        while True:
+            initial_timeout_s = 15.0 if first_turn else conv_timeout
+            print(f"  recording... (silent-bail at {initial_timeout_s:.0f}s)")
+            try:
+                audio, stop_reason = record_with_vad(rec_sr, rec_ch,
+                                                    initial_timeout_s=initial_timeout_s)
+            except KeyboardInterrupt:
+                print("\nbye.")
+                return 0
+            except Exception as exc:
+                print(f"  recording failed: {exc!r}")
+                break  # back to wake-word listening
 
-        duration = len(audio) / rec_sr if rec_sr > 0 else 0.0
-        peak = int(np.abs(audio).max()) if audio.size else 0
-        print(f"  captured {duration:.1f}s  peak={peak}  stop={stop_reason}")
+            duration = len(audio) / rec_sr if rec_sr > 0 else 0.0
+            peak = int(np.abs(audio).max()) if audio.size else 0
+            print(f"  captured {duration:.1f}s  peak={peak}  stop={stop_reason}")
 
-        if stop_reason == "timeout":
-            print("  (no speech detected; back to wake-word listening)")
+            if stop_reason == "timeout":
+                print("  (silent; back to wake-word listening)")
+                print()
+                break
+            if duration < 0.3 or peak < 400:
+                # Too quiet to be useful, but don't bail out of continuous
+                # mode — the user may have just hesitated.
+                print("  (recording too short/quiet; staying in continuous mode)")
+                first_turn = False
+                continue
+
+            wav = _pcm_to_wav_bytes(audio, rec_sr)
+            print(f"  sending {len(wav)/1024:.0f} KB to /converse...")
+            t0 = time.perf_counter()
+            d = post_converse(wav)
+            wall = time.perf_counter() - t0
+            if d is None:
+                # Server / network error. Bail out so we don't spam the
+                # server with broken audio. User can wake again.
+                print("  (server error; back to wake-word listening)")
+                print()
+                break
+
+            t = d.get("timings", {})
+            print(f"  you said: {d.get('transcript', '')!r}")
+            print(f"  reply:    {d.get('reply_text', '')}")
+            print(f"  route={d.get('route')} model={d.get('model')} "
+                  f"stt={t.get('stt', 0):.2f} llm={t.get('llm', 0):.2f} "
+                  f"tts={t.get('tts', 0):.2f} total={t.get('total', 0):.2f} "
+                  f"http={wall:.2f}")
+            if "session_file" in d:
+                print(f"  session:  {d['session_file']}")
             print()
-            continue
-        if duration < 0.3 or peak < 400:
-            print("  (recording too short/quiet; back to wake-word listening)")
-            print()
-            continue
-
-        wav = _pcm_to_wav_bytes(audio, rec_sr)
-        print(f"  sending {len(wav)/1024:.0f} KB to /converse...")
-        t0 = time.perf_counter()
-        d = post_converse(wav)
-        wall = time.perf_counter() - t0
-        if d is None:
-            print()
-            continue
-
-        t = d.get("timings", {})
-        print(f"  you said: {d.get('transcript', '')!r}")
-        print(f"  reply:    {d.get('reply_text', '')}")
-        print(f"  route={d.get('route')} model={d.get('model')} "
-              f"stt={t.get('stt', 0):.2f} llm={t.get('llm', 0):.2f} "
-              f"tts={t.get('tts', 0):.2f} total={t.get('total', 0):.2f} "
-              f"http={wall:.2f}")
-        if "session_file" in d:
-            print(f"  session:  {d['session_file']}")
-        print()
+            first_turn = False
+            # Stay in continuous mode — loop back to record next turn.
 
 
 if __name__ == "__main__":
