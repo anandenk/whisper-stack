@@ -372,37 +372,41 @@ def speak():
 
 @app.post("/converse")
 def converse():
-    """Full pipeline: audio -> STT -> router -> LLM -> TTS -> audio out + JSON."""
-    if "audio" not in request.files:
-        return jsonify({"error": "missing 'audio' file in multipart form"}), 400
-    f = request.files["audio"]
-    if not f.filename:
-        return jsonify({"error": "empty audio filename"}), 400
+    """Full pipeline: audio -> STT -> router -> LLM -> TTS -> audio out + JSON.
 
-    force_route = request.form.get("force_route")
+    Accepts the same three upload shapes as /converse/stream:
+      * multipart/form-data           (browser, talk.py)
+      * audio/l16; rate=N; channels=N (ESP-WROOM-32 firmware: raw int16 LE
+                                       mic capture, no WAV-wrap on the device)
+      * audio/wav                     (clients with a WAV fixture in flash)
+
+    Difference from /converse/stream: this endpoint plays the synthesized
+    reply through the WORKSTATION's default output device when
+    play_locally=true (default) — the ESP-32 doesn't need an on-board
+    speaker because the workstation is the speaker. The audio_base64 in
+    the JSON response is informational; mic-only clients can ignore it.
+    """
+    tmp_path, err, status, get_field = _capture_audio_upload(suffix_hint=".wav")
+    if err is not None:
+        return jsonify(err), status
+
+    force_route = get_field("force_route")
     if force_route is not None and force_route not in ("simple", "complex"):
         return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
 
-    session_id, sid_err = _validated_session_id(request.form.get("session_id"))
+    session_id, sid_err = _validated_session_id(get_field("session_id"))
     if sid_err:
         return jsonify({"error": sid_err}), 400
 
     # Phone/web clients want to play the reply audio themselves and don't want
     # the workstation playing it through its speakers. Default true preserves
-    # the ESP-32-style behavior where the workstation IS the speaker.
-    play_locally = request.form.get("play_locally", "true").strip().lower() != "false"
-
-    suffix = Path(f.filename).suffix or ".wav"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp_path = tmp.name
-    tmp.close()
+    # the ESP-WROOM-32 firmware's behavior where the workstation IS the speaker.
+    play_locally = (get_field("play_locally") or "true").strip().lower() != "false"
 
     timings: dict[str, float] = {}
     t_total = time.perf_counter()
 
     try:
-        f.save(tmp_path)
-
         t = time.perf_counter()
         stt_result = modes.get_stt().transcribe(tmp_path)
         timings["stt"] = time.perf_counter() - t
