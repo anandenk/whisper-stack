@@ -16,6 +16,7 @@ Run from repo root after activating .venv:
 from __future__ import annotations
 
 import base64
+import os
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,8 @@ from server import tts
 
 BASE = "http://127.0.0.1:5000"
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
+API_KEY = os.environ.get("API_KEY", "").strip()
+AUTH_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
 # (label, prompt-text-to-synth, expected_route_hint)
 # expected_route_hint is for human-readable output only — NOT asserted, since
@@ -71,6 +74,7 @@ def post_converse(audio_path: Path) -> dict:
         r = requests.post(
             f"{BASE}/converse",
             files={"audio": (audio_path.name, fh, "audio/wav")},
+            headers=AUTH_HEADERS,
             timeout=120,
         )
     must(r.status_code == 200, f"/converse status {r.status_code}: {r.text[:300]}")

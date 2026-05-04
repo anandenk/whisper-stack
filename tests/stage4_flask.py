@@ -9,14 +9,21 @@ Run from repo root after activating .venv:
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import requests
+
+from server import config  # noqa: F401  -- triggers .env load so API_KEY is in os.environ
 
 BASE = "http://127.0.0.1:5000"
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "jfk.wav"
+API_KEY = os.environ.get("API_KEY", "").strip()
+AUTH_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
 
 def must(cond: bool, msg: str) -> None:
@@ -55,6 +62,7 @@ def main() -> int:
         r = requests.post(
             f"{BASE}/transcribe",
             files={"audio": (SAMPLE.name, fh, "audio/wav")},
+            headers=AUTH_HEADERS,
             timeout=60,
         )
     must(r.status_code == 200, f"status {r.status_code}: {r.text}")
@@ -69,7 +77,7 @@ def main() -> int:
     # Use a query that routes complex so we exercise the Claude path end-to-end.
     msg = "Write a one-line Python function that adds two numbers."
     print(f"POST /chat  (message={msg!r})")
-    r = requests.post(f"{BASE}/chat", json={"message": msg}, timeout=30)
+    r = requests.post(f"{BASE}/chat", json={"message": msg}, headers=AUTH_HEADERS, timeout=30)
     must(r.status_code == 200, f"status {r.status_code}: {r.text}")
     c = r.json()
     for k in ("reply", "model", "latency_s", "input_tokens", "output_tokens"):
@@ -80,13 +88,13 @@ def main() -> int:
     print()
 
     print("POST /chat with no body  -> expect 400")
-    r = requests.post(f"{BASE}/chat", json={}, timeout=10)
+    r = requests.post(f"{BASE}/chat", json={}, headers=AUTH_HEADERS, timeout=10)
     must(r.status_code == 400, f"expected 400, got {r.status_code}: {r.text}")
     print(f"  -> 400 {r.json()}")
     print()
 
     print("POST /transcribe with no file  -> expect 400")
-    r = requests.post(f"{BASE}/transcribe", timeout=10)
+    r = requests.post(f"{BASE}/transcribe", headers=AUTH_HEADERS, timeout=10)
     must(r.status_code == 400, f"expected 400, got {r.status_code}: {r.text}")
     print(f"  -> 400 {r.json()}")
     print()
