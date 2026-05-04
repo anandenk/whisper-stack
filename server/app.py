@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import functools
 import hmac
+import json
 import re
 import sys
 import tempfile
@@ -16,8 +17,9 @@ import time
 import traceback
 from datetime import timedelta
 from pathlib import Path
+from typing import Iterator
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 
 from server import audio, audio_out, config, markdown, modes, router, titler
 from server.sessions import Session, SessionStore
@@ -84,7 +86,22 @@ app = Flask(__name__)
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Endpoints that mutate or cost money/credits. /, /health, /static stay public.
-PROTECTED_PATHS = frozenset({"/converse", "/chat", "/transcribe", "/speak"})
+PROTECTED_PATHS = frozenset({"/converse", "/converse/stream", "/chat", "/transcribe", "/speak"})
+
+
+def _sse_event(event: str, data: dict) -> str:
+    """Frame a single SSE event. JSON-encodes data on one line so the SSE
+    parser doesn't need to worry about multi-line `data:` continuations.
+    """
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _fake_text_deltas(text: str, chunk_len: int = 24) -> Iterator[str]:
+    """Phase 3A: chunk a fixed reply into small deltas so the client sees
+    the same shape it will see when ClaudeLLM.chat_stream() lands in 3B.
+    """
+    for i in range(0, len(text), chunk_len):
+        yield text[i:i + chunk_len]
 
 
 @app.before_request
@@ -403,6 +420,149 @@ def converse():
     if session is not None:
         body["session_file"] = session.path.name
     return jsonify(body)
+
+
+@app.post("/converse/stream")
+def converse_stream():
+    """SSE-streamed converse pipeline.
+
+    Phase 3A skeleton: real STT + real router, but the LLM is stubbed with a
+    fixed reply chunked into fake `text` deltas, and TTS runs ONCE
+    (non-streaming) over the whole reply emitted as a single `audio` event.
+    The wire format matches what phases 3B-3D will fill in with real LLM
+    streaming and per-sentence TTS chunks. Inputs mirror /converse —
+    multipart audio + optional force_route + session_id + play_locally —
+    so the client can be a near drop-in switch.
+    """
+    if "audio" not in request.files:
+        return jsonify({"error": "missing 'audio' file in multipart form"}), 400
+    f = request.files["audio"]
+    if not f.filename:
+        return jsonify({"error": "empty audio filename"}), 400
+
+    force_route = request.form.get("force_route")
+    if force_route is not None and force_route not in ("simple", "complex"):
+        return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
+
+    session_id, sid_err = _validated_session_id(request.form.get("session_id"))
+    if sid_err:
+        return jsonify({"error": sid_err}), 400
+
+    # play_locally is parsed and acknowledged but not yet wired — Phase 3D
+    # adds true streaming local playback. The skeleton always emits the
+    # PCM via SSE so the client can play it.
+    play_locally = request.form.get("play_locally", "true").strip().lower() != "false"
+
+    # Persist the upload to a tempfile we can hand to STT. We must save
+    # BEFORE entering the generator: Flask tears down the request context
+    # (and the SpooledTemporaryFile under request.files) once the view
+    # returns, so reading f inside the generator would race the teardown.
+    suffix = Path(f.filename).suffix or ".wav"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    f.save(tmp_path)
+
+    def generate() -> Iterator[str]:
+        timings: dict[str, float] = {}
+        t_total = time.perf_counter()
+        try:
+            yield _sse_event("ready", {
+                "mode": config.MODE,
+                "session_id": session_id,
+                "play_locally": play_locally,
+            })
+
+            t = time.perf_counter()
+            stt_result = modes.get_stt().transcribe(tmp_path)
+            timings["stt"] = time.perf_counter() - t
+            transcript = stt_result["transcript"]
+
+            yield _sse_event("transcript", {
+                "transcript": transcript,
+                "duration_s": stt_result.get("duration_s"),
+                "latency_s": timings["stt"],
+            })
+
+            if not transcript.strip():
+                yield _sse_event("error", {
+                    "error": "transcript was empty - no speech detected",
+                })
+                return
+
+            t = time.perf_counter()
+            decision = router.classify(transcript)
+            timings["route"] = time.perf_counter() - t
+            route = force_route if force_route is not None else decision["route"]
+            force_routed = force_route is not None
+
+            auto_escalated = False
+            if (not force_routed) and route == "simple" and router.is_tool_likely(transcript):
+                route = "complex"
+                auto_escalated = True
+
+            # We DON'T call get_llm(route) yet — that would force a backend
+            # to load and add real latency the skeleton is meant to avoid.
+            # The model name reported is the stub label so clients can tell
+            # 3A traffic apart from 3B-and-later real streams.
+            yield _sse_event("route", {
+                "route": route,
+                "force_routed": force_routed,
+                "auto_escalated": auto_escalated,
+                "model": "phase-3a-stub",
+                "router_scores": {
+                    "simple": decision["score_simple"],
+                    "complex": decision["score_complex"],
+                    "margin": decision["margin"],
+                    "margin_threshold": decision["margin_threshold"],
+                },
+            })
+
+            reply_text = (
+                f"This is a streaming skeleton reply. You said: {transcript.strip()} "
+                f"Real LLM streaming arrives in phase 3B."
+            )
+
+            t = time.perf_counter()
+            for delta in _fake_text_deltas(reply_text):
+                yield _sse_event("text", {"delta": delta})
+            timings["llm"] = time.perf_counter() - t
+
+            t = time.perf_counter()
+            speakable_text = markdown.to_speakable_text(reply_text)
+            raw_pcm, sample_rate = modes.get_tts().synth(speakable_text)
+            timings["tts"] = time.perf_counter() - t
+
+            yield _sse_event("audio", {
+                "sample_rate": sample_rate,
+                "pcm_b64": base64.b64encode(raw_pcm).decode("ascii"),
+            })
+
+            timings["total"] = time.perf_counter() - t_total
+            yield _sse_event("final", {
+                "reply_text": reply_text,
+                "audio_duration_s": (len(raw_pcm) // 2) / sample_rate if sample_rate else 0.0,
+                "timings": timings,
+                "tools_used": [],
+                "llm_tokens": {"input": None, "output": None},
+            })
+        except Exception as exc:
+            traceback.print_exc()
+            yield _sse_event("error", {"error": f"converse stream failed: {exc!r}"})
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    # X-Accel-Buffering disables proxy buffering (nginx + cloudflared honor it),
+    # so SSE events flush to the client as they're yielded instead of being
+    # held until the response completes.
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def main():
