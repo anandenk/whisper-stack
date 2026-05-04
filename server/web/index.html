@@ -28,6 +28,11 @@
     button.rec.recording { background: #cf222e; }
     button.rec:disabled { background: #444c56; cursor: wait; }
     .status { margin: 1rem 0; min-height: 1.4em; color: #8b949e; }
+    .status.speaking::after {
+      content: "▮"; margin-left: .35em;
+      animation: pulse 1s steps(2) infinite;
+    }
+    @keyframes pulse { 50% { opacity: .25; } }
     .panel {
       background: #161b22; border: 1px solid #30363d;
       border-radius: .5rem; padding: .9rem 1rem; margin-top: 1rem;
@@ -37,13 +42,17 @@
     .panel p { margin: 0; line-height: 1.4; }
     .timings { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: .8rem; color: #8b949e; }
-    audio { width: 100%; margin-top: .8rem; }
+    .reply.streaming { border-left: 2px solid #2da44e; }
+    .tools { margin-top: .4rem; font-size: .8rem; color: #8b949e;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .tools .tool { display: inline-block; padding: .15rem .5rem;
+      background: #1f2937; border-radius: .25rem; margin: 0 .3em .3em 0; }
     .err { color: #ff7b72; }
   </style>
 </head>
 <body>
 <main>
-  <h1>Voice AI</h1>
+  <h1>Voice AI <span style="font-size:.7em;color:#8b949e;font-weight:400;">streaming</span></h1>
 
   <div class="row">
     <label style="min-width: 5em;">API key:</label>
@@ -60,23 +69,25 @@
 
   <div id="result" style="display:none;">
     <div class="panel"><h2>You said</h2><p id="transcript"></p></div>
-    <div class="panel"><h2>Reply</h2><p id="reply"></p></div>
+    <div class="panel"><h2>Reply</h2>
+      <p id="reply" class="reply"></p>
+      <div id="tools" class="tools"></div>
+    </div>
     <div class="panel"><h2>Routing & timings</h2><p id="meta" class="timings"></p></div>
     <div class="panel" id="sessionPanel" style="display:none;">
       <h2>Session</h2><p id="sessionFile" class="timings"></p>
     </div>
-    <audio id="player" controls autoplay></audio>
   </div>
 </main>
 
 <script>
 const recBtn = document.getElementById('rec');
-const status = document.getElementById('status');
+const statusEl = document.getElementById('status');
 const result = document.getElementById('result');
 const transcriptEl = document.getElementById('transcript');
 const replyEl = document.getElementById('reply');
 const metaEl = document.getElementById('meta');
-const player = document.getElementById('player');
+const toolsEl = document.getElementById('tools');
 const apiKeyInput = document.getElementById('apiKey');
 const sessionInput = document.getElementById('sessionId');
 const sessionPanel = document.getElementById('sessionPanel');
@@ -89,28 +100,113 @@ sessionInput.value = localStorage.getItem('sessionId') || '';
 sessionInput.addEventListener('change', () => localStorage.setItem('sessionId', sessionInput.value.trim()));
 
 let mediaRecorder = null;
-let chunks = [];
+let recChunks = [];
 let mediaStream = null;
+let abortCtl = null;          // AbortController for the in-flight /converse/stream fetch
+let audioCtx = null;          // Lazily created on first user gesture
+let nextPlayTime = 0;         // audioCtx.currentTime when the next PCM chunk should start
+let activeSources = [];       // Currently scheduled BufferSources, so we can stop them on abort
+let speaking = false;         // Tracks whether at least one audio chunk has been queued
+
+function ensureAudioCtx() {
+  // AudioContext creation/resume must follow a user gesture — recBtn click qualifies.
+  // We let the device choose its native sample_rate; AudioBuffers carry their own
+  // sample_rate (22050 from Piper) and the browser resamples for output.
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+function abortInflight() {
+  if (abortCtl) {
+    try { abortCtl.abort(); } catch {}
+    abortCtl = null;
+  }
+  // Stop scheduled audio so a new turn doesn't overlap with the previous one.
+  for (const src of activeSources) {
+    try { src.stop(); } catch {}
+  }
+  activeSources = [];
+  nextPlayTime = 0;
+  speaking = false;
+}
+
+function enqueuePcm(pcmBytes, sampleRate) {
+  // pcmBytes is a Uint8Array of int16 little-endian PCM. Convert to Float32 in [-1,1]
+  // and schedule playback at nextPlayTime so consecutive chunks line up gaplessly.
+  const ctx = ensureAudioCtx();
+  // Build an Int16Array view. Watch for byte-offset alignment — atob output is fresh
+  // bytes so it's aligned, but copy defensively if not.
+  let int16;
+  if (pcmBytes.byteOffset % 2 === 0) {
+    int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
+  } else {
+    const aligned = new Uint8Array(pcmBytes);
+    int16 = new Int16Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 2);
+  }
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+
+  const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+  buffer.copyToChannel(float32, 0);
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+
+  const startAt = Math.max(nextPlayTime, ctx.currentTime + 0.02);  // tiny safety margin
+  source.start(startAt);
+  nextPlayTime = startAt + buffer.duration;
+
+  activeSources.push(source);
+  source.onended = () => {
+    const idx = activeSources.indexOf(source);
+    if (idx >= 0) activeSources.splice(idx, 1);
+    if (activeSources.length === 0 && speaking) {
+      speaking = false;
+      statusEl.classList.remove('speaking');
+      statusEl.textContent = 'Done.';
+    }
+  };
+
+  if (!speaking) {
+    speaking = true;
+    statusEl.classList.add('speaking');
+    statusEl.textContent = 'Speaking';
+  }
+}
+
+function b64ToUint8(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 
 async function startRecording() {
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
   } catch (err) {
-    status.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
+    statusEl.innerHTML = `<span class="err">Mic access denied: ${err.message}</span>`;
     return false;
   }
-  chunks = [];
+  ensureAudioCtx();  // prime the audio context on user gesture, before first audio event
+  recChunks = [];
   const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
   mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime })
                        : new MediaRecorder(mediaStream);
-  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
   mediaRecorder.onstop = handleStop;
   mediaRecorder.start();
   recBtn.classList.add('recording');
   recBtn.textContent = 'Tap to send';
-  status.textContent = 'Recording… speak then tap again.';
+  statusEl.textContent = 'Recording… speak then tap again.';
   return true;
 }
 
@@ -125,16 +221,19 @@ function stopRecording() {
   recBtn.classList.remove('recording');
   recBtn.disabled = true;
   recBtn.textContent = 'Sending…';
-  status.textContent = 'Sending to /converse…';
+  statusEl.textContent = 'Sending to /converse/stream…';
 }
 
 async function handleStop() {
-  const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+  // New turn — abort any prior in-flight stream + scheduled audio.
+  abortInflight();
+
+  const blob = new Blob(recChunks, { type: recChunks[0]?.type || 'audio/webm' });
   const ext = (blob.type.includes('mp4') ? '.m4a' : '.webm');
 
   const fd = new FormData();
   fd.append('audio', blob, `rec${ext}`);
-  fd.append('play_locally', 'false');  // play on this phone, not the workstation
+  fd.append('play_locally', 'false');  // play on this device, not the workstation
   const sid = sessionInput.value.trim();
   if (sid) fd.append('session_id', sid);
 
@@ -142,15 +241,31 @@ async function handleStop() {
   const key = apiKeyInput.value.trim();
   if (key) headers['X-API-Key'] = key;
 
+  // Reset UI for the new turn.
+  result.style.display = 'block';
+  transcriptEl.textContent = '';
+  replyEl.textContent = '';
+  replyEl.classList.add('streaming');
+  toolsEl.innerHTML = '';
+  metaEl.textContent = '';
+  sessionPanel.style.display = 'none';
+
+  abortCtl = new AbortController();
   const t0 = performance.now();
+
   let r;
   try {
-    r = await fetch('/converse', { method: 'POST', body: fd, headers });
+    r = await fetch('/converse/stream', {
+      method: 'POST',
+      body: fd,
+      headers,
+      signal: abortCtl.signal,
+    });
   } catch (err) {
+    if (err.name === 'AbortError') return;  // user started a new turn
     finishWithError(`Network error: ${err.message}`);
     return;
   }
-  const wallS = (performance.now() - t0) / 1000;
 
   if (!r.ok) {
     let msg;
@@ -158,48 +273,160 @@ async function handleStop() {
     finishWithError(`Server ${r.status}: ${msg}`);
     return;
   }
-  const d = await r.json();
-  showResult(d, wallS);
+
+  // Re-enable the button as soon as the stream is open. The user can interrupt
+  // mid-reply by tapping again — abortInflight() will tear down this stream.
   resetButton();
+  statusEl.textContent = 'Listening for reply…';
+
+  let finalEvent = null;
+  try {
+    await readSse(r.body, (event, data) => {
+      handleSseEvent(event, data);
+      if (event === 'final') finalEvent = data;
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    finishWithError(`Stream error: ${err.message}`);
+    return;
+  }
+
+  replyEl.classList.remove('streaming');
+  if (finalEvent) {
+    const wallS = (performance.now() - t0) / 1000;
+    showFinalSummary(finalEvent, wallS);
+  }
+}
+
+async function readSse(body, onEvent) {
+  // SSE frames: lines like "event: name" + "data: json", separated by blank line.
+  // Read fetch body as a stream and split on "\n\n".
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    while (true) {
+      // Tolerate \r\n line endings just in case a proxy normalized them.
+      const sep = buffer.indexOf('\n\n');
+      const sepCRLF = buffer.indexOf('\r\n\r\n');
+      const idx = (sep >= 0 && (sepCRLF < 0 || sep < sepCRLF)) ? sep
+                : (sepCRLF >= 0 ? sepCRLF : -1);
+      if (idx < 0) break;
+      const skip = (idx === sepCRLF) ? 4 : 2;
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + skip);
+      let event = null, data = null;
+      for (const line of frame.split(/\r?\n/)) {
+        if (line.startsWith('event: ')) event = line.slice(7);
+        else if (line.startsWith('data: ')) data = line.slice(6);
+      }
+      if (event && data !== null) {
+        try {
+          onEvent(event, JSON.parse(data));
+        } catch (e) {
+          console.warn('Bad SSE frame:', event, data, e);
+        }
+      }
+    }
+  }
+}
+
+function handleSseEvent(event, data) {
+  switch (event) {
+    case 'ready':
+      statusEl.textContent = `Stream open (mode=${data.mode}).`;
+      break;
+    case 'transcript':
+      transcriptEl.textContent = data.transcript;
+      statusEl.textContent = `Transcribed in ${data.latency_s.toFixed(2)}s. Routing…`;
+      break;
+    case 'route': {
+      const tag = data.auto_escalated ? ` (auto-escalated)` : '';
+      statusEl.textContent = `Routed to ${data.route} (${data.model})${tag}. Generating…`;
+      metaEl.textContent =
+        `route=${data.route} (${data.model})` +
+        (data.auto_escalated ? '  auto_escalated' : '') +
+        (data.force_routed ? '  force_routed' : '');
+      break;
+    }
+    case 'text':
+      replyEl.textContent += data.delta;
+      break;
+    case 'tool_call': {
+      const args = JSON.stringify(data.input || {});
+      const span = document.createElement('span');
+      span.className = 'tool';
+      span.textContent = `→ ${data.name}(${args})`;
+      span.dataset.toolId = data.id || data.name;
+      toolsEl.appendChild(span);
+      statusEl.textContent = `Calling ${data.name}…`;
+      break;
+    }
+    case 'tool_result': {
+      // Mark the matching tool_call span as completed.
+      const id = data.id || data.name;
+      const spans = toolsEl.querySelectorAll('.tool');
+      for (const s of spans) {
+        if (s.dataset.toolId === id && !s.dataset.done) {
+          s.textContent = `${data.name} → ${data.output_chars}ch / ${data.latency_s.toFixed(2)}s`;
+          s.dataset.done = '1';
+          break;
+        }
+      }
+      statusEl.textContent = `Tool returned. Generating reply…`;
+      break;
+    }
+    case 'audio':
+      enqueuePcm(b64ToUint8(data.pcm_b64), data.sample_rate);
+      break;
+    case 'final':
+      // Summary handled by showFinalSummary in handleStop; we leave the
+      // streamed reply text in place (matches what was spoken; intermediate
+      // "thinking text" from tool rounds stays visible for transparency).
+      break;
+    case 'error':
+      finishWithError(`Server: ${data.error}`);
+      break;
+    default:
+      console.log('Unknown SSE event:', event, data);
+  }
+}
+
+function showFinalSummary(d, wallS) {
+  const t = d.timings || {};
+  metaEl.textContent =
+    `${metaEl.textContent}\n` +
+    `stt=${(t.stt ?? 0).toFixed(2)}s  route=${(t.route ?? 0).toFixed(3)}s  ` +
+    `llm=${(t.llm ?? 0).toFixed(2)}s  tts=${(t.tts ?? 0).toFixed(2)}s  ` +
+    `total=${(t.total ?? 0).toFixed(2)}s  http_wall=${wallS.toFixed(2)}s\n` +
+    `audio_duration=${(d.audio_duration_s ?? 0).toFixed(2)}s  ` +
+    `tokens in=${d.llm_tokens?.input ?? '?'} out=${d.llm_tokens?.output ?? '?'}`;
+
+  if (d.session_file) {
+    sessionPanel.style.display = '';
+    sessionFileEl.textContent = d.session_file;
+  }
+  // If no audio was scheduled (e.g., empty reply), surface "Done." now;
+  // otherwise the source.onended callback will flip the status when the
+  // last chunk finishes playing.
+  if (activeSources.length === 0 && !speaking) {
+    statusEl.textContent = 'Done.';
+  }
 }
 
 function finishWithError(msg) {
-  status.innerHTML = `<span class="err">${msg}</span>`;
+  statusEl.innerHTML = `<span class="err">${msg}</span>`;
   resetButton();
+  replyEl.classList.remove('streaming');
 }
 
 function resetButton() {
   recBtn.disabled = false;
   recBtn.classList.remove('recording');
   recBtn.textContent = 'Tap to talk';
-}
-
-function showResult(d, wallS) {
-  result.style.display = 'block';
-  transcriptEl.textContent = d.transcript;
-  replyEl.textContent = d.reply_text;
-  const t = d.timings;
-  metaEl.textContent =
-    `route=${d.route} (${d.model})\n` +
-    `stt=${t.stt.toFixed(2)}s  route=${t.route.toFixed(3)}s  ` +
-    `llm=${t.llm.toFixed(2)}s  tts=${t.tts.toFixed(2)}s  ` +
-    `total=${t.total.toFixed(2)}s  http_wall=${wallS.toFixed(2)}s`;
-
-  if (d.session_file) {
-    sessionPanel.style.display = '';
-    sessionFileEl.textContent = d.session_file;
-  } else {
-    sessionPanel.style.display = 'none';
-  }
-
-  // Decode base64 WAV and play
-  const bin = atob(d.audio_base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const audioBlob = new Blob([bytes], { type: 'audio/wav' });
-  player.src = URL.createObjectURL(audioBlob);
-  player.play().catch(() => { /* autoplay blocked; user can press play */ });
-  status.textContent = 'Done.';
 }
 
 recBtn.addEventListener('click', async () => {
