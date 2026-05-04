@@ -33,6 +33,28 @@
       animation: pulse 1s steps(2) infinite;
     }
     @keyframes pulse { 50% { opacity: .25; } }
+    /* Live VAD peak readout — only visible when VAD is running. The bar
+       width tracks current peak (0..32 -> 0..100%); the threshold marker
+       is a vertical line at VAD_PEAK_THRESHOLD's position so the user
+       can see at a glance whether their voice is clearing the bar.   */
+    .vad-meter {
+      display: none; height: 4px; background: #21262d; border-radius: 2px;
+      margin: .25rem 0 0; position: relative; overflow: hidden;
+    }
+    .vad-meter.active { display: block; }
+    .vad-meter .bar {
+      height: 100%; background: #2da44e; width: 0;
+      transition: width 60ms linear;
+    }
+    .vad-meter.over .bar { background: #d29922; }
+    .vad-meter .threshold {
+      position: absolute; top: -1px; bottom: -1px; width: 1px;
+      background: #8b949e;
+    }
+    .vad-num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .7rem; color: #8b949e; margin-left: .5em;
+    }
     .panel {
       background: #161b22; border: 1px solid #30363d;
       border-radius: .5rem; padding: .9rem 1rem; margin-top: 1rem;
@@ -81,7 +103,8 @@
   </div>
 
   <button id="rec" class="rec">Tap to talk</button>
-  <div id="status" class="status">Ready.</div>
+  <div id="status" class="status">Ready.<span id="vadNum" class="vad-num"></span></div>
+  <div id="vadMeter" class="vad-meter"><div class="bar"></div><div class="threshold"></div></div>
 
   <div id="result" style="display:none;">
     <div class="panel"><h2>You said</h2><p id="transcript"></p></div>
@@ -110,6 +133,10 @@ const vadCheckbox = document.getElementById('vadEnabled');
 const continuousCheckbox = document.getElementById('continuousMode');
 const sessionPanel = document.getElementById('sessionPanel');
 const sessionFileEl = document.getElementById('sessionFile');
+const vadMeterEl = document.getElementById('vadMeter');
+const vadMeterBar = vadMeterEl.querySelector('.bar');
+const vadMeterThresholdLine = vadMeterEl.querySelector('.threshold');
+const vadNumEl = document.getElementById('vadNum');
 
 apiKeyInput.value = localStorage.getItem('apiKey') || '';
 apiKeyInput.addEventListener('change', () => localStorage.setItem('apiKey', apiKeyInput.value));
@@ -135,12 +162,18 @@ continuousCheckbox.addEventListener('change', () => {
   updateButtonForMode();
 });
 
-// VAD tuning constants — tweak here if speech is being clipped or background
-// noise auto-stops too eagerly. Threshold is in Uint8 deviation-from-center
-// units returned by AnalyserNode.getByteTimeDomainData (0..128). Quiet rooms
-// floor at ~1-3, breathing at ~3-5, normal speech at 20+. SILENCE_MS is the
-// dwell time below threshold (after speech has started) before auto-stop.
-const VAD_PEAK_THRESHOLD = 6;
+// VAD tuning constants. Threshold is in Uint8 deviation-from-center units
+// returned by AnalyserNode.getByteTimeDomainData (0..128 scale). Empirical
+// floor in a quiet office: 1-3 silence, 3-7 breathing/HVAC/fan, 15+ normal
+// speech. Threshold of 6 was too low — a quiet fan or HVAC running at peak
+// 5-7 was constantly resetting the silence timer between utterances, so
+// auto-stop never fired and the user had to speak twice. 12 sits in the
+// gap between background noise and quiet speech; raise toward 16-20 if
+// you're in a noisy room (typing, music) and have to keep tapping End.
+// Drop to 8 if you're a quiet talker and your speech doesn't auto-send.
+// SILENCE_MS is the dwell time below threshold (after speech has started)
+// before auto-stop.
+const VAD_PEAK_THRESHOLD = 12;
 const VAD_SILENCE_MS = 1500;
 // Phase 5B: interrupt detection while the assistant is speaking. Threshold
 // is HIGHER than VAD_PEAK_THRESHOLD so speaker-bleed from the assistant's
@@ -149,7 +182,7 @@ const VAD_SILENCE_MS = 1500;
 // peak to stay above threshold for VAD_INTERRUPT_FRAMES consecutive
 // analyser ticks — single-frame spikes from background sounds get
 // debounced out.
-const VAD_INTERRUPT_THRESHOLD = 14;
+const VAD_INTERRUPT_THRESHOLD = 22;
 const VAD_INTERRUPT_FRAMES = 3;
 // Small gap between SPEAKING ending and the next LISTENING starting in
 // continuous mode — gives the user a beat of silence to react before the
@@ -397,6 +430,17 @@ function setVadMode(mode) {
   vadSpeechStarted = false;
   vadSilenceStartMs = 0;
   vadInterruptFrames = 0;
+  // Show/position the meter to reflect the active threshold for this mode.
+  // The threshold line is at threshold/32 of the bar width, capped at 100%
+  // (peaks above 32 just saturate the bar).
+  if (mode === 'off') {
+    vadMeterEl.classList.remove('active');
+    vadNumEl.textContent = '';
+  } else {
+    vadMeterEl.classList.add('active');
+    const t = (mode === 'interrupt') ? VAD_INTERRUPT_THRESHOLD : VAD_PEAK_THRESHOLD;
+    vadMeterThresholdLine.style.left = Math.min(100, (t / 32) * 100) + '%';
+  }
   if (mode !== 'off' && vadAnalyser && !vadRafHandle) {
     vadRafHandle = requestAnimationFrame(vadTick);
   }
@@ -413,6 +457,15 @@ function vadTick() {
     if (dev > peak) peak = dev;
   }
   const now = performance.now();
+
+  // Live readout. Bar width tracks peak; "over" class flips color
+  // when peak crosses the active threshold so it's obvious whether
+  // your voice is registering.
+  const activeThreshold = (vadMode === 'interrupt')
+    ? VAD_INTERRUPT_THRESHOLD : VAD_PEAK_THRESHOLD;
+  vadMeterBar.style.width = Math.min(100, (peak / 32) * 100) + '%';
+  vadMeterEl.classList.toggle('over', peak >= activeThreshold);
+  vadNumEl.textContent = `peak=${peak} thresh=${activeThreshold}`;
 
   if (vadMode === 'silence') {
     // LISTENING — end the recording on silence-after-speech.
