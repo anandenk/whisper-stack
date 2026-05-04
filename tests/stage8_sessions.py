@@ -293,6 +293,75 @@ def test_prune_older_than(tmp: Path) -> None:
     print("  OK")
 
 
+def test_set_title_round_trip(tmp: Path) -> None:
+    print("[11] set_title slugifies, rewrites header, renames file, round-trips")
+    from server.sessions import _slugify
+
+    # Slug edge cases
+    must(_slugify("Pasta cooking advice") == "pasta-cooking-advice", "basic slug wrong")
+    must(_slugify("  Hello,  WORLD!  ") == "hello-world", "punct/spaces slug wrong")
+    must(_slugify("café résumé") == "caf-r-sum", "non-ASCII slug wrong")
+    must(_slugify("a" * 100).startswith("a") and len(_slugify("a" * 100)) <= 30,
+         "long slug not capped at 30 chars")
+    must(_slugify("中文") == "", "all-non-ascii slug should be empty")
+    must(_slugify("---") == "", "all-hyphens slug should be empty")
+    must(_slugify("a-very-long-slug-name-that-runs-over-30-chars").endswith(
+            ("a", "g", "n", "e", "r", "v", "s")),
+         f"truncated slug should not end on hyphen: {_slugify('a-very-long-slug-name-that-runs-over-30-chars')!r}")
+
+    store = SessionStore(tmp, idle_timeout=timedelta(minutes=10))
+    s = store.active_or_new("dev-title")
+    s.append_turn(
+        user_text="how do i cook pasta", reply_text="boil water",
+        route="simple", model="m", latency_s=0.1, input_tokens=1, output_tokens=1,
+    )
+    must(s.title is None, "title should start as None")
+    original_path = s.path
+    must(not original_path.name.endswith("--.md"),
+         f"untitled file should not have empty slug suffix: {original_path.name}")
+
+    # Set a title — file should rename, header should gain a `title:` line.
+    ok = s.set_title("Pasta cooking advice")
+    must(ok, "set_title should return True for a non-empty slug")
+    must(s.title == "pasta-cooking-advice", f"title field wrong: {s.title!r}")
+    must(s.path != original_path, "file should have been renamed")
+    must(s.path.exists(), f"renamed path missing: {s.path}")
+    must(not original_path.exists(), "original path should be gone after rename")
+    must(s.path.name.endswith("-pasta-cooking-advice.md"),
+         f"renamed file pattern wrong: {s.path.name}")
+
+    contents = s.path.read_text(encoding="utf-8")
+    must("title: pasta-cooking-advice" in contents, "title header missing from file")
+
+    # Reload from disk should pick up the title.
+    reloaded = Session.load(s.path, "dev-title")
+    must(reloaded.title == "pasta-cooking-advice", "reload title wrong")
+    must(len(reloaded.all_turns()) == 1, "reload turn count wrong (rename broke parse?)")
+
+    # Re-titling replaces the slug and renames again.
+    ok = s.set_title("Different topic now")
+    must(ok, "second set_title should succeed")
+    must(s.title == "different-topic-now", "second title wrong")
+    must(s.path.name.endswith("-different-topic-now.md"),
+         f"second rename pattern wrong: {s.path.name}")
+    must("title: different-topic-now" in s.path.read_text(encoding="utf-8"),
+         "second title header not in file")
+    must(s.path.read_text(encoding="utf-8").count("title:") == 1,
+         "should have exactly one title: header line")
+
+    # Empty/non-ASCII title is silently a no-op (returns False, no rename).
+    pre_path = s.path
+    ok = s.set_title("中文")
+    must(not ok, "set_title with empty slug should return False")
+    must(s.path == pre_path, "no-op set_title should not rename")
+
+    # active_or_new should still find the renamed file.
+    s_again = store.active_or_new("dev-title")
+    must(s_again.path == s.path, "active_or_new should resolve to the renamed file")
+    must(s_again.title == "different-topic-now", "active_or_new should pick up title")
+    print("  OK")
+
+
 def test_multiline_text(tmp: Path) -> None:
     print("[9] multi-line user_text and reply_text round-trip cleanly")
     store = SessionStore(tmp, idle_timeout=timedelta(minutes=10))
@@ -325,6 +394,7 @@ def main() -> int:
         test_malformed_block_skipped(tmp)
         test_multiline_text(tmp)
         test_prune_older_than(tmp)
+        test_set_title_round_trip(tmp)
 
     print("\n" + "=" * 64)
     print("  All Phase A (sessions.py) checks passed.")

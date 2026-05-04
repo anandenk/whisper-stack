@@ -1,12 +1,14 @@
 """Markdown-backed multi-turn session store.
 
-One file per active conversation at `<root>/<stream_id>-<ISO-timestamp>.md`.
+One file per active conversation at `<root>/<stream_id>-<ISO-timestamp>.md`,
+optionally with an auto-titled slug suffix: `<stream>-<ISO>-<slug>.md`.
 Idle is checked lazily at request time — no daemon, no scheduler. Server
 can be off for days; the rollover triggers on the next request.
 
 Format: see `notes/sessions-plan.md`. Briefly:
 
     # Session <stream>-<timestamp>
+    title: <slug>                 (optional, set after first turn by titler)
     created: <ISO>
     last_turn: <ISO>
 
@@ -38,6 +40,11 @@ _INFILE_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 # trailing newline(s). On Windows the file ends up with CRLF, and a `\s*$`
 # greedy match consumes \r and breaks up the blank-line separator.
 _HEADER_LAST_TURN_RE = re.compile(r"^last_turn:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+_HEADER_TITLE_RE = re.compile(r"^title:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+_HEADER_SESSION_LINE_RE = re.compile(r"^# Session .*$", re.MULTILINE)
+# Slug max length keeps full filename comfortably under common 255-byte filesystem
+# limits even with long stream_ids; also makes `ls sessions/` readable.
+_SLUG_MAX_LEN = 30
 _TURN_BLOCK_RE = re.compile(
     r"^## turn (\d+) — (\S+)\s*$",  # captures (n, timestamp)
     re.MULTILINE,
@@ -71,6 +78,21 @@ def _parse_infile_ts(s: str) -> datetime:
     return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
 
 
+def _slugify(text: str, max_len: int = _SLUG_MAX_LEN) -> str:
+    """Lowercase ASCII slug for use in filenames and the in-file title header.
+
+    Empty input or input with no usable characters returns "" — caller should
+    treat that as 'no title' and skip the rename rather than producing an
+    empty-suffix filename like `<stream>-<ts>-.md`.
+    """
+    s = text.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = s.strip("-")
+    if len(s) > max_len:
+        s = s[:max_len].rstrip("-")
+    return s
+
+
 @dataclass
 class Turn:
     index: int                   # 1-based, matches the `## turn N` header
@@ -101,6 +123,7 @@ class Session:
     stream_id: str
     created: datetime
     last_turn: datetime
+    title: str | None = None
     # Cache of parsed turns; populated on first read.
     _turns: list[Turn] | None = field(default=None, repr=False)
 
@@ -108,7 +131,7 @@ class Session:
 
     @classmethod
     def create(cls, root: Path, stream_id: str, now: datetime) -> Session:
-        """Create a brand-new session file. No turns yet."""
+        """Create a brand-new session file. No turns yet, no title."""
         fname = f"{stream_id}-{_fmt_fname_ts(now)}.md"
         path = root / fname
         ts = _fmt_infile_ts(now)
@@ -118,21 +141,24 @@ class Session:
             f"last_turn: {ts}\n\n",
             encoding="utf-8",
         )
-        return cls(path=path, stream_id=stream_id, created=now, last_turn=now, _turns=[])
+        return cls(path=path, stream_id=stream_id, created=now, last_turn=now,
+                   title=None, _turns=[])
 
     @classmethod
     def load(cls, path: Path, stream_id: str) -> Session:
         """Load an existing session file. Defers turn parsing until needed."""
         text = path.read_text(encoding="utf-8")
-        created_match = re.search(r"^created:\s*(\S+)\s*$", text, re.MULTILINE)
+        created_match = re.search(r"^created:[ \t]*(\S+)[ \t]*$", text, re.MULTILINE)
         last_match = _HEADER_LAST_TURN_RE.search(text)
         if not created_match or not last_match:
             raise ValueError(f"session file missing created/last_turn header: {path}")
+        title_match = _HEADER_TITLE_RE.search(text)
         return cls(
             path=path,
             stream_id=stream_id,
             created=_parse_infile_ts(created_match.group(1)),
             last_turn=_parse_infile_ts(last_match.group(1)),
+            title=title_match.group(1) if title_match else None,
         )
 
     # ---- read ----
@@ -149,6 +175,45 @@ class Session:
         return turns[-n:]
 
     # ---- write ----
+
+    def set_title(self, title: str) -> bool:
+        """Insert/replace the `title:` header line and rename the file to add
+        the slug suffix. Returns True if the title was set, False if `title`
+        slugifies to empty (no rename, no header change).
+
+        Idempotent for the no-change case: re-setting the same title just
+        rewrites the header line with the same slug; the rename is a no-op.
+        """
+        slug = _slugify(title)
+        if not slug:
+            return False
+
+        text = self.path.read_text(encoding="utf-8")
+        if _HEADER_TITLE_RE.search(text):
+            text = _HEADER_TITLE_RE.sub(f"title: {slug}", text, count=1)
+        else:
+            # Insert a `title:` line right after the `# Session ...` header line.
+            text = _HEADER_SESSION_LINE_RE.sub(
+                lambda m: f"{m.group(0)}\ntitle: {slug}", text, count=1
+            )
+        self.path.write_text(text, encoding="utf-8")
+
+        # Rename the file: <stream>-<ts>(-<oldslug>)?.md -> <stream>-<ts>-<slug>.md.
+        # The timestamp prefix stays sortable; the slug is just a suffix.
+        old = self.path
+        ts_part = _fmt_fname_ts(self.created)
+        new_name = f"{self.stream_id}-{ts_part}-{slug}.md"
+        new_path = old.with_name(new_name)
+        if new_path != old:
+            try:
+                old.replace(new_path)
+                self.path = new_path
+            except OSError:
+                # Rename failure is non-fatal — title-in-header still landed,
+                # just not reflected in the filename. Log-worthy if we had logging.
+                pass
+        self.title = slug
+        return True
 
     def append_turn(
         self,
