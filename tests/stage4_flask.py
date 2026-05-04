@@ -99,6 +99,76 @@ def main() -> int:
     print(f"  -> 400 {r.json()}")
     print()
 
+    # ----- Phase C: session_id wiring on /chat -----
+    # Three sequential calls with the same session_id; turn 2 establishes a
+    # fact, turn 3 asks for it back. Forces 'simple' route so we test the
+    # OllamaLLM /api/chat history path through the whole stack.
+    print("POST /chat  (session-aware probe via session_id='stage4-test')")
+    sid = "stage4-test"
+
+    # Turn 1: plain greeting — no fact yet.
+    r = requests.post(
+        f"{BASE}/chat",
+        json={"message": "Hello.", "session_id": sid, "force_route": "simple"},
+        headers=AUTH_HEADERS, timeout=60,
+    )
+    must(r.status_code == 200, f"turn 1 status {r.status_code}: {r.text}")
+    d1 = r.json()
+    must("session_file" in d1, f"session_file missing in response: {d1.keys()}")
+    must(d1["session_file"].startswith(f"{sid}-"),
+         f"session_file should start with '{sid}-', got {d1['session_file']!r}")
+    print(f"  turn 1 reply: {d1['reply'][:80]!r}  session_file={d1['session_file']}")
+
+    # Turn 2: establish a fact.
+    r = requests.post(
+        f"{BASE}/chat",
+        json={"message": "My favorite color is teal.",
+              "session_id": sid, "force_route": "simple"},
+        headers=AUTH_HEADERS, timeout=60,
+    )
+    must(r.status_code == 200, f"turn 2 status {r.status_code}: {r.text}")
+    d2 = r.json()
+    must(d2["session_file"] == d1["session_file"],
+         f"session_file should be stable across turns: {d1['session_file']} vs {d2['session_file']}")
+    print(f"  turn 2 reply: {d2['reply'][:80]!r}")
+
+    # Turn 3: recall the fact.
+    r = requests.post(
+        f"{BASE}/chat",
+        json={"message": "What's my favorite color? Reply in one short sentence.",
+              "session_id": sid, "force_route": "simple"},
+        headers=AUTH_HEADERS, timeout=60,
+    )
+    must(r.status_code == 200, f"turn 3 status {r.status_code}: {r.text}")
+    d3 = r.json()
+    print(f"  turn 3 reply: {d3['reply']!r}")
+    must("teal" in d3["reply"].lower(),
+         f"history not consumed — turn 3 reply missing 'teal': {d3['reply']!r}")
+
+    # Verify the file actually landed on disk with all three turns.
+    sessions_dir = Path(__file__).resolve().parent.parent / "sessions"
+    session_path = sessions_dir / d1["session_file"]
+    must(session_path.exists(), f"expected session file at {session_path}")
+    contents = session_path.read_text(encoding="utf-8")
+    must(contents.count("## turn") == 3,
+         f"expected 3 turns in session file, found "
+         f"{contents.count('## turn')} (file: {session_path.name})")
+    must("My favorite color is teal." in contents,
+         "turn 2 user text not in session file")
+    print(f"  OK: session file has 3 turns: {session_path.name}")
+    print()
+
+    print("POST /chat with bad session_id  -> expect 400")
+    r = requests.post(
+        f"{BASE}/chat",
+        json={"message": "hi", "session_id": "../../etc/passwd"},
+        headers=AUTH_HEADERS, timeout=10,
+    )
+    must(r.status_code == 400,
+         f"expected 400 for malformed session_id, got {r.status_code}: {r.text}")
+    print(f"  -> 400 {r.json()}")
+    print()
+
     print("=" * 64)
     print("  All stage 4 checks passed.")
     print()

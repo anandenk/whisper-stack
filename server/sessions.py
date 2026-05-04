@@ -34,7 +34,10 @@ _FNAME_TS_FMT = "%Y%m%dT%H%M%SZ"
 # Inside-file ISO uses the readable form so cat / grep / Obsidian render it nicely.
 _INFILE_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
-_HEADER_LAST_TURN_RE = re.compile(r"^last_turn:\s*(\S+)\s*$", re.MULTILINE)
+# `[ \t]*` (NOT `\s*`) at end-of-line so the substitution doesn't gobble the
+# trailing newline(s). On Windows the file ends up with CRLF, and a `\s*$`
+# greedy match consumes \r and breaks up the blank-line separator.
+_HEADER_LAST_TURN_RE = re.compile(r"^last_turn:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 _TURN_BLOCK_RE = re.compile(
     r"^## turn (\d+) — (\S+)\s*$",  # captures (n, timestamp)
     re.MULTILINE,

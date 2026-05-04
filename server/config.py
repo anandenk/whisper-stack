@@ -70,6 +70,19 @@ PIPER_MODEL_PATH = PIPER_MODELS_DIR / f"{PIPER_VOICE}.onnx"
 # Voice replies should be short (1-2 sentences). Tune via env if needed.
 CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "96"))
 
+# Multi-turn session memory (see notes/sessions-plan.md).
+# - SESSION_DIR is REPO_ROOT-relative unless an absolute path is given.
+#   On a Fly.io VM this should point at a mounted volume so redeploys don't wipe history.
+# - Idle timeout: gap between requests beyond which a new session file rolls over.
+#   Lazy check at request time — no daemon, no scheduler.
+# - Window: max recent turns sent to the LLM as `history`. Idle is the real
+#   conversation boundary; the window is a safety belt against runaway exchanges.
+_session_dir_raw = os.environ.get("SESSION_DIR", "sessions").strip()
+_session_dir_path = Path(_session_dir_raw)
+SESSION_DIR = _session_dir_path if _session_dir_path.is_absolute() else (REPO_ROOT / _session_dir_path)
+SESSION_IDLE_TIMEOUT_MIN = float(os.environ.get("SESSION_IDLE_TIMEOUT_MIN", "10"))
+SESSION_WINDOW_TURNS = int(os.environ.get("SESSION_WINDOW_TURNS", "30"))
+
 # System prompt prepended to LLM calls from /converse. Targets two failure modes:
 # (1) markdown formatting (asterisks, bullets) read literally by the TTS engine,
 # (2) verbose replies turning into 20+ seconds of audio.

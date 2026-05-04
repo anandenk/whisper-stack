@@ -7,16 +7,52 @@ Run from repo root:
 from __future__ import annotations
 
 import base64
+import functools
 import hmac
+import re
 import sys
 import tempfile
 import time
 import traceback
+from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request
 
 from server import audio, audio_out, config, markdown, modes, router
+from server.sessions import SessionStore
+
+# HTTP-facing stream IDs are stricter than the SessionStore's filesystem-safety
+# check. Conservative charset: alphanumeric, underscore, dash, 1-64 chars. Keeps
+# session files greppable and rules out anything that could surprise the parser.
+_STREAM_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+@functools.lru_cache(maxsize=1)
+def _session_store() -> SessionStore:
+    return SessionStore(
+        config.SESSION_DIR,
+        idle_timeout=timedelta(minutes=config.SESSION_IDLE_TIMEOUT_MIN),
+    )
+
+
+def _validated_session_id(raw) -> tuple[str | None, str | None]:
+    """Returns (session_id, error). session_id is None when not provided.
+
+    error is set to a human-readable string when the input is malformed; the
+    caller turns it into a 400 response.
+    """
+    if raw is None or raw == "":
+        return None, None
+    if not isinstance(raw, str):
+        return None, "session_id must be a string"
+    raw = raw.strip()
+    if not raw:
+        return None, None
+    if not _STREAM_ID_RE.match(raw):
+        return None, ("session_id must match [A-Za-z0-9_-]{1,64} "
+                      "(no path separators, no spaces)")
+    return raw, None
 
 app = Flask(__name__)
 
@@ -104,18 +140,43 @@ def chat():
     if force_route is not None and force_route not in ("simple", "complex"):
         return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
 
+    session_id, sid_err = _validated_session_id(data.get("session_id"))
+    if sid_err:
+        return jsonify({"error": sid_err}), 400
+
     try:
         # Always classify (even when forcing) so we record what the router would have decided.
         decision = router.classify(message)
         route = force_route if force_route is not None else decision["route"]
         force_routed = force_route is not None
 
-        llm_result = modes.get_llm(route).chat(message)
+        # If a session_id is present, load the active session and feed its
+        # recent window as `history` to the LLM. Then append this new turn.
+        # Absent session_id = fully stateless (existing behavior).
+        session = None
+        history: list[dict] | None = None
+        if session_id is not None:
+            session = _session_store().active_or_new(session_id)
+            window = session.recent_window(config.SESSION_WINDOW_TURNS)
+            history = [m for turn in window for m in turn.to_message_pair()]
+
+        llm_result = modes.get_llm(route).chat(message, history=history)
+
+        if session is not None:
+            session.append_turn(
+                user_text=message,
+                reply_text=llm_result["reply"],
+                route=route,
+                model=llm_result["model"],
+                latency_s=float(llm_result["latency_s"]),
+                input_tokens=int(llm_result.get("input_tokens") or 0),
+                output_tokens=int(llm_result.get("output_tokens") or 0),
+            )
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"chat failed: {exc!r}"}), 500
 
-    return jsonify({
+    body = {
         **llm_result,
         "route": route,
         "force_routed": force_routed,
@@ -126,7 +187,12 @@ def chat():
             "margin": decision["margin"],
             "margin_threshold": decision["margin_threshold"],
         },
-    })
+    }
+    if session is not None:
+        # Surface the active session file so the client can grep for it later
+        # without having to know the rollover rules.
+        body["session_file"] = session.path.name
+    return jsonify(body)
 
 
 @app.post("/speak")
