@@ -75,6 +75,14 @@ PIPER_MODEL_PATH = PIPER_MODELS_DIR / f"{PIPER_VOICE}.onnx"
 # natural. Voice-agent UX feels noticeably snappier with this set.
 # Below ~0.75 starts to sound rushed; above ~1.1 starts to sound sleepy.
 PIPER_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.85"))
+# Optional substring matched against output device names. When set, overrides
+# the system default output for /speak and /converse playback so a Bluetooth
+# headphone plugging in (or another app changing the default) doesn't reroute
+# the assistant's voice unexpectedly. Empty = use whatever the system default
+# is at the moment of playback. Avoid Hands-Free Bluetooth profiles
+# ('Headset (...)' entries) — they run at 8 kHz and TTS sounds awful through
+# them; pin A2DP/stereo or a wired/USB device.
+TTS_OUTPUT_DEVICE = os.environ.get("TTS_OUTPUT_DEVICE", "").strip()
 
 # /converse caps reply length so a chatty LLM doesn't turn into 30s of audio.
 # Voice replies should be short (1-2 sentences). Tune via env if needed.

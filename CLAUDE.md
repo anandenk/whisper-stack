@@ -40,7 +40,7 @@ different statuses.
 - [plan.md](plan.md) — original 7-stage local-mode build. **Shipped.**
 - [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor (one codebase, two deploy shapes). **Phases 1, 2, 3, 4, 6, 8 shipped; 5 (Deepgram STT), 7 (OpenAI TTS), 9 (Fly.io deploy) queued behind cloud signups.**
 - [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **All 5 phases (A-E) shipped.** Set `VOICE_AI_SESSION_ID` for talk.py, type a session ID into the web client's Session field, or pass `session_id` form/JSON field on `/converse` / `/chat` to opt in. Absent = stateless, default behavior preserved.
-- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **Not yet started.** Six milestones in dependency order; each is a usable pause point.
+- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI; `tests/jarvis.py` is the workstation wake-word client (`pip install openwakeword` + download the bundled models, then say "hey jarvis"). `web_search` stays disabled until `TAVILY_API_KEY` is set.
 
 ## MODE: local vs cloud
 
@@ -128,9 +128,22 @@ notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
 requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
 ```
 
-## TODO when audio setup is finalized
+## TTS output device
 
-Stage 6 ships using the **system default output device** (currently Razer USB Sound Card). When the speaker setup is finalized — Bose paired and set as default, or a specific device chosen — pin the device by name in `.env` so playback doesn't accidentally route to whatever is default at the moment (e.g. headphones plugging in). Mechanism: `sd.default.device = (None, "<substring of name>")` set from a `TTS_OUTPUT_DEVICE` env var in `server/config.py` and applied at the top of `server/audio_out.py` (the local-mode playback module). Avoid Hands-Free Bluetooth profiles (`Headset (...)` entries) — they run at 8 kHz and sound terrible for TTS. Use A2DP/stereo profile.
+Pinned in `.env` via `TTS_OUTPUT_DEVICE` (default unset → system default).
+Accepts a substring of the device name OR an integer index. On Windows the
+same device often appears under MME / DirectSound / WASAPI host APIs; the
+substring must be unique across input AND output devices, otherwise pin by
+integer index. Wired in [server/audio_out.py](server/audio_out.py) at module
+import; the boot log prints the resolved device. Avoid Hands-Free Bluetooth
+profiles (`Headset (...)` entries) — they run at 8 kHz and TTS sounds awful
+through them; use A2DP/stereo or a wired/USB device.
+
+Enumerate candidates:
+
+```
+.venv/Scripts/python.exe -c "import sounddevice as sd; print(sd.query_devices())"
+```
 
 ## Running the server
 

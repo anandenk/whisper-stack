@@ -17,6 +17,33 @@ from server import config
 
 LOCAL_PLAYBACK_AVAILABLE = config.MODE == "local"
 
+# Pin the output device when configured. TTS_OUTPUT_DEVICE accepts either:
+#   * an integer index (most reliable on Windows where the same device name
+#     appears under MME / DirectSound / WASAPI host APIs and substring
+#     matching becomes ambiguous), or
+#   * a substring of the device name — sounddevice raises ValueError when
+#     multiple devices match, so the substring must be unique across BOTH
+#     input and output device names.
+# Run `python -c "import sounddevice as sd; print(sd.query_devices())"` to
+# enumerate. Failure here is non-fatal: we fall back to the system default
+# and warn so the user sees the misconfiguration on boot rather than at
+# first /speak call.
+if LOCAL_PLAYBACK_AVAILABLE and config.TTS_OUTPUT_DEVICE:
+    raw = config.TTS_OUTPUT_DEVICE
+    try:
+        target = int(raw) if raw.lstrip("-").isdigit() else raw
+        sd.default.device = (None, target)
+        _idx = sd.default.device[1]
+        _picked = sd.query_devices(_idx)["name"]
+        print(f"TTS output device pinned: {raw!r} -> [{_idx}] {_picked!r}",
+              flush=True)
+    except Exception as exc:
+        print(f"WARNING: TTS_OUTPUT_DEVICE={raw!r} did not resolve to a "
+              f"unique output device ({exc!r}). Falling back to system "
+              f"default. Try a more specific substring or an integer index "
+              f"from `python -c \"import sounddevice as sd; print(sd.query_devices())\"`.",
+              flush=True)
+
 
 def synth_play_nonblock(text: str) -> tuple[bytes, int, float]:
     """Synth + start non-blocking playback. Returns (raw_pcm, sample_rate, synth_time_s).

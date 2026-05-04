@@ -10,6 +10,7 @@ Run from repo root after activating .venv:
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -103,8 +104,12 @@ def main() -> int:
     # Three sequential calls with the same session_id; turn 2 establishes a
     # fact, turn 3 asks for it back. Forces 'simple' route so we test the
     # OllamaLLM /api/chat history path through the whole stack.
-    print("POST /chat  (session-aware probe via session_id='stage4-test')")
-    sid = "stage4-test"
+    #
+    # Per-run unique session_id so back-to-back runs within the idle window
+    # (10 min default) don't accumulate turns in the same file and break the
+    # "exactly 3 turns" assertion below.
+    sid = f"stage4-test-{secrets.token_hex(3)}"
+    print(f"POST /chat  (session-aware probe via session_id={sid!r})")
 
     # Turn 1: plain greeting — no fact yet.
     r = requests.post(
