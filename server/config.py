@@ -24,6 +24,12 @@ if MODE not in ("local", "cloud"):
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16")
+# Pin STT language. Empty = auto-detect (faster-whisper's default — known to
+# misfire into Icelandic / Welsh / etc on short or noisy utterances). Set to
+# the BCP-47 lang code you actually speak ("en", "es", "fr", ...) to skip
+# detection entirely.
+_whisper_lang_raw = os.environ.get("WHISPER_LANGUAGE", "en").strip()
+WHISPER_LANGUAGE: str | None = _whisper_lang_raw if _whisper_lang_raw else None
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 # Cloud-mode simple-route model. The bare alias may need to be the dated form

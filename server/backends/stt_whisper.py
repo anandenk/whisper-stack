@@ -46,7 +46,14 @@ class WhisperLocalSTT:
     def transcribe(self, audio_path: str | Path) -> dict:
         model = self._get_model()
         t0 = time.perf_counter()
-        segments, info = model.transcribe(str(audio_path), beam_size=5)
+        # Passing language= skips Whisper's auto-detect — which is known to
+        # land on Icelandic/Welsh/etc for short or noisy English utterances,
+        # then "transcribe" English phonemes into the wrong language.
+        segments, info = model.transcribe(
+            str(audio_path),
+            beam_size=5,
+            language=config.WHISPER_LANGUAGE,
+        )
         segments = list(segments)
         elapsed = time.perf_counter() - t0
         text = " ".join(s.text.strip() for s in segments).strip()
