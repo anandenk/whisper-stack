@@ -80,6 +80,11 @@ PIPER_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.85"))
 # Voice replies should be short (1-2 sentences). Tune via env if needed.
 CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "96"))
 
+# Tool use safety cap — max iterations of the model -> tool -> model loop
+# inside one chat() call. Prevents a runaway "model keeps calling tools" bug
+# from billing forever. Each round is one Anthropic / Ollama call.
+TOOL_MAX_ROUNDS = int(os.environ.get("TOOL_MAX_ROUNDS", "5"))
+
 # Multi-turn session memory (see notes/sessions-plan.md).
 # - SESSION_DIR is REPO_ROOT-relative unless an absolute path is given.
 #   On a Fly.io VM this should point at a mounted volume so redeploys don't wipe history.
