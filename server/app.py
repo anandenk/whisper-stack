@@ -21,7 +21,7 @@ from typing import Iterator
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from server import audio, audio_out, config, markdown, modes, router, titler
+from server import audio, audio_out, config, markdown, modes, router, titler, usage
 from server.sessions import Session, SessionStore
 from server.streaming import SentenceChunker
 from server.tools import all_tools
@@ -97,6 +97,100 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _parse_content_type(ct: str | None) -> tuple[str, dict[str, str]]:
+    """Returns (media_type_lowercase, params_dict). Empty media_type if
+    Content-Type is missing or malformed."""
+    if not ct:
+        return "", {}
+    parts = [p.strip() for p in ct.split(";")]
+    media = parts[0].lower()
+    params: dict[str, str] = {}
+    for p in parts[1:]:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            params[k.strip().lower()] = v.strip().strip('"')
+    return media, params
+
+
+def _capture_audio_upload(suffix_hint: str = ".wav") -> tuple[str | None, dict | None, int | None, callable | None]:
+    """Save the audio body to a tempfile, returning
+    (tmp_path, error_response_dict_or_None, http_status_or_None, get_field).
+
+    Three accepted upload shapes:
+
+    1. multipart/form-data: existing path. File in 'audio' part, params
+       in form fields. `get_field` is `request.form.get`.
+
+    2. audio/l16; rate=N[; channels=N]: raw int16 LE PCM in body, params
+       from query string. ESP-32 / INMP441 captures int16 LE natively;
+       this skips WAV-wrapping on the device. We wrap to WAV here so the
+       existing faster-whisper / Deepgram pipeline doesn't have to know
+       about raw bodies.
+
+    3. audio/wav, audio/wave, audio/x-wav: already-wrapped WAV in body,
+       params from query string. Useful for tiny clients that have a WAV
+       file ready (e.g. a hardware unit-test fixture stored in flash).
+
+    On error returns (None, error_dict, http_status, None) so the caller
+    can `return jsonify(error_dict), status` immediately.
+    """
+    media, params = _parse_content_type(request.content_type)
+
+    # multipart upload
+    if media.startswith("multipart/"):
+        if "audio" not in request.files:
+            return None, {"error": "missing 'audio' file in multipart form"}, 400, None
+        f = request.files["audio"]
+        if not f.filename:
+            return None, {"error": "empty audio filename"}, 400, None
+        suffix = Path(f.filename).suffix or suffix_hint
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        f.save(tmp_path)
+        return tmp_path, None, None, request.form.get
+
+    # raw int16 PCM body
+    if media in ("audio/l16", "audio/x-l16"):
+        try:
+            rate = int(params.get("rate", "16000"))
+            channels = int(params.get("channels", "1"))
+        except ValueError:
+            return None, {"error": "Content-Type must include integer rate; "
+                                   "e.g. 'audio/l16; rate=16000; channels=1'"}, 400, None
+        if rate < 8000 or rate > 48000 or channels < 1 or channels > 2:
+            return None, {"error": f"unsupported PCM rate/channels: rate={rate} "
+                                   f"channels={channels}"}, 400, None
+        raw = request.get_data(cache=False)
+        if not raw:
+            return None, {"error": "empty audio body"}, 400, None
+        if len(raw) % 2 != 0:
+            return None, {"error": "audio/l16 body length must be even (int16 samples)"}, 400, None
+        wav_bytes = audio.pcm_to_wav(raw, rate, channels=channels)
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        Path(tmp_path).write_bytes(wav_bytes)
+        return tmp_path, None, None, request.args.get
+
+    # raw WAV body
+    if media in ("audio/wav", "audio/wave", "audio/x-wav"):
+        raw = request.get_data(cache=False)
+        if not raw:
+            return None, {"error": "empty audio body"}, 400, None
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        Path(tmp_path).write_bytes(raw)
+        return tmp_path, None, None, request.args.get
+
+    return None, {
+        "error": f"unsupported Content-Type {request.content_type!r}; "
+                 f"use multipart/form-data, audio/l16 (with rate=N; channels=N), "
+                 f"or audio/wav"
+    }, 415, None
+
+
 @app.before_request
 def _gate_protected_routes():
     if not config.API_KEY:
@@ -134,6 +228,7 @@ def health():
             "router": router.is_loaded(),
             "tts": tts_backend.is_loaded(),
         },
+        "usage": usage.snapshot(),
     })
 
 
@@ -213,6 +308,12 @@ def chat():
         tools = (all_tools() or None) if route == "complex" else None
 
         llm_result = modes.get_llm(route).chat(message, history=history, tools=tools)
+        usage.record(
+            llm_result.get("model"),
+            input_tokens=llm_result.get("input_tokens"),
+            output_tokens=llm_result.get("output_tokens"),
+            route=route,
+        )
 
         if session is not None:
             session.append_turn(
@@ -349,6 +450,12 @@ def converse():
         )
         timings["llm"] = time.perf_counter() - t
         reply_text = llm_result["reply"]
+        usage.record(
+            llm_result.get("model"),
+            input_tokens=llm_result.get("input_tokens"),
+            output_tokens=llm_result.get("output_tokens"),
+            route=route,
+        )
 
         # Persist the turn while it's fresh — store the raw reply, NOT the
         # markdown-stripped version. Strip is a TTS concern; future turns
@@ -419,6 +526,20 @@ def converse():
 def converse_stream():
     """SSE-streamed converse pipeline.
 
+    Three upload shapes accepted, chosen by Content-Type:
+
+      * multipart/form-data           file in `audio` part, params (force_route,
+                                      session_id, play_locally) in form fields.
+                                      The default for browser/MediaRecorder
+                                      clients.
+      * audio/l16; rate=N; channels=N raw int16 LE PCM in the body, params from
+                                      query string. Skips WAV-wrapping on the
+                                      device — the natural shape for ESP-32 +
+                                      INMP441 (which captures int16 LE natively).
+      * audio/wav                     pre-wrapped WAV in body, params from query
+                                      string. Useful for tiny clients with a
+                                      WAV fixture in flash.
+
     Phase 3D: real STT + router + LLM streaming + sentence-boundary
     streaming TTS. Text deltas land in a SentenceChunker; complete
     sentences are handed to TTS.synth_stream as they arrive, and
@@ -440,17 +561,22 @@ def converse_stream():
     one synth() call. (After 3C, both ClaudeLLM and OllamaLLM stream,
     so the fallback is dead code in practice — kept as a safety net.)
     """
-    if "audio" not in request.files:
-        return jsonify({"error": "missing 'audio' file in multipart form"}), 400
-    f = request.files["audio"]
-    if not f.filename:
-        return jsonify({"error": "empty audio filename"}), 400
+    # Three accepted upload shapes — multipart, raw audio/l16 PCM body,
+    # or raw audio/wav body. _capture_audio_upload writes to a tempfile and
+    # hands back a getter for the rest of the params (form fields for
+    # multipart, query string for the raw paths). The tempfile MUST be
+    # written here before the generator runs — Flask tears down the
+    # request context once the view returns, so reading request.files /
+    # request.get_data() inside the generator would race the teardown.
+    tmp_path, err, status, get_field = _capture_audio_upload(suffix_hint=".wav")
+    if err is not None:
+        return jsonify(err), status
 
-    force_route = request.form.get("force_route")
+    force_route = get_field("force_route")
     if force_route is not None and force_route not in ("simple", "complex"):
         return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
 
-    session_id, sid_err = _validated_session_id(request.form.get("session_id"))
+    session_id, sid_err = _validated_session_id(get_field("session_id"))
     if sid_err:
         return jsonify({"error": sid_err}), 400
 
@@ -459,17 +585,7 @@ def converse_stream():
     # leaves playback to the client (the web client uses Web Audio).
     # Workstation callers that want the workstation to speak the reply
     # should keep using the non-streaming /converse endpoint.
-    play_locally = request.form.get("play_locally", "true").strip().lower() != "false"
-
-    # Persist the upload to a tempfile we can hand to STT. We must save
-    # BEFORE entering the generator: Flask tears down the request context
-    # (and the SpooledTemporaryFile under request.files) once the view
-    # returns, so reading f inside the generator would race the teardown.
-    suffix = Path(f.filename).suffix or ".wav"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp_path = tmp.name
-    tmp.close()
-    f.save(tmp_path)
+    play_locally = (get_field("play_locally") or "true").strip().lower() != "false"
 
     def generate() -> Iterator[str]:
         timings: dict[str, float] = {}
@@ -634,6 +750,12 @@ def converse_stream():
                         llm_input_tokens = int(ev.get("input_tokens") or 0)
                         llm_output_tokens = int(ev.get("output_tokens") or 0)
                         tools_used = ev.get("tools_used") or []
+                        usage.record(
+                            ev.get("model") or getattr(llm, "model", None),
+                            input_tokens=llm_input_tokens,
+                            output_tokens=llm_output_tokens,
+                            route=route,
+                        )
             except NotImplementedError:
                 # Backend hasn't implemented streaming. Both shipped
                 # backends (ClaudeLLM, OllamaLLM) do as of 3C, so this

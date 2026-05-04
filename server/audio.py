@@ -9,11 +9,12 @@ import io
 import wave
 
 
-def pcm_to_wav(raw: bytes, sample_rate: int) -> bytes:
-    """Wrap raw int16 mono PCM as a WAV file."""
+def pcm_to_wav(raw: bytes, sample_rate: int, channels: int = 1) -> bytes:
+    """Wrap raw int16 PCM as a WAV file. Defaults to mono — pass channels=2
+    for stereo."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
+        wf.setnchannels(channels)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(raw)

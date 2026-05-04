@@ -38,7 +38,9 @@ Requires the server to be running:
 
 from __future__ import annotations
 
+import base64
 import io
+import json
 import os
 import queue
 import sys
@@ -284,33 +286,169 @@ def record_with_vad(sr: int, channels: int,
 
 
 # ---------------------------------------------------------------------------
-# /converse round-trip (server plays the reply locally)
+# /converse/stream round-trip with chunked PCM playback
 # ---------------------------------------------------------------------------
+#
+# Why the queue + consumer thread:
+# `sd.OutputStream.write()` blocks until the chunk has been queued for the
+# OS audio buffer. If we wrote chunks straight from the SSE-parsing loop the
+# main thread would block under back-pressure, stop draining the HTTP
+# response, and eventually the server would time out trying to push more
+# events. Decoupling SSE consumption from audio playback via a queue keeps
+# both pipelines flowing — the SSE loop pushes PCM bytes into the queue
+# free-running, the consumer thread blocks on stream.write() at the
+# playback rate.
+# This is also the shape the ESP-32 firmware will use: I²S DMA writer thread
+# pulled from a ring buffer, while the WiFi/HTTP task pushes chunks in.
 
-def post_converse(wav_bytes: bytes) -> dict | None:
-    """POST audio to /converse; returns response dict or None on error.
-    play_locally defaults to true server-side, so the workstation speakers
-    speak the reply automatically — same UX as talk.py."""
-    form: dict[str, str] = {}
+class _StreamingPlayer:
+    """Thread-safe sink for PCM chunks arriving from /converse/stream."""
+
+    def __init__(self) -> None:
+        self._q: queue.Queue[bytes | None] = queue.Queue()
+        self._stream: sd.OutputStream | None = None
+        self._thread: threading.Thread | None = None
+        self._sr: int | None = None
+        self._lock = threading.Lock()
+
+    def start(self, sample_rate: int) -> None:
+        """Open the OutputStream on the first audio chunk's announced rate."""
+        with self._lock:
+            if self._stream is not None:
+                return
+            self._sr = sample_rate
+            self._stream = sd.OutputStream(
+                samplerate=sample_rate, channels=1, dtype="int16",
+            )
+            self._stream.start()
+            self._thread = threading.Thread(target=self._consume, daemon=True)
+            self._thread.start()
+
+    def _consume(self) -> None:
+        # Drains the queue and writes to the stream. Each write blocks until
+        # the chunk is accepted into the OS audio buffer; that's the
+        # back-pressure mechanism that keeps memory bounded.
+        while True:
+            item = self._q.get()
+            if item is None:
+                return
+            arr = np.frombuffer(item, dtype=np.int16)
+            try:
+                self._stream.write(arr)
+            except Exception as exc:
+                print(f"  audio write failed: {exc!r}")
+                return
+
+    def push(self, pcm_bytes: bytes) -> None:
+        if self._stream is None or not pcm_bytes:
+            return
+        self._q.put(pcm_bytes)
+
+    def finish(self) -> None:
+        # Sentinel + join + close. After this returns, all pushed audio has
+        # been written to the OS buffer (but may still be playing).
+        with self._lock:
+            if self._stream is None:
+                return
+            self._q.put(None)
+            if self._thread:
+                self._thread.join(timeout=30.0)
+            try: self._stream.stop()
+            except Exception: pass
+            try: self._stream.close()
+            except Exception: pass
+            self._stream = None
+            self._thread = None
+
+
+def post_converse_stream(wav_bytes: bytes) -> dict | None:
+    """POST audio to /converse/stream; play PCM chunks through the workstation
+    speaker as they arrive; return the parsed `final` event dict (None on
+    error). Mirrors the Phase 6 flow but with /converse/stream's lower
+    perceived first-byte latency — the same shape the ESP-32 firmware will
+    use, just with I²S in place of sounddevice.
+
+    play_locally is sent as 'false' because /converse/stream NEVER plays
+    locally server-side anyway (PCM only ships via SSE) — the field is just
+    surfaced in the `ready` event for client visibility.
+    """
+    form: dict[str, str] = {"play_locally": "false"}
     if SESSION_ID:
         form["session_id"] = SESSION_ID
+
+    player = _StreamingPlayer()
+    final_event: dict | None = None
+    transcript_seen = False
+
     try:
         r = requests.post(
-            f"{BASE}/converse",
+            f"{BASE}/converse/stream",
             files={"audio": ("user.wav", wav_bytes, "audio/wav")},
             data=form,
             headers=_auth_headers(),
+            stream=True,
             timeout=180,
         )
     except requests.exceptions.RequestException as exc:
         print(f"  request failed: {exc}")
         return None
+
     if r.status_code != 200:
         try: err = r.json().get("error", r.text)
         except Exception: err = r.text
         print(f"  server {r.status_code}: {err}")
         return None
-    return r.json()
+
+    cur_event: str | None = None
+    cur_data: str | None = None
+    try:
+        for raw in r.iter_lines(decode_unicode=False):
+            line = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            if line == "":
+                if cur_event and cur_data is not None:
+                    try:
+                        data = json.loads(cur_data)
+                    except json.JSONDecodeError:
+                        cur_event = cur_data = None
+                        continue
+                    if cur_event == "transcript" and not transcript_seen:
+                        transcript_seen = True
+                        print(f"  you said: {data.get('transcript', '')!r}")
+                    elif cur_event == "route":
+                        tag = " (auto-escalated)" if data.get("auto_escalated") else ""
+                        print(f"  route={data.get('route')} model={data.get('model')}{tag}")
+                    elif cur_event == "tool_call":
+                        print(f"  tool_call: {data.get('name')}({data.get('input', {})})")
+                    elif cur_event == "tool_result":
+                        print(f"  tool_result: {data.get('name')} "
+                              f"({data.get('output_chars')}ch / {data.get('latency_s', 0):.2f}s)")
+                    elif cur_event == "audio":
+                        sr = int(data["sample_rate"])
+                        pcm = base64.b64decode(data["pcm_b64"])
+                        player.start(sr)
+                        player.push(pcm)
+                    elif cur_event == "final":
+                        final_event = data
+                    elif cur_event == "error":
+                        print(f"  server error: {data.get('error')}")
+                cur_event = cur_data = None
+                continue
+            if line.startswith("event: "):
+                cur_event = line[len("event: "):]
+            elif line.startswith("data: "):
+                cur_data = line[len("data: "):]
+    finally:
+        # Wait for the audio queue to drain through OS buffer before we move
+        # on. Without this the next "Listening for hey jarvis..." print
+        # would race ahead of the assistant's last syllable.
+        player.finish()
+        # Belt-and-suspenders: wait for the OS audio buffer to actually
+        # finish playing what we wrote. sd.wait() blocks on the default
+        # stream — works because we used the default device.
+        try: sd.wait()
+        except Exception: pass
+
+    return final_event
 
 
 # ---------------------------------------------------------------------------
@@ -417,9 +555,9 @@ def main() -> int:
                 continue
 
             wav = _pcm_to_wav_bytes(audio, rec_sr)
-            print(f"  sending {len(wav)/1024:.0f} KB to /converse...")
+            print(f"  sending {len(wav)/1024:.0f} KB to /converse/stream...")
             t0 = time.perf_counter()
-            d = post_converse(wav)
+            d = post_converse_stream(wav)
             wall = time.perf_counter() - t0
             if d is None:
                 # Server / network error. Bail out so we don't spam the
@@ -429,12 +567,13 @@ def main() -> int:
                 break
 
             t = d.get("timings", {})
-            print(f"  you said: {d.get('transcript', '')!r}")
+            # transcript was printed live during the stream; reply text is
+            # only complete once `final` arrives, so it goes here.
             print(f"  reply:    {d.get('reply_text', '')}")
-            print(f"  route={d.get('route')} model={d.get('model')} "
-                  f"stt={t.get('stt', 0):.2f} llm={t.get('llm', 0):.2f} "
+            print(f"  stt={t.get('stt', 0):.2f} llm={t.get('llm', 0):.2f} "
                   f"tts={t.get('tts', 0):.2f} total={t.get('total', 0):.2f} "
-                  f"http={wall:.2f}")
+                  f"http={wall:.2f}  audio_dur={d.get('audio_duration_s', 0):.2f}s "
+                  f"in/out={d.get('llm_tokens', {}).get('input')}/{d.get('llm_tokens', {}).get('output')}")
             if "session_file" in d:
                 print(f"  session:  {d['session_file']}")
             print()
