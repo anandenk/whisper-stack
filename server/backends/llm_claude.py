@@ -28,15 +28,22 @@ class ClaudeLLM:
         return self._loaded
 
     def chat(self, message: str, max_tokens: int = 1024,
-             system_prompt: str | None = None) -> dict:
+             system_prompt: str | None = None,
+             history: list[dict] | None = None) -> dict:
         client = self._get_client()
         t0 = time.perf_counter()
+        # Anthropic expects messages to alternate user/assistant and end on
+        # a user turn. `history` is already alternating; appending the new
+        # user message preserves that.
+        messages: list[dict] = list(history) if history else []
+        messages.append({"role": "user", "content": message})
         kwargs: dict = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": message}],
+            "messages": messages,
         }
         if system_prompt:
+            # Anthropic puts the system prompt at top-level, not in messages.
             kwargs["system"] = system_prompt
         msg = client.messages.create(**kwargs)
         elapsed = time.perf_counter() - t0

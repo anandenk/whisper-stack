@@ -41,6 +41,7 @@ OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "alloy")
 # Use 127.0.0.1 not 'localhost' on Windows — DNS/IPv6 fallback adds ~2s per request.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_GENERATE_URL = f"{OLLAMA_HOST}/api/generate"
+OLLAMA_CHAT_URL = f"{OLLAMA_HOST}/api/chat"
 OLLAMA_EMBED_URL = f"{OLLAMA_HOST}/api/embed"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b-instruct-q5_K_M")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")

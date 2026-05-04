@@ -35,11 +35,18 @@ class STT(Protocol):
 
 class LLM(Protocol):
     def chat(self, message: str, max_tokens: int = 1024,
-             system_prompt: str | None = None) -> dict:
+             system_prompt: str | None = None,
+             history: list[dict] | None = None) -> dict:
         """Returns {reply, model, latency_s, input_tokens, output_tokens, stop_reason}.
 
         `tps` (tokens-per-second) is optional — present when the backend
         reports it (Ollama does), absent otherwise (Anthropic does not).
+
+        `history` is a chronological list of {role, content} dicts representing
+        prior turns (NOT including the current user `message`). When None or
+        empty, behaves identically to a stateless one-shot. Both backends
+        pass-through the same shape — Anthropic's messages array and Ollama's
+        /api/chat both accept it natively.
         """
         ...
 
