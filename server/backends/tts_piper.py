@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from piper import PiperVoice
+from piper import PiperVoice, SynthesisConfig
 
 from server import config
 
@@ -18,13 +18,18 @@ class PiperTTS:
             PiperTTS._voice = PiperVoice.load(str(config.PIPER_MODEL_PATH))
         return PiperTTS._voice
 
+    def _syn_config(self) -> SynthesisConfig:
+        # Built fresh per call so a hot-reloaded config takes effect on the
+        # next synth without a process restart.
+        return SynthesisConfig(length_scale=config.PIPER_LENGTH_SCALE)
+
     def is_loaded(self) -> bool:
         return PiperTTS._voice is not None
 
     def synth(self, text: str) -> tuple[bytes, int]:
         """Synthesize text. Returns (raw int16 PCM mono bytes, sample_rate_hz)."""
         voice = self._get_voice()
-        chunks = list(voice.synthesize(text))
+        chunks = list(voice.synthesize(text, syn_config=self._syn_config()))
         if not chunks:
             return b"", voice.config.sample_rate
         raw = b"".join(c.audio_int16_bytes for c in chunks)

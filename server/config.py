@@ -65,6 +65,10 @@ WARMUP_AUDIO = REPO_ROOT / "samples" / "jfk.wav"
 PIPER_MODELS_DIR = REPO_ROOT / "models" / "piper"
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-amy-medium")
 PIPER_MODEL_PATH = PIPER_MODELS_DIR / f"{PIPER_VOICE}.onnx"
+# Speech rate. Lower = faster. Default 0.85 is ~15% faster than 1.0; still
+# natural. Voice-agent UX feels noticeably snappier with this set.
+# Below ~0.75 starts to sound rushed; above ~1.1 starts to sound sleepy.
+PIPER_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.85"))
 
 # /converse caps reply length so a chatty LLM doesn't turn into 30s of audio.
 # Voice replies should be short (1-2 sentences). Tune via env if needed.
