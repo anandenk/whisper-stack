@@ -64,6 +64,14 @@
     <input id="sessionId" type="text" placeholder="optional — leave blank for stateless" autocomplete="off">
   </div>
 
+  <div class="row">
+    <label style="min-width: 5em;">VAD:</label>
+    <label style="flex:1;display:flex;align-items:center;gap:.5em;cursor:pointer;">
+      <input id="vadEnabled" type="checkbox" checked>
+      <span style="color:#8b949e;font-size:.85rem;">Auto-stop after silence (manual tap still works)</span>
+    </label>
+  </div>
+
   <button id="rec" class="rec">Tap to talk</button>
   <div id="status" class="status">Ready.</div>
 
@@ -90,6 +98,7 @@ const metaEl = document.getElementById('meta');
 const toolsEl = document.getElementById('tools');
 const apiKeyInput = document.getElementById('apiKey');
 const sessionInput = document.getElementById('sessionId');
+const vadCheckbox = document.getElementById('vadEnabled');
 const sessionPanel = document.getElementById('sessionPanel');
 const sessionFileEl = document.getElementById('sessionFile');
 
@@ -99,6 +108,21 @@ apiKeyInput.addEventListener('change', () => localStorage.setItem('apiKey', apiK
 sessionInput.value = localStorage.getItem('sessionId') || '';
 sessionInput.addEventListener('change', () => localStorage.setItem('sessionId', sessionInput.value.trim()));
 
+// VAD toggle persists across sessions; defaults to on.
+const _vadStored = localStorage.getItem('vadEnabled');
+vadCheckbox.checked = _vadStored === null ? true : (_vadStored === '1');
+vadCheckbox.addEventListener('change', () => {
+  localStorage.setItem('vadEnabled', vadCheckbox.checked ? '1' : '0');
+});
+
+// VAD tuning constants — tweak here if speech is being clipped or background
+// noise auto-stops too eagerly. Threshold is in Uint8 deviation-from-center
+// units returned by AnalyserNode.getByteTimeDomainData (0..128). Quiet rooms
+// floor at ~1-3, breathing at ~3-5, normal speech at 20+. SILENCE_MS is the
+// dwell time below threshold (after speech has started) before auto-stop.
+const VAD_PEAK_THRESHOLD = 6;
+const VAD_SILENCE_MS = 1500;
+
 let mediaRecorder = null;
 let recChunks = [];
 let mediaStream = null;
@@ -107,6 +131,11 @@ let audioCtx = null;          // Lazily created on first user gesture
 let nextPlayTime = 0;         // audioCtx.currentTime when the next PCM chunk should start
 let activeSources = [];       // Currently scheduled BufferSources, so we can stop them on abort
 let speaking = false;         // Tracks whether at least one audio chunk has been queued
+let vadAnalyser = null;       // AnalyserNode reading the mic stream while recording
+let vadMicSource = null;      // MediaStreamAudioSourceNode wrapping the recording stream
+let vadRafHandle = 0;         // requestAnimationFrame handle for the silence-watch loop
+let vadSpeechStarted = false; // True once peak crosses VAD_PEAK_THRESHOLD this turn
+let vadSilenceStartMs = 0;    // performance.now() when continuous silence started (0 = not silent)
 
 function ensureAudioCtx() {
   // AudioContext creation/resume must follow a user gesture — recBtn click qualifies.
@@ -206,11 +235,76 @@ async function startRecording() {
   mediaRecorder.start();
   recBtn.classList.add('recording');
   recBtn.textContent = 'Tap to send';
-  statusEl.textContent = 'Recording… speak then tap again.';
+  if (vadCheckbox.checked) {
+    startVad();
+    statusEl.textContent = 'Recording… auto-stops on silence (or tap to send).';
+  } else {
+    statusEl.textContent = 'Recording… speak then tap again.';
+  }
   return true;
 }
 
+function startVad() {
+  // Wire a MediaStreamAudioSource -> AnalyserNode (NOT connected to destination,
+  // so the mic isn't echoed). Read peak amplitude per frame; once speech has
+  // crossed the threshold at least once, dwell-time below threshold counts
+  // toward auto-stop. The "speech started" gate keeps the timer from firing
+  // before the user has actually spoken.
+  if (!audioCtx || !mediaStream) return;
+  vadSpeechStarted = false;
+  vadSilenceStartMs = 0;
+  try {
+    vadMicSource = audioCtx.createMediaStreamSource(mediaStream);
+    vadAnalyser = audioCtx.createAnalyser();
+    vadAnalyser.fftSize = 1024;
+    vadMicSource.connect(vadAnalyser);
+  } catch (err) {
+    console.warn('VAD setup failed; continuing in manual-only mode:', err);
+    return;
+  }
+  const buf = new Uint8Array(vadAnalyser.fftSize);
+  const tick = () => {
+    if (!vadAnalyser || !mediaRecorder || mediaRecorder.state !== 'recording') return;
+    vadAnalyser.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const dev = buf[i] >= 128 ? buf[i] - 128 : 128 - buf[i];
+      if (dev > peak) peak = dev;
+    }
+    const now = performance.now();
+    if (peak >= VAD_PEAK_THRESHOLD) {
+      vadSpeechStarted = true;
+      vadSilenceStartMs = 0;
+    } else if (vadSpeechStarted) {
+      if (vadSilenceStartMs === 0) {
+        vadSilenceStartMs = now;
+      } else if (now - vadSilenceStartMs > VAD_SILENCE_MS) {
+        // Auto-fire stop. The same path the manual tap takes.
+        stopRecording();
+        return;
+      }
+    }
+    vadRafHandle = requestAnimationFrame(tick);
+  };
+  vadRafHandle = requestAnimationFrame(tick);
+}
+
+function stopVad() {
+  if (vadRafHandle) {
+    cancelAnimationFrame(vadRafHandle);
+    vadRafHandle = 0;
+  }
+  if (vadMicSource) {
+    try { vadMicSource.disconnect(); } catch {}
+    vadMicSource = null;
+  }
+  vadAnalyser = null;
+  vadSpeechStarted = false;
+  vadSilenceStartMs = 0;
+}
+
 function stopRecording() {
+  stopVad();
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
