@@ -25,8 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server import router
-from server.backends.embed_ollama import OllamaEmbedder
+from server import config, modes, router
 
 # (query, expected_route)  -- TODO: re-label borderline group to taste
 FIXTURE: list[tuple[str, str]] = [
@@ -84,9 +83,13 @@ def confusion(pairs: list[tuple[str, str]]) -> dict:
 
 
 def main() -> int:
-    print(f"Warming router (loads {router.config.EMBED_MODEL} into Ollama, embeds {len(router.SIMPLE_EXAMPLES) + len(router.COMPLEX_EXAMPLES)} examples)...")
+    embedder = modes.get_embedder()
+    embedder_label = type(embedder).__name__
+    n_examples = len(router.SIMPLE_EXAMPLES) + len(router.COMPLEX_EXAMPLES)
+    print(f"MODE={config.MODE}  embedder={embedder_label}")
+    print(f"Warming router (embeds {n_examples} examples)...")
     t0 = time.perf_counter()
-    router.attach_embedder(OllamaEmbedder())
+    router.attach_embedder(embedder)
     router.warmup()
     print(f"Warmup done in {time.perf_counter() - t0:.2f}s\n")
 
@@ -136,15 +139,19 @@ def main() -> int:
             print(f"  margin {m:.2f}: (no disagreements)")
     print()
 
-    # VRAM residency check — both Llama and nomic-embed-text should be hot
-    print("ollama ps (should list both Llama AND nomic-embed-text if both stay resident):")
-    try:
-        out = subprocess.check_output(["ollama", "ps"], text=True)
-        print(out)
-    except Exception as exc:
-        print(f"  could not run ollama ps: {exc!r}")
+    # VRAM residency check — local mode only (Ollama). Cloud-mode embedder is
+    # in-process, so VRAM/process inspection isn't meaningful here.
+    if config.MODE == "local":
+        print("ollama ps (should list both Llama AND nomic-embed-text if both stay resident):")
+        try:
+            out = subprocess.check_output(["ollama", "ps"], text=True)
+            print(out)
+        except Exception as exc:
+            print(f"  could not run ollama ps: {exc!r}")
 
-    print("Done. Pick a margin, set ROUTER_MARGIN_S in .env (or accept the default 0.05).")
+    print(f"Done. Pick a margin for MODE={config.MODE}, set ROUTER_MARGIN_S in .env "
+          f"(or accept the default 0.05). Score scales differ between embedders, "
+          f"so the optimal margin is per-mode.")
     return 0
 
 

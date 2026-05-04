@@ -23,4 +23,4 @@ sounddevice
 # Phase 7 — OpenAI tts-1 TTS (PCM)
 # openai
 # Phase 8 — sentence-transformers MiniLM-L6 embedder (pulls torch CPU ~250 MB)
-# sentence-transformers
+sentence-transformers

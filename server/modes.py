@@ -63,7 +63,5 @@ def get_embedder() -> Embedder:
     if config.MODE == "local":
         from server.backends.embed_ollama import OllamaEmbedder
         return OllamaEmbedder()
-    raise NotImplementedError(
-        "cloud embedder (sentence-transformers) not yet implemented — "
-        "Phase 8 of two-mode-plan"
-    )
+    from server.backends.embed_st import SentenceTransformerEmbedder
+    return SentenceTransformerEmbedder()

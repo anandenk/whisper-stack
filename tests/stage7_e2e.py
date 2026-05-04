@@ -49,6 +49,11 @@ def must(cond: bool, msg: str) -> None:
         sys.exit(1)
 
 
+# Per-mode expected model substring for the simple route. Complex route is
+# Sonnet in both modes ("claude" matches), simple is Llama (local) or Haiku (cloud).
+SIMPLE_MODEL_SUBSTR_BY_MODE = {"local": "llama", "cloud": "haiku"}
+
+
 def wait_for_health(timeout_s: float = 60.0) -> dict:
     deadline = time.time() + timeout_s
     last = None
@@ -86,7 +91,12 @@ def main() -> int:
     print(f"Waiting for server at {BASE}/health ...")
     h = wait_for_health()
     must(h.get("status") == "ok", f"unexpected /health: {h}")
-    print(f"  -> {h}\n")
+    server_mode = h.get("mode", "local")
+    must(server_mode in SIMPLE_MODEL_SUBSTR_BY_MODE,
+         f"unexpected /health.mode: {server_mode!r}")
+    simple_substr = SIMPLE_MODEL_SUBSTR_BY_MODE[server_mode]
+    print(f"  -> {h}")
+    print(f"  server MODE={server_mode}; simple-route model expected to contain {simple_substr!r}\n")
 
     SAMPLES_DIR.mkdir(exist_ok=True)
     print(f"Generating {len(QUERIES)} fixture audio files via Piper...")
@@ -112,9 +122,11 @@ def main() -> int:
                   "audio_sample_rate", "audio_duration_s", "timings", "router_scores"):
             must(k in d, f"missing key {k!r} in response: {list(d.keys())}")
         must(d["route"] in ("simple", "complex"), f"bad route: {d['route']!r}")
-        # model name should match the route taken
+        # model name should match the route taken (per-mode for simple route)
         if d["route"] == "simple":
-            must("llama" in d["model"].lower(), f"simple route but model={d['model']!r}")
+            must(simple_substr in d["model"].lower(),
+                 f"simple route but model={d['model']!r} (MODE={server_mode}, "
+                 f"expected substring {simple_substr!r})")
         else:
             must("claude" in d["model"].lower(), f"complex route but model={d['model']!r}")
         # audio_base64 should be non-empty + decode successfully
