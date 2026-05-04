@@ -27,6 +27,36 @@ Full plan with all 7 stages: see [plan.md](plan.md).
 
 Each stage leaves a re-runnable smoke test in `tests/`.
 
+## MODE: local vs cloud
+
+The server picks one backend set at process boot via the `MODE` env var
+(default `local`). One process = one mode; no runtime switching.
+
+| | `MODE=local` (workstation) | `MODE=cloud` (VPS) |
+|---|---|---|
+| STT | faster-whisper (GPU) | Deepgram nova-3 *(Phase 5 — pending)* |
+| Simple LLM | Ollama Llama 3.1 8B | Claude Haiku 4.5 |
+| Complex LLM | Claude Sonnet 4.6 | Claude Sonnet 4.6 |
+| TTS | Piper (local synth + sounddevice play) | OpenAI tts-1 (PCM, no local play) *(Phase 7 — pending)* |
+| Router embedder | Ollama nomic-embed-text | sentence-transformers MiniLM-L6-v2 |
+| Audio playback | yes (system default output) | no-op (server has no audio device) |
+
+The factory in [server/modes.py](server/modes.py) returns the right
+backend per call — `modes.get_stt()`, `modes.get_llm("simple"|"complex")`,
+`modes.get_tts()`, `modes.get_embedder()`. Backend imports live INSIDE the
+factory branches so cloud-mode boot doesn't pay the faster-whisper DLL
+bootstrap and local-mode boot doesn't pay the ~250 MB torch import.
+
+Cloud-only branches that aren't wired yet raise `NotImplementedError`
+naming the phase that adds them. See [notes/two-mode-plan.md](notes/two-mode-plan.md)
+for the full plan.
+
+`/health` reports `mode` so clients can confirm what they're talking to.
+
+Local-mode install uses the existing setup. Cloud-mode install uses
+[requirements-cloud.txt](requirements-cloud.txt) — slim, no GPU, no Piper,
+no faster-whisper.
+
 ## Stage gates
 
 Hard stop at the end of every stage to check in with the user. Do not progress autonomously between stages — push back on bad assumptions before moving on.
