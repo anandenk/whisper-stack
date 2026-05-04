@@ -21,6 +21,7 @@ from flask import Flask, Response, jsonify, request
 
 from server import audio, audio_out, config, markdown, modes, router, titler
 from server.sessions import Session, SessionStore
+from server.tools import all_tools
 
 # HTTP-facing stream IDs are stricter than the SessionStore's filesystem-safety
 # check. Conservative charset: alphanumeric, underscore, dash, 1-64 chars. Keeps
@@ -174,6 +175,16 @@ def chat():
         route = force_route if force_route is not None else decision["route"]
         force_routed = force_route is not None
 
+        # Auto-escalate "tool-likely" simple queries to complex. Keeps users
+        # from getting a "my training cutoff" answer when a tool could have
+        # served the real-time question. force_route="simple" overrides this
+        # — explicit user intent wins.
+        auto_escalated = False
+        if (not force_routed) and route == "simple" and router.is_tool_likely(message):
+            route = "complex"
+            auto_escalated = True
+        decision["auto_escalated"] = auto_escalated
+
         # If a session_id is present, load the active session and feed its
         # recent window as `history` to the LLM. Then append this new turn.
         # Absent session_id = fully stateless (existing behavior).
@@ -184,7 +195,12 @@ def chat():
             window = session.recent_window(config.SESSION_WINDOW_TURNS)
             history = [m for turn in window for m in turn.to_message_pair()]
 
-        llm_result = modes.get_llm(route).chat(message, history=history)
+        # Tools list — empty if none registered. all_tools() is the public
+        # registry from server.tools; tools self-register at import time
+        # (search.py only when TAVILY_API_KEY is set).
+        tools = all_tools() or None
+
+        llm_result = modes.get_llm(route).chat(message, history=history, tools=tools)
 
         if session is not None:
             session.append_turn(
@@ -205,6 +221,7 @@ def chat():
         **llm_result,
         "route": route,
         "force_routed": force_routed,
+        "auto_escalated": decision.get("auto_escalated", False),
         "router_latency_s": decision["latency_s"],
         "router_scores": {
             "simple": decision["score_simple"],

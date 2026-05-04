@@ -61,6 +61,42 @@ COMPLEX_EXAMPLES: list[str] = [
     "Write me a poem in the style of Robert Frost about climate change.",
 ]
 
+# "Tool-likely" keyword set. When a query that the embedding router classifies
+# as `simple` contains any of these substrings, the route handler in app.py
+# auto-escalates to `complex` (Sonnet) — Llama 3.1 8B's tool calling is
+# unreliable, and we'd rather pay a fraction of a cent extra on Sonnet than
+# have the assistant answer "I don't know" from training data when a tool
+# could have answered correctly. List is intentionally small; the embedding
+# router is the primary mechanism. Adjust as patterns emerge.
+TOOL_LIKELY_KEYWORDS: frozenset[str] = frozenset({
+    # current-state lookups
+    "weather", "temperature", "forecast",
+    "news", "headlines", "today", "yesterday", "tomorrow",
+    "current", "latest", "right now", "currently",
+    # explicit search asks
+    "search", "look up", "find out", "google",
+    # time / location lookups
+    "time in", "what time", "what's the time",
+    # money / market
+    "stock", "price of", "exchange rate",
+    # sports / live events
+    "score", "scores", "who won",
+})
+
+
+def is_tool_likely(query: str) -> bool:
+    """Heuristic: does the query smell like it needs a real-time tool?
+
+    Used by the route handler to auto-escalate `simple` -> `complex` when
+    a simple-route query is asking about something time-sensitive. The
+    keyword list is small on purpose — false positives just spend a
+    fraction of a cent extra on Sonnet, false negatives leave the user
+    with a "my training cutoff" answer.
+    """
+    q = query.lower()
+    return any(kw in q for kw in TOOL_LIKELY_KEYWORDS)
+
+
 _embedder: Embedder | None = None
 _simple_vecs: np.ndarray | None = None  # (n, dim), L2-normalized
 _complex_vecs: np.ndarray | None = None
