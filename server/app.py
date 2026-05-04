@@ -19,8 +19,8 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request
 
-from server import audio, audio_out, config, markdown, modes, router
-from server.sessions import SessionStore
+from server import audio, audio_out, config, markdown, modes, router, titler
+from server.sessions import Session, SessionStore
 
 # HTTP-facing stream IDs are stricter than the SessionStore's filesystem-safety
 # check. Conservative charset: alphanumeric, underscore, dash, 1-64 chars. Keeps
@@ -34,6 +34,30 @@ def _session_store() -> SessionStore:
         config.SESSION_DIR,
         idle_timeout=timedelta(minutes=config.SESSION_IDLE_TIMEOUT_MIN),
     )
+
+
+def _maybe_autotitle(session: Session, user_text: str, reply_text: str) -> None:
+    """Fire the titler if this session has exactly one turn and no title yet.
+
+    Synchronous on purpose — titling is a single fast Haiku call (~400-700ms)
+    and waiting for it inside the route handler keeps the rename atomic
+    relative to the user's next request. Failures inside titler.title_for_turn
+    are already swallowed; this wrapper additionally guards against any
+    bug in the storage layer (set_title is also fault-tolerant on rename
+    failure).
+    """
+    if session.title is not None:
+        return
+    if len(session.all_turns()) != 1:
+        return
+    title = titler.title_for_turn(user_text, reply_text)
+    if not title:
+        return
+    try:
+        session.set_title(title)
+    except Exception:
+        # Don't let a cosmetic rename take down the route response.
+        pass
 
 
 def _validated_session_id(raw) -> tuple[str | None, str | None]:
@@ -172,6 +196,7 @@ def chat():
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
             )
+            _maybe_autotitle(session, message, llm_result["reply"])
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"chat failed: {exc!r}"}), 500
@@ -293,6 +318,7 @@ def converse():
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
             )
+            _maybe_autotitle(session, transcript, reply_text)
 
         speakable_text = markdown.to_speakable_text(reply_text)
 
