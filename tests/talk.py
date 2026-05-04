@@ -1,8 +1,15 @@
 """Push-to-talk client for the voice AI server.
 
-UX: press Enter to start recording, speak, press Enter again to send.
-The reply text prints to this terminal; the reply audio plays automatically
-through the server's default output device. Ctrl+C to quit.
+UX: press Enter to start recording, speak. With VAD enabled (the default),
+recording auto-stops after 1.5s of silence — no second Enter needed.
+Pressing Enter still works as an immediate manual send. The reply text
+prints to this terminal; the reply audio plays automatically through the
+server's default output device. Ctrl+C to quit.
+
+Tune VAD via env: VOICE_AI_VAD=0 disables it (back to manual-only),
+VAD_PEAK_THRESHOLD=N sets the int16-abs threshold below which the mic
+is considered silent (default 600), VAD_SILENCE_MS=N sets the dwell
+time in milliseconds (default 1500).
 
 Requires the server to be running:
     python -m server.app
@@ -15,6 +22,7 @@ from __future__ import annotations
 
 import io
 import os
+import queue
 import sys
 import threading
 import time
@@ -36,6 +44,14 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 SESSION_ID = os.environ.get("VOICE_AI_SESSION_ID", "").strip()
 LAST_RECORDING_PATH = Path(__file__).resolve().parent.parent / "samples" / "_last_recording.wav"
 QUIET_PEAK_THRESHOLD = 500  # int16 abs max; below this, mic is effectively silent
+
+# VAD knobs. Threshold is in int16 abs space (0..32767). Quiet rooms floor
+# around 100-200, breathing around 200-400, normal speech 1500+. 600 ignores
+# breathing without clipping quiet talkers. Silence dwell time of 1500ms
+# matches the web client default (4A).
+VAD_ENABLED = os.environ.get("VOICE_AI_VAD", "1").strip() not in ("0", "false", "False", "")
+VAD_PEAK_THRESHOLD = int(os.environ.get("VAD_PEAK_THRESHOLD", "600"))
+VAD_SILENCE_MS = int(os.environ.get("VAD_SILENCE_MS", "1500"))
 
 
 def find_input_config() -> tuple[int, int]:
@@ -72,35 +88,111 @@ def find_input_config() -> tuple[int, int]:
     )
 
 
-def record_until_enter(sr: int, channels: int) -> np.ndarray:
-    """Stream from default mic until user presses Enter. Returns int16 mono PCM."""
+# Single owner of stdin. Multiple parts of the loop need to "wait for Enter"
+# (the start prompt, plus the in-recording manual-override). If each one spawned
+# its own input() thread, leftover daemons from VAD-aborted recordings would
+# race the next prompt for the same stdin newline and randomly eat user input.
+# A persistent reader thread routes every line through this queue; callers
+# block on the queue (at the start prompt) or poll it with a timeout (during
+# recording).
+_stdin_q: "queue.Queue[str | None]" = queue.Queue()
+_stdin_thread_started = False
+
+
+def _ensure_stdin_thread() -> None:
+    global _stdin_thread_started
+    if _stdin_thread_started:
+        return
+    _stdin_thread_started = True
+
+    def reader() -> None:
+        while True:
+            try:
+                line = input()
+            except (KeyboardInterrupt, EOFError):
+                _stdin_q.put(None)
+                return
+            _stdin_q.put(line)
+
+    threading.Thread(target=reader, daemon=True).start()
+
+
+def _wait_enter() -> None:
+    """Block forever until the user presses Enter (or the reader sees EOF/^C)."""
+    line = _stdin_q.get()
+    if line is None:
+        raise KeyboardInterrupt()
+
+
+def _poll_enter(timeout_s: float) -> bool:
+    """Returns True if Enter arrived within timeout_s; False otherwise."""
+    try:
+        line = _stdin_q.get(timeout=timeout_s)
+    except queue.Empty:
+        return False
+    if line is None:
+        raise KeyboardInterrupt()
+    return True
+
+
+def record_until_stop(sr: int, channels: int,
+                      vad: bool = True) -> tuple[np.ndarray, str]:
+    """Stream from the default mic until either the user presses Enter or
+    VAD detects silence-after-speech. Returns (int16 mono PCM, stop_reason).
+
+    stop_reason is one of:
+      - "manual"  user pressed Enter (always available, even with VAD on)
+      - "vad"     VAD silence-after-speech timeout fired
+
+    VAD state machine inside audio_cb:
+      Before first peak >= VAD_PEAK_THRESHOLD: ignore silence (don't auto-stop;
+      otherwise the timer fires before the user has spoken).
+      After speech detected: track most-recent voice frame; if elapsed since
+      that frame exceeds VAD_SILENCE_MS, set the stop event with reason="vad".
+
+    audio_cb runs in a sounddevice driver thread. The main thread polls the
+    stdin queue with a short timeout so it can exit promptly when audio_cb
+    sets the stop event.
+    """
+    _ensure_stdin_thread()
     chunks: list[np.ndarray] = []
     stop = threading.Event()
+    stop_reason = ["manual"]  # mutable container so audio_cb can write through
+
+    speech_started = [False]
+    last_voice_t = [0.0]
 
     def audio_cb(indata, frames, time_info, status):
         chunks.append(indata.copy())
-
-    def wait_for_enter():
-        try:
-            input()
-        except (KeyboardInterrupt, EOFError):
-            pass
-        stop.set()
-
-    threading.Thread(target=wait_for_enter, daemon=True).start()
+        if not vad or stop.is_set():
+            return
+        peak = int(np.abs(indata).max()) if indata.size else 0
+        now = time.perf_counter()
+        if peak >= VAD_PEAK_THRESHOLD:
+            speech_started[0] = True
+            last_voice_t[0] = now
+        elif speech_started[0]:
+            silent_ms = (now - last_voice_t[0]) * 1000.0
+            if silent_ms > VAD_SILENCE_MS:
+                stop_reason[0] = "vad"
+                stop.set()
 
     with sd.InputStream(samplerate=sr, channels=channels, dtype="int16", callback=audio_cb):
-        stop.wait()
+        while not stop.is_set():
+            # Poll for Enter; small timeout so we exit quickly when VAD fires.
+            if _poll_enter(0.05):
+                stop_reason[0] = "manual"
+                stop.set()
+                break
 
     if not chunks:
-        return np.array([], dtype=np.int16)
+        return np.array([], dtype=np.int16), stop_reason[0]
     audio = np.concatenate(chunks)
     if channels > 1:
-        # Downmix to mono so the server gets a single-channel WAV
         audio = audio.mean(axis=1).astype(np.int16)
     else:
         audio = audio.flatten()
-    return audio
+    return audio, stop_reason[0]
 
 
 def pcm_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
@@ -146,34 +238,52 @@ def main() -> int:
         print(f"ERROR: {exc}")
         return 2
 
+    _ensure_stdin_thread()
+
+    vad_status = (f"on (peak>{VAD_PEAK_THRESHOLD}, silence>{VAD_SILENCE_MS}ms)"
+                  if VAD_ENABLED else "off")
     print(f"Mic:    [{in_idx}] {in_name}")
     print(f"Recording: {sr} Hz, {ch} channel(s)" + ("  -> downmixed to mono" if ch > 1 else ""))
     print(f"Server: {BASE}  auth={'on' if API_KEY else 'off'}  "
           f"session={SESSION_ID or '(stateless)'}  "
           f"models={h.get('models_loaded', {})}")
+    print(f"VAD:    {vad_status}  (set VOICE_AI_VAD=0 to disable)")
     print()
     print("=" * 60)
     print("  PUSH-TO-TALK LOOP:")
     print("    1. Press Enter to START recording")
     print("    2. SPEAK your question")
-    print("    3. Press Enter again to STOP and send")
+    if VAD_ENABLED:
+        print(f"    3. Stop talking — auto-sends after {VAD_SILENCE_MS}ms silence")
+        print("       (or press Enter to send immediately)")
+    else:
+        print("    3. Press Enter again to STOP and send")
     print("  Ctrl+C to quit.")
     print("=" * 60)
     print()
 
     while True:
+        print("> Press Enter to start recording...", end="", flush=True)
         try:
-            input("> Press Enter to start recording...")
-        except (KeyboardInterrupt, EOFError):
+            _wait_enter()
+        except KeyboardInterrupt:
             print()
             return 0
+        print()
 
         print()
         print("  >>>>>>>>>>  RECORDING — SPEAK NOW  <<<<<<<<<<")
-        print("             Press Enter to send when you're done.")
+        if VAD_ENABLED:
+            print(f"             Auto-sends after {VAD_SILENCE_MS}ms silence "
+                  "(or press Enter to send now).")
+        else:
+            print("             Press Enter to send when you're done.")
         print()
         try:
-            audio = record_until_enter(sr, ch)
+            audio, stop_reason = record_until_stop(sr, ch, vad=VAD_ENABLED)
+        except KeyboardInterrupt:
+            print("\n  cancelled.\n")
+            return 0
         except Exception as exc:
             print(f"  recording failed: {exc!r}\n")
             continue
@@ -181,7 +291,8 @@ def main() -> int:
         duration = len(audio) / sr if sr > 0 else 0.0
         peak = int(np.abs(audio).max()) if audio.size else 0
         rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))) if audio.size else 0.0
-        print(f"  Captured {duration:.1f}s @ {sr} Hz.  peak={peak}/32767 ({peak/327.67:.1f}%)  rms={rms:.0f}")
+        print(f"  Captured {duration:.1f}s @ {sr} Hz.  peak={peak}/32767 ({peak/327.67:.1f}%)  "
+              f"rms={rms:.0f}  (stop={stop_reason})")
 
         if duration < 0.3:
             print("  (too short, try again)\n")
