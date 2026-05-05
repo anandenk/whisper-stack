@@ -21,5 +21,5 @@ typedef enum {
 // flip these on incrementally as wiring lands. Each subsystem's init call
 // in main.c is guarded by the matching #if.
 #define ENABLE_OLED 1   // Step 5 wires OLED + flashes this build
-#define ENABLE_MIC  0   // Step 6 enables I²S mic capture (off until soldered)
+#define ENABLE_MIC  1   // Step 6 enables I²S mic capture
 #define ENABLE_WIFI 1   // Step 7 enables WiFi STA + connects
