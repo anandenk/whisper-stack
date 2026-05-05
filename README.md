@@ -267,18 +267,18 @@ requires an `X-API-Key` header. The web page persists the key in
   (server-side openWakeWord), `?omit_audio_base64=1` on `/converse`,
   `wake_detections` counter in `/health.usage`. Smoke test at
   `tests/stage11_listen.py`.
-- **ESP-32 firmware M1 (partial)** — ESP-IDF 5.3.5 project at
+- **ESP-32 firmware M1** — ESP-IDF 5.3.5 project at
   [`firmware/`](firmware/) with the full module skeleton (main + OLED
-  + WiFi + I²S mic). OLED and WiFi verified on real hardware: 0.96"
-  SSD1306 renders text via `esp_lcd_panel_ssd1306` + a 6×8 ASCII font;
-  WiFi STA associates and `/health` is reachable from the device. Mic
-  is deferred to Step 6 unblock (soldering).
+  + WiFi + I²S mic). All three subsystems verified on real hardware:
+  0.96" SSD1306 renders text via `esp_lcd_panel_ssd1306` + a 6×8
+  ASCII font; WiFi STA associates and `/health` is reachable from the
+  device; INMP441 captures audio with RMS/peak responsive to sound on
+  the OLED. Open blocker for production deployment: dorm WiFi is
+  WPA2-Enterprise (firmware currently only supports WPA2-PSK) — see
+  the open-blockers note in [CLAUDE.md](CLAUDE.md) and
+  [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
 
 ### Planned but not shipped
-- **ESP-WROOM-32 firmware M1 mic capture** — INMP441 wiring + RMS
-  smoke test. Code is written and gated on `ENABLE_MIC` in
-  `firmware/main/app_state.h`; blocked on physical soldering of the
-  6-pin breakout. See [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
 - **ESP-WROOM-32 firmware M2-M6** — button + `/converse` round-trip,
   VAD-bounded recording, server-side wake via `/listen` client,
   continuous mode, OLED polish — see

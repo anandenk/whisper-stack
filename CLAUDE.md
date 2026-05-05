@@ -136,17 +136,19 @@ server/
 plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
 requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
-firmware/                    ESP-IDF v5.3.5 project (M1 OLED+WiFi shipped, mic deferred)
+firmware/                    ESP-IDF v5.3.5 project (M1 shipped, M2 pending)
 └── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h + app_state.h
 ```
 
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). State at M1 partial-green: the OLED renders status
-text and WiFi STA gets a DHCP lease; mic capture is code-complete but
-gated on `ENABLE_MIC` in `firmware/main/app_state.h` because the user's
-INMP441 breakout came with loose headers and needs soldering.
+classic, NOT s3). **M1 fully shipped** (workstation session 2026-05-06):
+OLED renders status text, WiFi STA gets a DHCP lease and is reachable
+via ping, INMP441 captures audio with RMS/peak responsive to sound.
+All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI` in
+`firmware/main/app_state.h`) are flipped on. Next milestone is M2
+(button + `POST /converse` round-trip).
 
 ### Build environment quirk (Windows)
 

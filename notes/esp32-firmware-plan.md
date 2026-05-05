@@ -347,11 +347,10 @@ each milestone builds on the previous board state.
 
 ### Milestone 1 — Bring-up
 
-**Status:** ⚠️ **partial-shipped (workstation session 2026-05-05)** —
-OLED + WiFi green on real hardware; mic deferred behind a soldering
-blocker. The firmware skeleton at [`firmware/`](../firmware/) is
-complete; flipping `ENABLE_MIC=1` in `app_state.h` after wiring the
-mic finishes M1.
+**Status:** ✅ **fully shipped (workstation session 2026-05-06)** —
+all three subsystems green on real hardware. The firmware at
+[`firmware/`](../firmware/) is complete with `ENABLE_OLED` /
+`ENABLE_MIC` / `ENABLE_WIFI` all set to 1 in `app_state.h`.
 
 **Goal:** the board can capture mic, drive the display, and connect to WiFi.
 
@@ -365,16 +364,20 @@ mic finishes M1.
 - ✅ WiFi STA, creds via `Kconfig.projbuild` (CONFIG_WS_WIFI_SSID /
   CONFIG_WS_WIFI_PASS in `sdkconfig`, NOT `sdkconfig.defaults`).
   Hardcoded server IP via CONFIG_WS_SERVER_HOST. mDNS deferred.
-- ⏸️ I²S0 capture from INMP441 — code complete (`i2s_mic.c` with
-  `driver/i2s_std.h`, 32→16 bit shift via `>> 16`), gated on
-  `ENABLE_MIC` in `app_state.h`. Awaits the user's circular INMP441
-  breakout being soldered (came with loose headers).
+  Currently WPA2-PSK only — dorm WPA2-Enterprise blocker tracked
+  under "Open blockers" above; bench-verified on iPhone hotspot.
+- ✅ I²S0 capture from INMP441 — code complete (`i2s_mic.c` with
+  `driver/i2s_std.h`, 32→16 bit shift via `>> 16`). Soldered with
+  2x 3-pin header segments into the breakout's 3+3 hole layout,
+  L/R tied to GND for mono left-channel slot. Idle RMS ~40 / peak
+  ~100, snap response peak ~1000+ on real hardware.
 
 **Verification:**
 - ✅ OLED shows "ready" + IP address.
-- ⏸️ Serial log prints non-zero mic RMS when you snap your fingers near
-  the board (deferred to mic-wiring stage).
-- ✅ Workstation `ping <esp32-ip>` succeeds at LAN RTT.
+- ✅ Serial log + OLED lines 5/6 print mic RMS that responds to sound
+  (snap your fingers near the board → peak spikes from ~100 to ~1000+).
+- ✅ Workstation `ping <esp32-ip>` succeeds at LAN RTT (verified on
+  iPhone hotspot 172.20.10.0/28).
 
 ### Milestone 2 — Button + POST /converse
 
