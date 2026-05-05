@@ -193,6 +193,31 @@ defaults — wipes creds. After a fullclean, re-edit
 `CONFIG_WS_WIFI_SSID` / `CONFIG_WS_WIFI_PASS` /
 `CONFIG_WS_SERVER_HOST` / `CONFIG_WS_API_KEY` before rebuilding.
 
+### 🚧 Open blockers — investigate next session
+
+1. **Dorm WiFi (WPA2-Enterprise) doesn't work.** The user is on a
+   university network that uses 802.1X / EAP (username + password +
+   device registration), not plain WPA2-PSK. Our firmware
+   (`firmware/main/wifi.c`) is hardcoded to `WIFI_AUTH_WPA2_PSK` and
+   passes a single password via `wifi_config.sta.password`. Current
+   workaround: **iPhone personal hotspot** (standard WPA2-PSK), which
+   works but means the server LAN-IP changes per session and the
+   hotspot sleeps after ~90 s idle. To support dorm WiFi properly,
+   need to switch to `esp_wifi_sta_wpa2_ent_set_*` APIs in IDF —
+   see [esp_wifi 802.1X docs](https://docs.espressif.com/projects/esp-idf/en/v5.3/esp32/api-reference/network/esp_wifi.html).
+   Look into this **before M2** so the device is usable in the
+   actual deployment environment.
+
+2. **ELEGOO 830-tie-point breadboard has an internal mid-rail split.**
+   The colored line on each rail runs continuously edge-to-edge, BUT
+   the metal contact strip is split in half around the middle of the
+   board (~row 30). Connections on opposite halves of the same rail
+   are NOT electrically connected. Workaround: keep all rail
+   connections on the **same half** OR drop a M-M jumper across the
+   middle to bridge them. This burned us during M1 hardening — the
+   OLED dropped dark because its VCC bridge landed on the opposite
+   half from the 3V3 feed.
+
 ## TTS output device
 
 Pinned in `.env` via `TTS_OUTPUT_DEVICE` (default unset → system default).

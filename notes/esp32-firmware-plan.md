@@ -510,6 +510,20 @@ diagnose "is my mic working" with the VU bar.
 
 ## Risks and pushback
 
+### Open blockers (discovered during M1 bring-up)
+
+- **Dorm WiFi is WPA2-Enterprise (802.1X / EAP).** Our `wifi.c`
+  uses `WIFI_AUTH_WPA2_PSK` only. M1 was verified on iPhone
+  hotspot. Before M2, swap in `esp_wifi_sta_wpa2_ent_set_*` so the
+  device works in the actual deployment environment. Hotspot is a
+  bench-only fallback (172.20.10.0/28 changes per session, sleeps
+  after ~90s idle).
+
+- **ELEGOO 830-tie-point breadboard rails are split mid-board** —
+  colored line runs continuous but the contact strip splits around
+  row 30. Keep all rail connections on the same half, or bridge
+  with an extra M-M jumper. Bit us during M1 OLED re-routing.
+
 ### Real
 
 1. **Sustained TX power + thermal during continuous mic streaming.**
