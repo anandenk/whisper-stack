@@ -1,4 +1,4 @@
-# Voice AI Server
+# whisper stack
 
 A self-hosted voice assistant backend. Speak into a phone, terminal, or
 (eventually) an ESP-32 device — the server transcribes, routes the query
@@ -79,8 +79,8 @@ You'll need:
 ### Install (local mode)
 
 ```powershell
-git clone https://github.com/anandenk/voice-ai-server.git
-cd voice-ai-server
+git clone https://github.com/anandenk/whisper-stack.git
+cd whisper-stack
 
 # Create the 3.13 venv
 py -3.13 -m venv .venv

@@ -2,7 +2,7 @@
 
 ## Context
 
-The voice-ai-server is fully shipped server-side: STT + router + dual-LLM
+The whisper-stack server is fully shipped: STT + router + dual-LLM
 + streaming TTS + sessions + tool use + auto-titling + VAD + continuous +
 interrupt + wake word (in `tests/jarvis.py`). The original product goal —
 a hands-free ESP-32 + INMP441 voice device that speaks to that server —
@@ -351,7 +351,7 @@ each milestone builds on the previous board state.
 
 - ESP-IDF project scaffold (`firmware/main/`)
 - I²S0 capture from INMP441, 16 kHz, 32-bit raw → shift down to int16
-- SSD1306 over I²C with u8g2; "Hello, voice-ai" on screen
+- SSD1306 over I²C with u8g2; "Hello, whisper-stack" on screen
 - WiFi STA connect using hardcoded creds in `sdkconfig.defaults`
 - mDNS resolve (or hardcoded LAN IP if mDNS proves flaky)
 - Serial-log a 3-second mic sample's RMS so you can verify the mic is wired

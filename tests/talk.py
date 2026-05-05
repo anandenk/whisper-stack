@@ -1,4 +1,4 @@
-"""Push-to-talk client for the voice AI server.
+"""Push-to-talk client for the whisper stack.
 
 UX: press Enter to start recording, speak. With VAD enabled (the default),
 recording auto-stops after 1.5s of silence — no second Enter needed.

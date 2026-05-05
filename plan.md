@@ -1,4 +1,4 @@
-# Voice AI Server: Local-First Pipeline
+# whisper stack: Local-First Pipeline
 
 > **Sequel:** [notes/two-mode-plan.md](notes/two-mode-plan.md) — refactoring this server to support a cloud-mode deployment alongside local.
 
@@ -20,7 +20,7 @@ This plan covers only the workstation server. The ESP-32 firmware is a later, se
   - `nomic-embed-text` (274 MB) — useful for embedding-based router classification (stage 5)
 - **No ffmpeg** (will install — required for audio decoding)
 - **No CUDA toolkit** installed system-wide — fine, PyTorch/CTranslate2 ship CUDA libs via pip
-- **Empty workspace** at `C:\voice-ai-server`
+- **Empty workspace** at `C:\whisper-stack`
 
 ---
 
@@ -45,7 +45,7 @@ This plan covers only the workstation server. The ESP-32 firmware is a later, se
 ## Project layout
 
 ```
-C:\voice-ai-server\
+C:\whisper-stack\
 ├── .venv\                    # Python 3.13 virtualenv
 ├── requirements.txt          # pinned versions
 ├── .env                      # ANTHROPIC_API_KEY (gitignored)
@@ -80,7 +80,7 @@ C:\voice-ai-server\
 
 **Steps:**
 1. Install **ffmpeg** (`winget install Gyan.FFmpeg` or scoop) — required for audio decoding
-2. `py -3.13 -m venv C:\voice-ai-server\.venv` and activate
+2. `py -3.13 -m venv C:\whisper-stack\.venv` and activate
 3. `pip install faster-whisper` (if numpy/CTranslate2 ABI errors appear, retry with `pip install "numpy<2"` — recent CTranslate2 supports numpy 2.x but older builds did not)
 4. Download a small public-domain WAV (JFK clip, ~11s) into `samples\`
 5. Write `tests/stage1_whisper.py`:
@@ -122,7 +122,7 @@ C:\voice-ai-server\
 
 **Steps:**
 1. `pip install anthropic python-dotenv`
-2. You add your key to `C:\voice-ai-server\.env` as `ANTHROPIC_API_KEY=sk-ant-...` (I'll create `.env.example` as the template). You'll add credits separately at console.anthropic.com.
+2. You add your key to `C:\whisper-stack\.env` as `ANTHROPIC_API_KEY=sk-ant-...` (I'll create `.env.example` as the template). You'll add credits separately at console.anthropic.com.
 3. Write `tests/stage3_anthropic.py`:
    - Loads key from `.env`
    - Calls `claude-sonnet-4-6` (best price/perf for "complex" route — we can swap to `claude-opus-4-7` later if you want max quality)

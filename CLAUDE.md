@@ -1,4 +1,13 @@
-# Voice AI Server
+# whisper stack
+
+> **Note for any machine pulling this commit:** This project was renamed
+> from `voice-ai-server` to `whisper-stack`. The Python package
+> structure (`server/`, `tests/`) is unchanged — all imports still
+> work. To update your local checkout: rename the parent directory
+> (`mv voice-ai-server whisper-stack`), and on Windows the `.venv`
+> may need to be recreated since it embeds absolute paths. The GitHub
+> remote URL is being updated separately; if `git pull` fails with
+> "repository not found," run `git remote set-url origin <new-url>`.
 
 Workstation backend for a future ESP-32 + INMP441 voice device. Pipeline:
 **audio → STT → router → simple-LLM or complex-LLM → TTS → speaker + ESP-32 OLED**.
@@ -11,7 +20,7 @@ plan: [notes/two-mode-plan.md](notes/two-mode-plan.md).
 
 ## Environment
 
-- **Working dir:** `C:\voice-ai-server`
+- **Working dir:** `C:\whisper-stack`
 - **Venv:** `.venv` — **Python 3.13.13** (the system `python` is 3.14, which lacks ML wheels — do NOT use it)
 - **Run scripts directly via** `.venv/Scripts/python.exe tests/stageN_*.py` (or activate the venv first)
 - **GPU:** RTX 5070 Ti **Laptop**, Blackwell `sm_120`, 12 GB VRAM
