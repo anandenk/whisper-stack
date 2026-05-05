@@ -1,8 +1,10 @@
 # whisper stack
 
-A self-hosted voice assistant backend. Speak into a phone, terminal, or
-(eventually) an ESP-32 device — the server transcribes, routes the query
-to the right LLM, runs tools when needed, streams synthesized speech back.
+A self-hosted voice assistant backend. Whisper for STT, a router on top
+of two LLMs, Piper for streaming TTS — full mic-to-speaker loop on one
+machine. Speak into a phone, terminal, or (eventually) an ESP-32
+device; the server transcribes, routes the query to the right LLM,
+runs tools when needed, streams synthesized speech back.
 
 ```
 audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → audio out
@@ -220,8 +222,9 @@ CLAUDE.md                    project instructions for Claude Code agents
 | `POST /transcribe` | Multipart `audio` → `{transcript, duration_s, latency_s, model, language}` |
 | `POST /chat` | JSON `{message, session_id?, force_route?}` → routed LLM reply |
 | `POST /speak` | JSON `{text}` → synth + blocking play through default output |
-| `POST /converse` | One-shot voice round-trip; server plays reply locally when `play_locally=true`. Accepts multipart, raw `audio/l16`, or raw `audio/wav` body |
+| `POST /converse` | One-shot voice round-trip; server plays reply locally when `play_locally=true`. Accepts multipart, raw `audio/l16`, or raw `audio/wav` body. Add `?omit_audio_base64=1` to drop the WAV from the JSON response (saves ~100–200 KB per turn for clients that don't need it — used by the ESP-32 firmware) |
 | `POST /converse/stream` | SSE-streamed voice round-trip; client plays the audio. Accepts the same three Content-Types as `/converse`. The web client uses this |
+| `POST /listen` | Chunked-transfer raw int16 LE @ 16 kHz body; server runs openWakeWord and returns `{"wake": true, ...}` on detection (or `{"wake": false, "reason": "idle_timeout" \| "client_closed"}` otherwise). Used by the ESP-32 firmware in IDLE state. Requires `pip install openwakeword` + `download_models()` on the server |
 
 When `API_KEY` is set, every route except `GET /` and `GET /health`
 requires an `X-API-Key` header. The web page persists the key in
@@ -255,12 +258,19 @@ requires an `X-API-Key` header. The web page persists the key in
   streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
   see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
 
+- **ESP-32 firmware plan, M4 server-side scope** — `POST /listen`
+  (server-side openWakeWord), `?omit_audio_base64=1` on `/converse`,
+  `wake_detections` counter in `/health.usage`. Smoke test at
+  `tests/stage11_listen.py`. The firmware-side half is the next
+  thing to build — see [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
+
 ### Planned but not shipped
 - **ESP-WROOM-32 firmware** (mic + display + WiFi only — TTS plays
-  through workstation speakers; wake-word path locked to server-side
-  openWakeWord via a new `POST /listen` endpoint) — see
+  through workstation speakers; wake-word path is server-side
+  openWakeWord via the now-shipped `POST /listen`) — see
   [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md). Six
-  firmware milestones; M4 also adds the `/listen` route server-side.
+  firmware milestones; server-side scope for M4 has shipped, the
+  firmware-side scope is the remaining work.
 - **Two-mode plan phases 5, 7, 9** — Deepgram STT, OpenAI TTS, Fly.io
   deploy. Queued behind cloud-provider signups. Only relevant if you
   ever want to host the brain on a VPS instead of your workstation.
