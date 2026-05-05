@@ -1,0 +1,33 @@
+menu "Whisper Stack Device"
+
+    config WS_WIFI_SSID
+        string "WiFi SSID"
+        default "changeme"
+        help
+            SSID of the 2.4GHz network the device joins. ESP-WROOM-32
+            does not support 5GHz.
+
+    config WS_WIFI_PASS
+        string "WiFi password"
+        default "changeme"
+
+    config WS_SERVER_HOST
+        string "whisper-stack server LAN IP"
+        default "192.168.1.100"
+        help
+            IPv4 address of the workstation running `python -m server.app`.
+            mDNS resolution is deferred to a later milestone; hardcoded
+            for M1.
+
+    config WS_SERVER_PORT
+        int "whisper-stack server port"
+        default 5000
+
+    config WS_API_KEY
+        string "X-API-Key value"
+        default ""
+        help
+            Must match server's API_KEY in .env. Empty disables auth
+            (LAN-only mode).
+
+endmenu

@@ -1,0 +1,21 @@
+# sdkconfig.defaults — committed defaults; user copies this to ./sdkconfig
+# and edits the local copy with real WiFi creds + server addr (Step 7).
+
+# --- Partition table -------------------------------------------------------
+# Built-in two-OTA layout: ota_0 (1.5MB) + ota_1 (1.5MB) + nvs + otadata.
+# OTA itself isn't wired in v1 but pre-allocating slots avoids a full
+# re-flash later when OTA lands.
+CONFIG_PARTITION_TABLE_TWO_OTA=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# --- Compiler / log level --------------------------------------------------
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- App config (Kconfig.projbuild) ---------------------------------------
+# Placeholders — replaced in the local sdkconfig at Step 7.
+CONFIG_WS_WIFI_SSID="changeme"
+CONFIG_WS_WIFI_PASS="changeme"
+CONFIG_WS_SERVER_HOST="192.168.1.100"
+CONFIG_WS_SERVER_PORT=5000
+CONFIG_WS_API_KEY=""

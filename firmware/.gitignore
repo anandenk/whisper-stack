@@ -1,0 +1,17 @@
+# ESP-IDF build output
+build/
+
+# Local sdkconfig — holds WiFi password + API key, must NOT be committed.
+# The committed sdkconfig.defaults has placeholders only.
+sdkconfig
+sdkconfig.old
+
+# Component manager lock + cache
+dependencies.lock
+managed_components/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

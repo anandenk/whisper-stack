@@ -136,7 +136,62 @@ server/
 plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
 requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
+firmware/                    ESP-IDF v5.3.5 project (M1 OLED+WiFi shipped, mic deferred)
+└── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h + app_state.h
 ```
+
+## Firmware (ESP-WROOM-32)
+
+ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
+classic, NOT s3). State at M1 partial-green: the OLED renders status
+text and WiFi STA gets a DHCP lease; mic capture is code-complete but
+gated on `ENABLE_MIC` in `firmware/main/app_state.h` because the user's
+INMP441 breakout came with loose headers and needs soldering.
+
+### Build environment quirk (Windows)
+
+The Espressif installer creates a Python 3.11 venv at
+`C:\Espressif\python_env\idf5.3_py3.11_env\` regardless of the system
+Python (which on this box is 3.14). `export.ps1` does
+`python --version` to detect what Python env to expect, so a vanilla
+PowerShell with system Python 3.14 first on PATH will look for an
+`idf5.3_py3.14_env` that doesn't exist and fail with
+`No module named 'click'` / "tool ... has no installed versions".
+
+**Fix:** put the IDF Python first on PATH, or use the Start menu's
+"ESP-IDF 5.3.5 PowerShell" shortcut (which does this for you). For
+scripted invocations:
+
+```powershell
+$env:IDF_PATH = "C:\Espressif\frameworks\esp-idf-v5.3.5"
+$env:IDF_TOOLS_PATH = "C:\Espressif"
+$env:IDF_PYTHON_ENV_PATH = "C:\Espressif\python_env\idf5.3_py3.11_env"
+$env:PATH = "C:\Espressif\python_env\idf5.3_py3.11_env\Scripts;$env:PATH"
+. $env:IDF_PATH\export.ps1
+```
+
+### Build / flash / monitor
+
+```powershell
+cd C:\voice-ai-server\firmware
+idf.py build
+idf.py -p COM3 flash       # COM port from Device Manager — was COM3 on this box
+idf.py -p COM3 monitor     # interactive serial; Ctrl-T then Ctrl-X to exit
+```
+
+Subsystem toggles in `firmware/main/app_state.h`:
+`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`. Each subsystem's `_init`
+call in `main.c` is `#if`-gated; the .c files always compile but
+unreferenced functions get `--gc-sections`-removed at link time.
+
+### sdkconfig fragility
+
+`firmware/sdkconfig` (gitignored) holds the WiFi creds + server IP +
+API key. `firmware/sdkconfig.defaults` (committed) has placeholders
+only. **`idf.py fullclean` deletes `sdkconfig`** and regenerates from
+defaults — wipes creds. After a fullclean, re-edit
+`CONFIG_WS_WIFI_SSID` / `CONFIG_WS_WIFI_PASS` /
+`CONFIG_WS_SERVER_HOST` / `CONFIG_WS_API_KEY` before rebuilding.
 
 ## TTS output device
 

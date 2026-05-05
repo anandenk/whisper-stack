@@ -347,17 +347,34 @@ each milestone builds on the previous board state.
 
 ### Milestone 1 — Bring-up
 
+**Status:** ⚠️ **partial-shipped (workstation session 2026-05-05)** —
+OLED + WiFi green on real hardware; mic deferred behind a soldering
+blocker. The firmware skeleton at [`firmware/`](../firmware/) is
+complete; flipping `ENABLE_MIC=1` in `app_state.h` after wiring the
+mic finishes M1.
+
 **Goal:** the board can capture mic, drive the display, and connect to WiFi.
 
-- ESP-IDF project scaffold (`firmware/main/`)
-- I²S0 capture from INMP441, 16 kHz, 32-bit raw → shift down to int16
-- SSD1306 over I²C with u8g2; "Hello, whisper-stack" on screen
-- WiFi STA connect using hardcoded creds in `sdkconfig.defaults`
-- mDNS resolve (or hardcoded LAN IP if mDNS proves flaky)
-- Serial-log a 3-second mic sample's RMS so you can verify the mic is wired
+- ✅ ESP-IDF project scaffold (`firmware/main/` — main.c, oled.c/h,
+  wifi.c/h, i2s_mic.c/h, app_state.h, Kconfig.projbuild). Build target
+  ESP32 (LX6 classic), partition table `CONFIG_PARTITION_TABLE_TWO_OTA=y`.
+- ✅ SSD1306 via IDF-builtin `esp_lcd_panel_ssd1306` (instead of u8g2 —
+  no managed-component dep, ships with IDF 5.3+, ~3 KB extra .a) plus a
+  small embedded 6×8 ASCII font (~600 B). "Hello, whisper-stack"
+  → "ready" rendered on real hardware.
+- ✅ WiFi STA, creds via `Kconfig.projbuild` (CONFIG_WS_WIFI_SSID /
+  CONFIG_WS_WIFI_PASS in `sdkconfig`, NOT `sdkconfig.defaults`).
+  Hardcoded server IP via CONFIG_WS_SERVER_HOST. mDNS deferred.
+- ⏸️ I²S0 capture from INMP441 — code complete (`i2s_mic.c` with
+  `driver/i2s_std.h`, 32→16 bit shift via `>> 16`), gated on
+  `ENABLE_MIC` in `app_state.h`. Awaits the user's circular INMP441
+  breakout being soldered (came with loose headers).
 
-**Verification:** OLED shows "ready" + IP address; serial log prints
-non-zero mic RMS when you snap your fingers near the board.
+**Verification:**
+- ✅ OLED shows "ready" + IP address.
+- ⏸️ Serial log prints non-zero mic RMS when you snap your fingers near
+  the board (deferred to mic-wiring stage).
+- ✅ Workstation `ping <esp32-ip>` succeeds at LAN RTT.
 
 ### Milestone 2 — Button + POST /converse
 
@@ -578,10 +595,12 @@ diagnose "is my mic working" with the VU bar.
 
 | Phase | File | Action |
 |---|---|---|
-| 1 | `firmware/main/i2s_mic.c` | new — I²S0 capture, 24→16 shift |
-| 1 | `firmware/main/oled.c` | new — SSD1306 over I²C via u8g2 |
-| 1 | `firmware/main/wifi.c` | new — STA + mDNS |
-| 1 | `firmware/main/main.c` | new — task setup, state machine |
+| 1 | `firmware/main/i2s_mic.c` | ✅ shipped (gated on `ENABLE_MIC`) — I²S0 capture, 32→16 shift via `>> 16` |
+| 1 | `firmware/main/oled.c` | ✅ shipped — SSD1306 via IDF `esp_lcd_panel_ssd1306` + embedded 6×8 font (chose over u8g2 — no managed-component dep) |
+| 1 | `firmware/main/wifi.c` | ✅ shipped — STA + Kconfig.projbuild creds; mDNS deferred |
+| 1 | `firmware/main/main.c` | ✅ shipped — task setup, ENABLE_X-gated subsystem init, heartbeat |
+| 1 | `firmware/main/app_state.h` | ✅ shipped — state enum + ENABLE_OLED/MIC/WIFI toggles |
+| 1 | `firmware/main/Kconfig.projbuild` | ✅ shipped — exposes WS_WIFI_SSID/PASS, WS_SERVER_HOST/PORT, WS_API_KEY in menuconfig |
 | 2 | `firmware/main/http_client.c` | new — POST raw audio/l16 to /converse |
 | 2 | `firmware/main/json_parse.c` | new — extract transcript/reply_text |
 | 3 | `firmware/main/vad.c` | new — peak threshold + silence dwell |
