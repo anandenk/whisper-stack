@@ -21,7 +21,7 @@ from typing import Iterator
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from server import audio, audio_out, config, markdown, modes, router, titler, usage
+from server import audio, audio_out, config, markdown, modes, router, titler, usage, wakeword
 from server.sessions import Session, SessionStore
 from server.streaming import SentenceChunker
 from server.tools import all_tools
@@ -87,7 +87,7 @@ app = Flask(__name__)
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Endpoints that mutate or cost money/credits. /, /health, /static stay public.
-PROTECTED_PATHS = frozenset({"/converse", "/converse/stream", "/chat", "/transcribe", "/speak"})
+PROTECTED_PATHS = frozenset({"/converse", "/converse/stream", "/chat", "/transcribe", "/speak", "/listen"})
 
 
 def _sse_event(event: str, data: dict) -> str:
@@ -403,6 +403,15 @@ def converse():
     # the ESP-WROOM-32 firmware's behavior where the workstation IS the speaker.
     play_locally = (get_field("play_locally") or "true").strip().lower() != "false"
 
+    # ESP-32 firmware ignores audio_base64 (workstation plays the reply via
+    # play_locally=true). Letting it omit the base64 from the JSON saves
+    # ~100-200 KB per /converse response on a chip with ~300 KB heap, which
+    # is the difference between "cJSON parses cleanly" and "heap exhaustion".
+    # Always parsed from the query string — multipart form fields work too
+    # but the firmware uses raw audio/l16 with query params.
+    omit_audio_base64 = (request.args.get("omit_audio_base64", "0").strip().lower()
+                         in ("1", "true", "yes"))
+
     timings: dict[str, float] = {}
     t_total = time.perf_counter()
 
@@ -487,8 +496,15 @@ def converse():
             raw_pcm, sample_rate = modes.get_tts().synth(speakable_text)
         timings["tts"] = time.perf_counter() - t
 
-        wav_bytes = audio.pcm_to_wav(raw_pcm, sample_rate)
-        audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+        if omit_audio_base64:
+            # Skip the WAV wrap + base64 entirely on the firmware path —
+            # both are pure CPU waste when the client will discard the
+            # field. audio_duration_s is computed from raw_pcm directly
+            # so the device can still time its SPEAKING state.
+            audio_b64 = None
+        else:
+            wav_bytes = audio.pcm_to_wav(raw_pcm, sample_rate)
+            audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"converse failed: {exc!r}"}), 500
@@ -504,7 +520,6 @@ def converse():
         "auto_escalated": decision.get("auto_escalated", False),
         "model": llm_result["model"],
         "reply_text": reply_text,
-        "audio_base64": audio_b64,
         "audio_sample_rate": sample_rate,
         "audio_duration_s": (len(raw_pcm) // 2) / sample_rate if sample_rate else 0.0,
         "timings": timings,
@@ -519,6 +534,8 @@ def converse():
             "output": llm_result.get("output_tokens"),
         },
     }
+    if audio_b64 is not None:
+        body["audio_base64"] = audio_b64
     if llm_result.get("tools_used"):
         body["tools_used"] = llm_result["tools_used"]
     if session is not None:
@@ -834,6 +851,66 @@ def converse_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/listen")
+def listen():
+    """Server-side openWakeWord over a chunked-transfer raw PCM body.
+
+    Spec (see notes/esp32-firmware-plan.md "Wake word"): the client (the
+    ESP-WROOM-32 firmware in IDLE state, or tests/stage11_listen.py)
+    holds an open chunked-transfer POST while streaming int16 LE mono
+    @ 16 kHz from its mic. The server frames to 1280-sample windows
+    and runs openWakeWord.Model.predict() per frame. On detection:
+    respond 200 with {"wake": true, "score": ..., "model": ...} and
+    close. After IDLE_TIMEOUT_S (10 min) of bytes-but-no-detection:
+    respond {"wake": false, "reason": "idle_timeout"}. Client EOF
+    (TCP close from device side) is graceful: {"wake": false,
+    "reason": "client_closed"}.
+
+    Content-Type must be audio/l16; rate=16000; channels=1. Anything
+    else returns 415 — there's no point trying to handle other formats
+    here since the device emits exactly this shape.
+    """
+    if not wakeword.is_available():
+        return jsonify({
+            "error": "openwakeword not installed on the server; install via "
+                     "`pip install openwakeword` and openwakeword.utils."
+                     "download_models()",
+        }), 503
+
+    media, params = _parse_content_type(request.content_type)
+    if media not in ("audio/l16", "audio/x-l16"):
+        return jsonify({
+            "error": f"Content-Type must be audio/l16; got {request.content_type!r}",
+        }), 415
+    try:
+        rate = int(params.get("rate", "16000"))
+        channels = int(params.get("channels", "1"))
+    except ValueError:
+        return jsonify({
+            "error": "Content-Type must include integer rate; "
+                     "e.g. 'audio/l16; rate=16000; channels=1'",
+        }), 400
+    if rate != 16000 or channels != 1:
+        # openWakeWord's bundled models are trained at 16 kHz mono; any
+        # other rate/channel combo would need resampling which is out of
+        # scope for v1. The firmware contract is explicit (16 kHz mono),
+        # so reject anything else with a clear error.
+        return jsonify({
+            "error": f"unsupported PCM format: rate={rate} channels={channels}; "
+                     f"need rate=16000 channels=1",
+        }), 415
+
+    try:
+        result = wakeword.stream_predict(request.stream.read)
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"listen failed: {exc!r}"}), 500
+
+    if result.get("wake"):
+        usage.record_wake_detection()
+    return jsonify(result)
 
 
 def main():

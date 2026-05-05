@@ -25,14 +25,88 @@ workstation already, mostly via `/converse`'s `play_locally=true`).
 
 | Component | Choice | Notes |
 |---|---|---|
+| Dev board | **DOIT ESP32 DEVKIT V1**, 30-pin variant | MicroUSB, CP2102 USB-UART, EN + BOOT buttons. Reuses the BOOT button (GPIO0) as the runtime trigger for M2 — see "Pin map" §below for the strapping-pin caveat. GPIOs 6-11 are tied to flash and unavailable. |
 | MCU | **ESP-WROOM-32** (original ESP-32, dual-core LX6, **no PSRAM** — confirmed via `esptool.py chip_id`) | NOT ESP32-S3. Verified absence of PSRAM rules out on-device wake word; v1 uses server-side wake (path B locked) — see §"Wake word" below. |
-| Mic | **INMP441** I²S MEMS microphone | 24-bit signed I²S output; we'll downshift to int16 in software. |
-| Display | **0.96" SSD1306** I²C OLED (128×64) | u8g2 over I²C — single bus, three pins (SCL, SDA, VCC, GND). |
+| Mic | **INMP441** I²S MEMS microphone | 24-bit signed I²S output in 32-bit slots; we'll downshift to int16 in software. Silkscreen: L/R, WS, SCK, SD, VDD, GND. **L/R tied to GND** for mono left-channel capture. |
+| Display | **0.96" SSD1306** I²C OLED (128×64), 4-pin variant | u8g2 over I²C. Address 0x3C (default). Built-in pull-ups present, no external resistors needed. Silkscreen pin order: GND/VCC/SCL/SDA. |
 | Speaker | **None on the device** | Workstation's Realtek output (already pinned via `TTS_OUTPUT_DEVICE`) plays the reply. |
-| Power | USB (always-on) | No battery / sleep states for v1. |
+| Power | USB (always-on, MicroUSB on the DOIT V1) | No battery / sleep states for v1. |
 
 **No I²S DAC. No MAX98357A. No audio output task. No PCM playback
-queue.** The device ignores `audio_base64` on `/converse` responses.
+queue.** The device ignores `audio_base64` on `/converse` responses
+(and also passes `?omit_audio_base64=1` to keep the JSON small — see
+§"Server surface" below).
+
+### Tooling (locked)
+
+- **ESP-IDF v5.3.2** on the dev MacBook (~/esp/esp-idf). The new I²S
+  driver (`driver/i2s_std.h`) replaces the legacy `driver/i2s.h` —
+  any tutorial copy-paste from before ~2023 needs translating.
+- **Build target:** `idf.py set-target esp32` (LX6 classic, NOT s3).
+- **Partition table:** `partitions_two_ota.csv` from M1 onward, even
+  though OTA is deferred to v2. Picking the wrong table now means a
+  full re-flash later when OTA lands; pre-allocating the OTA slots
+  costs nothing at v1 and avoids that.
+- **Secrets in `sdkconfig`:** `sdkconfig` is `.gitignore`'d.
+  `sdkconfig.defaults` is checked in with **placeholder** values for
+  WiFi SSID / password / `API_KEY` / `SERVER_HOST`. First-run
+  workflow: `cp sdkconfig.defaults sdkconfig` then edit the local
+  copy. NVS-based provisioning is a v2 concern.
+
+### Pin map (locked, DOIT ESP32 DEVKIT V1)
+
+| Function | GPIO | Notes |
+|---|---|---|
+| **I²S0 BCK** (mic SCK) | **GPIO 26** | Output. Standard I²S BCK choice. |
+| **I²S0 WS** (mic WS / LRCLK) | **GPIO 25** | Output. Adjacent to BCK on the DOIT V1 silkscreen — short jumpers. |
+| **I²S0 SD** (mic SD / DOUT) | **GPIO 33** | Input. Input-only-capable pins (34-39) would also work but 33 is fine and leaves 34-39 free for future analog inputs. |
+| **I²C SDA** (OLED) | **GPIO 21** | Default Arduino-ESP32 SDA pin. Internal pull-up enabled in driver as belt-and-suspenders; the OLED breakout's pull-ups dominate. |
+| **I²C SCL** (OLED) | **GPIO 22** | Default Arduino-ESP32 SCL pin. |
+| **Trigger button** (M2+) | **GPIO 0 / BOOT** | Reuses the on-board BOOT button. **Strapping-pin caveat:** holding it during reset puts the chip in download mode, so don't long-press through a power cycle. Runtime presses are fine because the strap is sampled only at reset. |
+| **Reserved — status LED** | GPIO 2 | On-board blue LED on the DOIT V1; available for v2 status indication without extra wiring. NOT used in v1. |
+| **Reserved — second button** | GPIO 4 | Free for a v2 add-on (e.g. mute or session-clear). Not wired in v1. |
+| **Reserved — I²S1 BCK / LRCK / DIN** | GPIO 27 / 14 / 13 | For v2 MAX98357A on-device speaker output. Block-reserved so a future PCB layout doesn't have to re-route. NOT used in v1. |
+
+GPIOs 6-11 are tied to the on-board flash and **must not be touched**.
+GPIOs 34-39 are input-only and reserved for future ADC use. GPIO 1/3
+are UART0 TX/RX and stay tied to the CP2102. GPIO 12 is a strapping
+pin (flash voltage); avoid using it as an output during boot.
+
+### INMP441 wiring
+
+| INMP441 pin | Connect to | Notes |
+|---|---|---|
+| VDD | 3V3 (DOIT V1) | INMP441 is 1.8–3.3 V tolerant; 3V3 is fine. |
+| GND | GND | |
+| L/R | **GND** | Mono left-channel capture. The I²S driver's `slot_mode = I2S_SLOT_MODE_MONO` with `slot_mask = I2S_STD_SLOT_LEFT` matches. |
+| WS | GPIO 25 | LRCLK / word select |
+| SCK | GPIO 26 | Bit clock |
+| SD | GPIO 33 | Serial data out (mic → ESP) |
+
+### SSD1306 wiring
+
+| SSD1306 pin | Connect to | Notes |
+|---|---|---|
+| GND | GND | |
+| VCC | 3V3 | The 4-pin module is 3V3-only on most variants. |
+| SCL | GPIO 22 | I²C clock |
+| SDA | GPIO 21 | I²C data |
+
+I²C address is 0x3C (default jumper position). Pull-ups on the
+breakout are confirmed present, so no external 4.7 k resistors are
+needed. If you later swap to an SSD1306 board without pull-ups, add
+4.7 k SDA→3V3 and SCL→3V3.
+
+### Power budget (revised)
+
+Continuous-TX WiFi on the WROOM-32 averages ~160–180 mA with bursts
+to ~250–280 mA during chunked uploads on `/listen` and `/converse`.
+INMP441 draws ~1.4 mA, SSD1306 ~15–25 mA depending on pixel-on
+density. Total typical: **~180–230 mA average, ~270–310 mA peak**.
+USB 2.0 ports supply 500 mA; the DOIT V1's AMS1117-3.3 LDO is rated
+~800 mA. Margin is comfortable. The thermal risk under continuous
+streaming (Risk #1 below) still applies — current draw is fine, but
+sustained TX heats the module.
 
 ---
 
@@ -139,6 +213,17 @@ existing, battle-tested machinery.
 - **Keep-alive frames:** none for v1 — the device's TCP keepalive
   + WiFi-layer retransmits handle line health. Add only if real-world
   testing surfaces socket teardowns from intermediate routers.
+- **Pre-roll buffer (firmware-side):** when `{"wake": true}` arrives,
+  the user's question is *already in progress* — they're saying
+  "...jarvis, what's the weather". The firmware MUST retain ~500 ms
+  of audio that was just streamed to `/listen` and prepend it to the
+  recording it sends to `/converse`, otherwise VAD chops the start
+  of every utterance. Implementation: the audio_in ring buffer (the
+  one `listen_stream_task` drains in IDLE) keeps a 500 ms window of
+  history; on transition to LISTENING, that window seeds the new
+  recording buffer. Cheap — ~16 KB at 16 kHz int16. Without this,
+  recordings would routinely cut off the first phoneme of the
+  question.
 
 The server side reuses `openWakeWord` exactly the way `jarvis.py` does:
 one `Model(wakeword_models=["hey_jarvis"])` per process, threshold
@@ -205,24 +290,52 @@ the v1 plan commits to Path B, and we ship M4 against it.
 - `play_locally=true` (default) → workstation plays the reply through
   the pinned Realtek output. Device never sees audio.
 - `audio_base64` is in the JSON reply but the device ignores it.
+- **`?omit_audio_base64=1`** — query param the firmware always sets.
+  When true, the JSON response omits the `audio_base64` field
+  entirely (no WAV wrap, no base64 encode server-side either). This
+  is critical: a 4-second TTS reply is ~176 KB of base64, on a chip
+  with ~300 KB heap and a non-streaming cJSON parser. With the field
+  omitted, `/converse` JSON responses to the firmware are typically
+  <2 KB and parse cleanly. **Landed alongside the `/listen` work.**
 - `/converse/stream` is also available for clients that want SSE +
   per-sentence audio chunks (the web client uses this), but the
   ESP-WROOM-32 firmware uses `/converse` because the workstation
   speaker is already pinned.
 
-### Planned addition (Milestone 4 server-side scope)
+### Milestone 4 server-side scope (✅ shipped — MacBook session 2026-05-04)
 
-- `POST /listen` — chunked-transfer raw int16 LE PCM body, server runs
-  `openWakeWord.Model.predict()` per chunk, returns
-  `{"wake": true, "score": ..., "model": "hey_jarvis"}` on detection
-  (200 OK) or `{"wake": false, "reason": "idle_timeout"}` after a
-  10-minute idle cap. Detailed spec in §"Wake word" above.
-- Reuses the existing `openWakeWord` setup `tests/jarvis.py` already
-  loads. No new model files, no new dependencies; only a route handler
-  + a small frame-buffering loop wrapping `model.predict()`.
-- Added to the existing `PROTECTED_PATHS` so the X-API-Key gate covers
-  it. Logged in `usage.snapshot()` with a per-detection counter (cost
-  zero — local inference).
+The server-side half of M4 is now in the repo. The firmware-side
+half is the next thing to write at the workstation; the device has
+a working endpoint to talk to.
+
+- ✅ `POST /listen` — `server/app.py`. Chunked-transfer raw int16 LE
+  @ 16 kHz body, returns `{"wake": true, "score": ..., "model": ...}`
+  on detection or `{"wake": false, "reason": "idle_timeout" |
+  "client_closed"}` otherwise.
+- ✅ `server/wakeword.py` — process-level `openWakeWord.Model`
+  singleton guarded by a lock. Lazy import so the server still
+  boots if the optional dep isn't installed (`/listen` returns 503
+  with a clear install hint in that case). `model.reset()` between
+  arms. 1280-sample (80 ms) frame buffer wrapping `predict()`.
+- ✅ `PROTECTED_PATHS` updated; `X-API-Key` covers `/listen`.
+- ✅ `usage.record_wake_detection()` counter; `/health.usage`
+  surfaces `wake_detections`. Cost zero (local inference).
+- ✅ `tests/stage11_listen.py` — wire-format negatives (415 on bad
+  Content-Type / rate / channels), graceful client-close path
+  (`reason: client_closed`), best-effort detection via TTS-synthed
+  "hey jarvis" (logged, not asserted — TTS fixtures don't reliably
+  cross threshold; real-mic detection is verified at firmware
+  bring-up), and an in-process idle-timeout test that drives
+  `wakeword.stream_predict` directly.
+
+Server-side install on the workstation, before the firmware-side M4
+work starts:
+
+```
+.venv/Scripts/python.exe -m pip install openwakeword
+.venv/Scripts/python.exe -c "import openwakeword; openwakeword.utils.download_models()"
+.venv/Scripts/python.exe tests/stage11_listen.py
+```
 
 ---
 
@@ -250,17 +363,22 @@ non-zero mic RMS when you snap your fingers near the board.
 
 **Goal:** a button-driven round-trip works end-to-end.
 
-- BOOT button GPIO triggers a 3-second fixed-length recording
+- BOOT button (GPIO 0) triggers a 3-second fixed-length recording.
+  Strapping-pin caveat: don't hold through reset (puts chip in flash
+  download mode). Runtime presses are fine.
 - Build a heap buffer of int16 samples from the I²S ring buffer
-- POST to `/converse` with:
+- POST to `/converse?omit_audio_base64=1` with:
   - `Content-Type: audio/l16; rate=16000; channels=1`
   - `X-API-Key: <key>` header
   - Raw int16 LE bytes in body
-  - Optional `?session_id=esp32` query string for multi-turn memory
-- Parse JSON reply for `transcript` + `reply_text` + `timings`
+  - Optional `&session_id=esp32` query string for multi-turn memory
+- Parse JSON reply for `transcript` + `reply_text` + `timings`. With
+  `omit_audio_base64=1` the response is typically <2 KB so cJSON
+  parses cleanly on the device.
 - OLED shows "listening" → "uploading" → "speaking (Ns)" → "idle"
-  using `audio_duration_s` to time the SPEAKING state
-- Discard `audio_base64`
+  using `audio_duration_s` to time the SPEAKING state.
+- The `audio_base64` field is absent from the response — workstation
+  speaks the reply via `play_locally=true` (the `/converse` default).
 
 **Verification:** Press BOOT, ask a question, hear the workstation
 speakers reply, see the transcript on OLED. Workstation `/health.usage`
@@ -284,38 +402,34 @@ ends ~1.5s after you stop talking. Long-press cancels.
 (see §"Wake word" above) — Path A and Path C are not in scope for this
 milestone.**
 
-This milestone has both server-side and firmware-side scope; ship in
-that order so the device has a working endpoint to talk to.
+This milestone has both server-side and firmware-side scope. Server-
+side **shipped during the MacBook planning session 2026-05-04** (see
+§"Server surface" above for the landed file list); the firmware-side
+half is the work below.
 
-**Server-side scope (do first):**
-- Add `POST /listen` route in `server/app.py` matching the spec in
-  §"Wake word" above: chunked-transfer raw int16 LE @ 16 kHz body,
-  responds with `{"wake": true, ...}` (200 OK) on detection or
-  `{"wake": false, "reason": "idle_timeout"}` after a 10-minute cap.
-- Reuses the openWakeWord setup `tests/jarvis.py` already loads
-  (`Model(wakeword_models=[config.WAKEWORD_MODEL])`,
-  `config.WAKEWORD_THRESHOLD` from `.env`).
-- Frame-buffers the streamed body to 1280-sample chunks before each
-  `model.predict()` call (openWakeWord's preferred frame size; the
-  device may send chunks of any size).
-- Add to `PROTECTED_PATHS` (X-API-Key gate).
-- Per-detection counter logged via `usage.snapshot()` so `/health`
-  surfaces wake activity.
-- Regression test (`tests/stage11_listen.py`): synthesize an utterance
-  containing "hey jarvis", stream chunks via chunked-transfer to
-  `/listen`, assert 200 + `{"wake": true}`. Idle-timeout test:
-  stream silence for 11 minutes (or fake the clock), assert
-  `idle_timeout` reply.
+**Server-side scope** — see §"Server surface" → "Milestone 4 server-
+side scope (✅ shipped)" above. Summary: `POST /listen`,
+`server/wakeword.py`, `usage.wake_detections` counter,
+`tests/stage11_listen.py`.
 
 **Firmware-side scope:**
 - New `listen_stream_task`: while IDLE, holds an open
   chunked-transfer POST to `/listen`, draining the audio_in ring buffer
   in 1280-sample chunks. Backed by `esp_http_client` with
   `transfer_encoding=ESP_HTTP_CLIENT_TRANSFER_ENCODING_CHUNKED`.
+- **Pre-roll buffer** — see §"Wake word" above. Retain the last 500 ms
+  of audio that was just streamed to `/listen` so the
+  user's question (which often overlaps the tail of "...jarvis") isn't
+  truncated when LISTENING starts. Implementation note: keep a 16 KB
+  ring window separate from the chunked-upload feed; on transition
+  to LISTENING, copy that window into the new recording buffer
+  before VAD starts.
 - On JSON response parse: if `wake==true`, cancel the stream, transition
-  to LISTENING, run M3's VAD recording, POST to `/converse` as before.
-  After SPEAKING ends, re-POST `/listen` to re-arm.
-- On `idle_timeout` or connection-level error: backoff 1s, re-POST.
+  to LISTENING, run M3's VAD recording (seeded with pre-roll), POST
+  to `/converse?omit_audio_base64=1` as in M2. After SPEAKING ends,
+  re-POST `/listen` to re-arm.
+- On `idle_timeout`, `client_closed`, or connection-level error:
+  backoff 1s, re-POST.
 - OLED status flips between "listening for wake" / "wake fired" /
   M3's existing labels.
 
@@ -384,10 +498,12 @@ diagnose "is my mic working" with the VU bar.
 1. **Sustained TX power + thermal during continuous mic streaming.**
    Path B keeps the WROOM-32's WiFi modem in TX continuously while
    IDLE (~32 KB/s at 16 kHz × 16-bit). The modem dominates the
-   device's power budget — the WROOM-32 spec sheet rates
-   continuous-TX current draw at ~150-240 mA peaks. On USB this is
-   well within margin, but the chip die heats up: bench
-   measurement at M4 should record die temp after 30 min of
+   device's power budget. Revised numbers (see "Power budget"
+   §above): ~180–230 mA average, ~270–310 mA peak under
+   continuous TX + I²S + OLED, well within USB 2.0 (500 mA) and
+   the DOIT V1's AMS1117 LDO (~800 mA). Current draw is fine; the
+   real risk is thermal — chip die heats up under sustained TX,
+   so the M4 bench check is to record die temp after 30 min of
    continuous streaming with the case closed. If it crosses ~75 °C
    or starts thermal-throttling, that's a Path-C trigger (see
    §"Wake word" Path C criteria).
@@ -469,9 +585,12 @@ diagnose "is my mic working" with the VU bar.
 | 2 | `firmware/main/http_client.c` | new — POST raw audio/l16 to /converse |
 | 2 | `firmware/main/json_parse.c` | new — extract transcript/reply_text |
 | 3 | `firmware/main/vad.c` | new — peak threshold + silence dwell |
-| **4** | **`server/app.py`** | **edit — add `POST /listen` endpoint** (chunked-transfer raw int16 PCM body, openWakeWord predict loop, idle-timeout reply). **Locked, not conditional.** |
-| **4** | **`tests/stage11_listen.py`** | **new — server-side regression: stream a synth'd "hey jarvis" utterance through `/listen` via chunked-transfer, assert wake fires; idle-timeout test.** |
-| 4 | `firmware/main/listen_stream.c` | new — `listen_stream_task`: chunked POST to /listen, parses JSON wake response |
+| **2** | **`server/app.py`** | ✅ **shipped** — `?omit_audio_base64=1` query param on `/converse` so firmware JSON responses fit in heap. |
+| **4** | **`server/wakeword.py`** | ✅ **shipped** — singleton openWakeWord Model + frame-buffered predict loop. |
+| **4** | **`server/app.py`** | ✅ **shipped** — `POST /listen` route, added to `PROTECTED_PATHS`. |
+| **4** | **`server/usage.py`** | ✅ **shipped** — `record_wake_detection()` + `wake_detections` field in `/health.usage`. |
+| **4** | **`tests/stage11_listen.py`** | ✅ **shipped** — wire-format negatives, EOF path, best-effort detection, in-process idle-timeout test. |
+| 4 | `firmware/main/listen_stream.c` | new — `listen_stream_task`: chunked POST to /listen, parses JSON wake response, retains pre-roll window for the LISTENING transition. |
 | 5 | `firmware/main/state_machine.c` | edit — continuous mode loop |
 | 6 | `firmware/main/oled.c` | edit — VU bar + transcript overlay |
 | - | `firmware/sdkconfig.defaults` | new — WiFi creds, partition table |
