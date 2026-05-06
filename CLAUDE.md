@@ -88,14 +88,19 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
 
 ## Known issues / TODO
 
-- **Router misroutes very short queries to complex.** Observed
-  2026-05-06 on the ESP-32 voice client: `"1+1"` goes to the complex
-  route. Diagnosis and a tiered improvement plan (Tier 1 example
-  curation + regex shortcut, Tier 2 build a real eval set, Tier 3
-  LLM classifier — only if 1+2 plateau) live at the top of
-  [server/router.py](server/router.py). Don't skip ahead to Tier 3
-  without measuring first; the embedding router is fast (~30 ms) and
-  the LLM-classifier latency tax adds to *every* voice turn forever.
+- **Router accuracy gaps measured.** A 95-query held-out fixture
+  ([tests/router_eval.py](tests/router_eval.py)) puts the embedding
+  router at **68.4% accuracy at the production margin (0.05)** and
+  **75.8% at margin 0.02**. Weak categories: short queries (`"1+1"`,
+  60%), bare facts (50%), quick lookups (50%), conversational fillers
+  (62%). Code / drafting / debug categories all score 100%. Top of
+  [server/router.py](server/router.py) has the full breakdown +
+  Tier 1 plan (lower margin, add curated short examples, regex
+  shortcut). Re-run `python tests/router_eval.py` after any router
+  change to confirm no regression. Don't skip ahead to LLM classifier
+  (Tier 3) without measuring Tier 1 first — the embedding router is
+  fast (~30 ms) and the LLM-classifier latency tax adds to *every*
+  voice turn forever.
 
 ## Critical gotchas
 

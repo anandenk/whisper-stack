@@ -20,56 +20,80 @@ mode-independent. The Phase 3 factory wires either OllamaEmbedder
 Examples below are a starting draft. Re-label / re-curate against the
 test fixture in tests/stage5_router.py — that fixture is also editable.
 
-KNOWN ISSUE (observed 2026-05-06 from the ESP-32 voice client):
-Very short queries route to complex more often than they should.
-Concrete failure: "1+1" goes to complex. Three things stack:
+KNOWN ISSUES — measured against tests/router_eval.py 2026-05-06
+================================================================
 
-  1. Lexically alien — closest SIMPLE example is "What's 23 plus 47?"
-     (full English question), so a 3-character math expression scores
-     low against it.
-  2. Semantic adjacency to code — embeddings of "1+1" land closer to
-     "Write a Python function..." or "Refactor this function" than to
-     anything in SIMPLE, so s_complex is unexpectedly high.
-  3. Margin asymmetry — even if s_simple > s_complex, it has to win by
-     ROUTER_MARGIN_S (default 0.05). Tight matches go to complex.
+A 95-query held-out fixture (tests/router_eval.py — designed to NOT
+paraphrase the example sets below) puts the embedding router at:
 
-Staged improvement plan (none implemented yet):
+    Production margin ROUTER_MARGIN_S=0.05:    68.4% accuracy
+    Best margin in the sweep (0.02):           75.8% accuracy
 
-  TIER 1 — cheap, do first:
-    a. Add short-arithmetic / single-word / brief-greeting examples to
-       SIMPLE_EXAMPLES — currently 1 of 12 simple examples is math, and
-       that one is wordy. Add: "1+1", "5 times 7", "what's 2 plus 2",
-       "100 divided by 4", "what's 15 percent of 80".
-    b. Add a regex shortcut at the top of classify() for unambiguous-
+Per-category accuracy at production margin reveals the weak spots:
+
+    100%  code, drafting, debug, time_location
+     83%  creative, deep_explain
+     63%  conversational  (5/8)
+     60%  short_arith     (6/10)  <-- the user-observed "1+1" issue
+     60%  planning        (3/5)
+     50%  quick_lookup    (6/12)  -- short translations / conversions / definitions
+     50%  bare_facts      (5/10)  -- "Population of Tokyo", "Speed of light", etc.
+     47%  borderline      (7/15)  -- expected (judgment calls)
+
+Two distinct failure modes in the data:
+
+  A. Short / factual queries narrowly miss the 0.05 margin. "1+1" lands
+     at margin +0.047 (just shy of 0.05), "100 / 4" at +0.042, "what's
+     2 plus 2" at +0.019. The embedding actually scores them simple-ish,
+     but the asymmetric tiebreak rejects them. Lowering ROUTER_MARGIN_S
+     to 0.02 fixes the bulk of these without code changes.
+
+  B. A handful of complex queries leak to simple even at margin 0.00.
+     Examples (with computed margins):
+       "Write a song chorus about Monday mornings"  +0.094
+       "Help me prepare for a job interview..."     +0.052
+       "How would I start a podcast from scratch?"  +0.054
+       "Discuss the origins of World War 1"         +0.062
+       "Tell me about the Eiffel Tower"             +0.054
+       "Best way to learn Python?"                  +0.058
+     These are curation gaps in COMPLEX_EXAMPLES, not margin issues.
+     "Write a song chorus about Monday mornings" hits s_simple=0.748
+     because "Good morning." is in SIMPLE_EXAMPLES — the embedding
+     latches onto "morning". Mode-B failures need new COMPLEX examples
+     covering "tell me about" broad topics, multi-step planning ("help
+     me prepare..."), and pedagogical advice ("best way to learn...").
+
+Staged improvement plan, recalibrated to the measurements:
+
+  TIER 1 — cheap, high leverage:
+    a. Lower ROUTER_MARGIN_S from 0.05 to 0.02. Single env-var change,
+       buys ~7 points of held-out accuracy. Net trade: +3 under-routings
+       (8->11), -10 over-routings (22->12). Asymmetric tiebreak was
+       too strict for the actual data.
+    b. Add short-arithmetic / single-word examples to SIMPLE_EXAMPLES:
+       "1+1", "5 times 7", "what's 2 plus 2", "100 divided by 4". Pulls
+       the simple cluster centroid toward the bare_facts/short_arith
+       neighborhoods that scored 50-60%.
+    c. Add ~5 examples to COMPLEX_EXAMPLES targeting Mode B above:
+       "tell me about [topic]", multi-step planning, "best way to do X",
+       pedagogical-advice queries.
+    d. Add a regex shortcut at the top of classify() for unambiguous-
        simple patterns (mirror is_tool_likely's shape):
          - pure arithmetic: r"^\s*\d+\s*[+\-*/x]\s*\d+\s*=?\s*\??\s*$"
          - single-word lookups: r"^\s*\w+\s*\??\s*$"
        Both auto-route to simple before the embedding path runs.
-    c. Optionally lower ROUTER_MARGIN_S from 0.05 to 0.02 (or 0). One
-       env-var dial. Risk: more under-routing on borderline cases.
 
-  TIER 2 — measurement before more changes:
-    d. Build a real eval set. tests/stage5_router.py's fixture is
-       30 queries and self-admits "several paraphrase the example sets",
-       which inflates accuracy. Expand to ~100 queries with NO lexical
-       overlap with SIMPLE_EXAMPLES / COMPLEX_EXAMPLES. Cover weak
-       categories: very short queries, bare facts, conversational
-       fillers, short translations.
-    e. Re-curate example sets to ~20-30 per class once the eval set
-       exposes which neighborhoods are under-represented.
+  TIER 2 — DONE: tests/router_eval.py is the held-out fixture.
+    Re-run it after any router change to confirm no regression.
 
-  TIER 3 — only if Tier 1+2 plateau (do NOT skip ahead to here):
+  TIER 3 — only if Tier 1 plateaus (do NOT skip ahead to here):
     f. Replace embedding classifier with a 2-shot LLM call (Llama 3.1
        8B is already loaded). Costs ~150 ms per turn (added to every
        voice round-trip), and in cloud mode doubles per-turn token
-       spend. Worth it only with eval-set data showing the embedding
-       approach has fundamental gaps that curation can't close.
-
-Pushback on jumping straight to Tier 3: the embedding router is fast
-(~30 ms) and the routing cost-of-being-wrong is bounded (a fraction
-of a cent or one weird answer). Tier 1 is five minutes of work and
-might solve the observed cases entirely. Measure before paying the
-voice-latency tax of an LLM-classifier path.
+       spend. Hard to justify at 76% baseline + Tier 1 gains
+       unmeasured — the embedding router is fast (~30 ms; eval shows
+       p95 41 ms) and the routing cost-of-being-wrong is bounded
+       (a fraction of a cent or one weird answer per misroute).
 """
 
 from __future__ import annotations
