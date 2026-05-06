@@ -6,6 +6,47 @@ machine. Speak into a phone, a terminal, or a custom ESP-WROOM-32
 voice device; the server transcribes, routes the query to the right
 LLM, runs tools when needed, streams synthesized speech back.
 
+**Status:** v1 shipped (May 2026) — end-to-end voice loop, seven shipped feature plans, working ESP-WROOM-32 hardware client.
+**Built by:** Anand Enkhjin .
+**Looking to fund:** v2 — battery-powered, enclosed, on-device wake word, USB-C charging.
+
+In plain terms: you speak into a microphone, a speech-recognition model
+transcribes the audio, the text is routed to either a small local AI
+model (for simple or factual questions) or Anthropic's Claude (for
+anything more complex — Claude can also call tools like web search when
+relevant), and the reply is synthesized back to speech and played out.
+The whole loop runs on one workstation; an optional custom hardware
+device — currently an ESP-WROOM-32 with a microphone, OLED display, and
+WiFi — talks to the workstation from across the room and lets you use
+the assistant hands-free.
+
+## What's next (v2)
+
+V1 works but lives on a breadboard plugged into a USB cable. V2 turns
+it into a self-contained device:
+
+- **ESP32-S3 microcontroller** (replaces the ESP-WROOM-32). PSRAM
+  unlocks on-device wake-word inference, eliminating the always-on
+  network connection v1 needs.
+- **LiPo battery + USB-C charging.** Multi-day runtime, recharges
+  like a phone.
+- **I²S amplifier (MAX98357) + 3W speaker.** Device speaks for itself
+  instead of routing audio back to the workstation's speakers.
+- **3D-printed enclosure** with acoustic separation between the
+  microphone and the speaker — needed once the device makes its own
+  sound.
+- **WiFi provisioning over a captive portal** (no more re-flashing to
+  change networks).
+- **OTA firmware updates** so the device can be updated without
+  opening the case.
+
+**Estimated cost:** ~$50 in parts (ESP32-S3 dev board with built-in
+LiPo charging, MAX98357, 3W speaker, LiPo cell, switches, enclosure
+filament).
+**Estimated time:** ~5 weekends, phased so each phase is independently
+testable.
+**Currently seeking funding** for parts + tooling.
+
 ```
 audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → audio out
                             ↓                  ↓
@@ -76,6 +117,8 @@ verified on real hardware.
 - **Cloudflare Tunnel runbook** for off-LAN access without port-forwarding.
 
 ## Quick start
+
+> **macOS / Linux note:** the commands below are PowerShell-flavored. Substitute `source .venv/bin/activate` for the venv activate line and standard `mkdir -p` / `curl -L -o` for the model-download lines; everything else is portable Python.
 
 You'll need:
 
