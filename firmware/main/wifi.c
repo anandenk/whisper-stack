@@ -4,6 +4,14 @@
 // there's no network there's nothing useful to do. Failure here is
 // terminal — log loudly and let the watchdog reset us, the next boot
 // retries.
+//
+// Two auth modes, picked at build time via Kconfig:
+//   - WS_WIFI_AUTH_PSK              — home WiFi / phone hotspot
+//   - WS_WIFI_AUTH_WPA2_ENTERPRISE  — 802.1X / PEAP-MSCHAPv2
+//                                     (eduroam, university dorm WiFi)
+// EAP-TLS (client cert) is not supported. Server cert validation is
+// deliberately skipped in v1; document & revisit if real-world MITM
+// risk on the dorm network warrants it.
 
 #include "wifi.h"
 #include "app_state.h"
@@ -14,6 +22,9 @@
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_wifi.h"
+#if CONFIG_WS_WIFI_AUTH_WPA2_ENTERPRISE
+#  include "esp_eap_client.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "lwip/ip4_addr.h"
@@ -23,7 +34,13 @@ static const char *TAG = "wifi";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 #define WIFI_MAX_RETRY     8
-#define WIFI_TIMEOUT_TICKS pdMS_TO_TICKS(30000)
+// 90 s outer timeout. The retry handler is the real safety net — it
+// gives up after WIFI_MAX_RETRY disconnects (≈ 10–20 s of trying) and
+// sets WIFI_FAIL_BIT, which unblocks us. The timeout only matters when
+// assoc succeeds but DHCP stalls (no DISCONNECTED to drive retries).
+// Network access controller / NAC takes ~30 s to reclassify a freshly-registered device,
+// during which DHCP can stall on the first attempt — 30 s wasn't enough.
+#define WIFI_TIMEOUT_TICKS pdMS_TO_TICKS(90000)
 
 static EventGroupHandle_t s_evt = NULL;
 static int s_retry = 0;
@@ -75,16 +92,51 @@ esp_err_t wifi_init_sta_blocking(char *out_ip, size_t out_ip_len)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,   IP_EVENT_STA_GOT_IP, on_wifi_event, NULL, NULL));
 
     wifi_config_t wifi_cfg = { 0 };
-    strncpy((char *)wifi_cfg.sta.ssid,     CONFIG_WS_WIFI_SSID, sizeof(wifi_cfg.sta.ssid) - 1);
-    strncpy((char *)wifi_cfg.sta.password, CONFIG_WS_WIFI_PASS, sizeof(wifi_cfg.sta.password) - 1);
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    strncpy((char *)wifi_cfg.sta.ssid, CONFIG_WS_WIFI_SSID, sizeof(wifi_cfg.sta.ssid) - 1);
     wifi_cfg.sta.pmf_cfg.capable    = true;
     wifi_cfg.sta.pmf_cfg.required   = false;
 
+#if CONFIG_WS_WIFI_AUTH_WPA2_ENTERPRISE
+    // 802.1X / PEAP-MSCHAPv2. Don't set sta.password — credentials go
+    // through esp_eap_client_*. Threshold gates roaming to enterprise APs.
+    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_ENTERPRISE;
+#else
+    strncpy((char *)wifi_cfg.sta.password, CONFIG_WS_WIFI_PASS, sizeof(wifi_cfg.sta.password) - 1);
+    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+#endif
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+
+#if CONFIG_WS_WIFI_AUTH_WPA2_ENTERPRISE
+    {
+        const char *outer = CONFIG_WS_WIFI_EAP_IDENTITY;
+        const char *user  = CONFIG_WS_WIFI_EAP_USERNAME;
+        const char *pass  = CONFIG_WS_WIFI_EAP_PASSWORD;
+
+        // Outer (anonymous) identity is optional. If empty, the supplicant
+        // sends the inner username as the outer identity automatically.
+        if (outer[0] != '\0') {
+            ESP_ERROR_CHECK(esp_eap_client_set_identity((const uint8_t *)outer, strlen(outer)));
+        }
+        ESP_ERROR_CHECK(esp_eap_client_set_username((const uint8_t *)user, strlen(user)));
+        ESP_ERROR_CHECK(esp_eap_client_set_password((const uint8_t *)pass, strlen(pass)));
+
+        // No CA cert validation in v1. The supplicant accepts whatever the
+        // RADIUS server presents; password is still encrypted inside PEAP,
+        // but a rogue AP on the same SSID could MITM. Acceptable for a
+        // single-network dorm device; revisit if threat model changes.
+        ESP_LOGW(TAG, "EAP: server cert validation disabled (v1 trade-off)");
+
+        ESP_ERROR_CHECK(esp_wifi_sta_enterprise_enable());
+        ESP_LOGI(TAG, "connecting to SSID=\"%s\" via WPA2-Enterprise (user=\"%s\")",
+                 CONFIG_WS_WIFI_SSID, user);
+    }
+#else
+    ESP_LOGI(TAG, "connecting to SSID=\"%s\" via WPA2-PSK", CONFIG_WS_WIFI_SSID);
+#endif
+
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "connecting to SSID=\"%s\" ...", CONFIG_WS_WIFI_SSID);
 
     EventBits_t bits = xEventGroupWaitBits(s_evt,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,

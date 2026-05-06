@@ -10,6 +10,7 @@ idf_component_register(
         "oled.c"
         "wifi.c"
         "i2s_mic.c"
+        "http_client.c"
     INCLUDE_DIRS "."
     REQUIRES
         # OLED stack
@@ -23,4 +24,13 @@ idf_component_register(
         esp_netif
         nvs_flash
         lwip
+        # WPA2-Enterprise / 802.1X (eduroam, dorm WiFi). Provides
+        # esp_eap_client.h. Pulled regardless of auth mode — the
+        # enterprise code path is compiled out via Kconfig when PSK
+        # is selected, but the header still needs to resolve.
+        wpa_supplicant
+        # M2: button-driven /converse round-trip
+        esp_driver_gpio
+        esp_http_client
+        json
 )

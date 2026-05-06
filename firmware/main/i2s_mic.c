@@ -8,6 +8,12 @@
 //
 // The new driver/i2s_std.h replaces the legacy driver/i2s.h API. Tutorials
 // from before ~2023 won't apply.
+//
+// Ring buffer policy: audio_in_task pushes int16 frames non-blocking; if
+// the buffer is full (no consumer reading) the new frame is dropped. That
+// keeps memory bounded during idle. M2's capture API drains stale audio
+// at entry, so the captured window starts cleanly from the moment of the
+// call regardless of how long the buffer has been idling.
 
 #include "i2s_mic.h"
 #include "app_state.h"
@@ -16,6 +22,7 @@
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/ringbuf.h"
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 
@@ -25,23 +32,25 @@ static const char *TAG = "i2s_mic";
 #define I2S_WS_GPIO  25
 #define I2S_SD_GPIO  33
 
+// 16 KB byte buffer = 8192 int16 samples = ~512 ms at 16 kHz. Plenty of
+// slack between producer and a real-time consumer; small enough that
+// idle memory cost is negligible.
+#define MIC_RINGBUF_BYTES (16 * 1024)
+
 static i2s_chan_handle_t s_rx = NULL;
 static volatile uint32_t s_last_rms = 0;
 static volatile uint32_t s_last_peak = 0;
+static RingbufHandle_t   s_rb = NULL;
 static bool s_initialized = false;
 
 // Convert one 32-bit I²S slot containing a 24-bit MSB-aligned signed sample
-// into int16 by dropping the bottom 16 bits. The bottom 8 are the 8 unused
-// LSBs of the 32-bit slot; the next 8 are the 8 lowest bits of the 24-bit
-// sample (≈ -42 dB headroom — fine for speech). Plan-aligned with the
-// "discard the bottom 8 bits" wording.
+// into int16 by dropping the bottom 16 bits.
 static inline int16_t slot32_to_int16(int32_t s) { return (int16_t)(s >> 16); }
 
 static void audio_in_task(void *arg)
 {
-    // M1 just computes RMS/peak per frame; the int16 buffer (and the ring
-    // buffer that drains it for M3/M4) is added when those milestones land.
     static int32_t raw[I2S_MIC_FRAME_SAMPLES];
+    static int16_t pcm[I2S_MIC_FRAME_SAMPLES];
 
     while (1) {
         size_t got = 0;
@@ -58,18 +67,30 @@ static void audio_in_task(void *arg)
         uint32_t peak = 0;
         for (size_t i = 0; i < n; ++i) {
             int16_t s = slot32_to_int16(raw[i]);
+            pcm[i] = s;
             int32_t a = s < 0 ? -s : s;
             if ((uint32_t)a > peak) peak = (uint32_t)a;
             sumsq += (uint64_t)((int32_t)s * (int32_t)s);
         }
         s_last_peak = peak;
         s_last_rms  = (uint32_t)sqrt((double)sumsq / (double)n);
+
+        if (s_rb) {
+            // Non-blocking — drop the frame if no consumer is draining.
+            (void)xRingbufferSend(s_rb, pcm, n * sizeof(int16_t), 0);
+        }
     }
 }
 
 esp_err_t i2s_mic_init(void)
 {
     if (s_initialized) return ESP_OK;
+
+    s_rb = xRingbufferCreate(MIC_RINGBUF_BYTES, RINGBUF_TYPE_BYTEBUF);
+    if (!s_rb) {
+        ESP_LOGE(TAG, "xRingbufferCreate failed");
+        return ESP_ERR_NO_MEM;
+    }
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.dma_desc_num  = 4;
@@ -78,8 +99,6 @@ esp_err_t i2s_mic_init(void)
 
     i2s_std_config_t std_cfg = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(I2S_MIC_SAMPLE_RATE),
-        // Slot config: 32-bit slot holding a 24-bit-MSB-aligned sample,
-        // mono, left-channel only (matches L/R-tied-to-GND wiring).
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -102,10 +121,44 @@ esp_err_t i2s_mic_init(void)
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG, "I²S0 init OK (BCK=%d WS=%d SD=%d, %d Hz mono)",
-             I2S_BCK_GPIO, I2S_WS_GPIO, I2S_SD_GPIO, I2S_MIC_SAMPLE_RATE);
+    ESP_LOGI(TAG, "I²S0 init OK (BCK=%d WS=%d SD=%d, %d Hz mono, rb=%d B)",
+             I2S_BCK_GPIO, I2S_WS_GPIO, I2S_SD_GPIO, I2S_MIC_SAMPLE_RATE, MIC_RINGBUF_BYTES);
     return ESP_OK;
 }
 
-uint32_t i2s_mic_last_rms(void) { return s_last_rms; }
+uint32_t i2s_mic_last_rms(void)  { return s_last_rms; }
 uint32_t i2s_mic_last_peak(void) { return s_last_peak; }
+
+esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms)
+{
+    if (!s_rb || !out) return ESP_ERR_INVALID_STATE;
+
+    // Drain stale audio so the captured window starts at "now".
+    size_t stale_n;
+    void *stale;
+    while ((stale = xRingbufferReceive(s_rb, &stale_n, 0)) != NULL) {
+        vRingbufferReturnItem(s_rb, stale);
+    }
+
+    const size_t bytes_needed = n_samples * sizeof(int16_t);
+    size_t bytes_got = 0;
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+
+    while (bytes_got < bytes_needed) {
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(deadline - now) <= 0) break;
+        TickType_t wait = deadline - now;
+
+        size_t chunk_n = 0;
+        void *chunk = xRingbufferReceive(s_rb, &chunk_n, wait);
+        if (!chunk) break;
+
+        size_t copy = bytes_needed - bytes_got;
+        if (copy > chunk_n) copy = chunk_n;
+        memcpy((uint8_t *)out + bytes_got, chunk, copy);
+        bytes_got += copy;
+        vRingbufferReturnItem(s_rb, chunk);
+    }
+
+    return (bytes_got == bytes_needed) ? ESP_OK : ESP_ERR_TIMEOUT;
+}

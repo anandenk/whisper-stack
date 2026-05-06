@@ -7,9 +7,49 @@ menu "Whisper Stack Device"
             SSID of the 2.4GHz network the device joins. ESP-WROOM-32
             does not support 5GHz.
 
+    choice WS_WIFI_AUTH_MODE
+        prompt "WiFi auth mode"
+        default WS_WIFI_AUTH_PSK
+        help
+            Pick PSK for home WiFi or phone hotspot. Pick WPA2-Enterprise
+            for 802.1X networks like eduroam or university dorm WiFi
+            (username + password, PEAP-MSCHAPv2). EAP-TLS (client cert)
+            is not supported.
+
+        config WS_WIFI_AUTH_PSK
+            bool "WPA2-PSK (home / phone hotspot)"
+
+        config WS_WIFI_AUTH_WPA2_ENTERPRISE
+            bool "WPA2-Enterprise / 802.1X (eduroam, dorm WiFi)"
+    endchoice
+
     config WS_WIFI_PASS
-        string "WiFi password"
+        string "WiFi password (PSK only)"
+        depends on WS_WIFI_AUTH_PSK
         default "changeme"
+
+    config WS_WIFI_EAP_IDENTITY
+        string "EAP outer identity (optional)"
+        depends on WS_WIFI_AUTH_WPA2_ENTERPRISE
+        default ""
+        help
+            "Anonymous" identity sent in the clear during the outer TLS
+            handshake. Many universities use anonymous@realm here.
+            Leave empty to send the inner username as the outer identity
+            too — works on most networks.
+
+    config WS_WIFI_EAP_USERNAME
+        string "EAP username (inner identity)"
+        depends on WS_WIFI_AUTH_WPA2_ENTERPRISE
+        default ""
+        help
+            Real username, typically user@realm. Sent inside the encrypted
+            PEAP tunnel.
+
+    config WS_WIFI_EAP_PASSWORD
+        string "EAP password"
+        depends on WS_WIFI_AUTH_WPA2_ENTERPRISE
+        default ""
 
     config WS_SERVER_HOST
         string "whisper-stack server LAN IP"

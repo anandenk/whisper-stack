@@ -5,8 +5,8 @@
 // `>> 16` (drops the 8 unused LSBs of the 32-bit slot AND the 8 LSBs of the
 // 24-bit sample — that's what the plan calls "discard the bottom 8 bits").
 //
-// M1 only uses i2s_mic_read_rms() to log peak/RMS for the snap-test.
-// M2/M3/M4 will pull pcm directly out of the ring buffer.
+// M1 only used i2s_mic_last_rms() / _peak() for the snap-test. M2+ uses
+// i2s_mic_capture() to drain a fixed-length recording from the ring buffer.
 
 #pragma once
 
@@ -21,9 +21,15 @@
 esp_err_t i2s_mic_init(void);
 
 // Read the most recent frame's RMS (root-mean-square) of int16 samples.
-// Returns 0 if no frame yet. Useful for the M1 verification step
-// ("snap your fingers near the board, watch RMS spike").
+// Returns 0 if no frame yet.
 uint32_t i2s_mic_last_rms(void);
 
 // Read the most recent frame's absolute peak (max |sample|).
 uint32_t i2s_mic_last_peak(void);
+
+// Drain `n_samples` int16 samples from the mic ring buffer into `out`.
+// Discards any stale audio at entry — the captured window starts NOW.
+// Blocks until the buffer fills or `timeout_ms` elapses. Returns ESP_OK
+// on a complete fill, ESP_ERR_TIMEOUT otherwise. Caller owns `out` (must
+// hold n_samples * 2 bytes).
+esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms);

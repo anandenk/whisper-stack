@@ -15,7 +15,15 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # --- App config (Kconfig.projbuild) ---------------------------------------
 # Placeholders — replaced in the local sdkconfig at Step 7.
 CONFIG_WS_WIFI_SSID="changeme"
+# Auth mode: default to PSK (home / phone hotspot). Flip to enterprise
+# in `idf.py menuconfig` (or by editing the local sdkconfig) for dorm /
+# eduroam-style 802.1X networks.
+CONFIG_WS_WIFI_AUTH_PSK=y
+# CONFIG_WS_WIFI_AUTH_WPA2_ENTERPRISE is not set
 CONFIG_WS_WIFI_PASS="changeme"
+CONFIG_WS_WIFI_EAP_IDENTITY=""
+CONFIG_WS_WIFI_EAP_USERNAME=""
+CONFIG_WS_WIFI_EAP_PASSWORD=""
 CONFIG_WS_SERVER_HOST="192.168.1.100"
 CONFIG_WS_SERVER_PORT=5000
 CONFIG_WS_API_KEY=""

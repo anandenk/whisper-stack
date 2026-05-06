@@ -136,19 +136,23 @@ server/
 plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
 requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
-firmware/                    ESP-IDF v5.3.5 project (M1 shipped, M2 pending)
-└── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h + app_state.h
+firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
+└── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h
+                             + http_client.c/h + app_state.h
 ```
 
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 fully shipped** (workstation session 2026-05-06):
-OLED renders status text, WiFi STA gets a DHCP lease and is reachable
-via ping, INMP441 captures audio with RMS/peak responsive to sound.
-All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI` in
-`firmware/main/app_state.h`) are flipped on. Next milestone is M2
-(button + `POST /converse` round-trip).
+classic, NOT s3). **M1 + M2 shipped** (workstation session 2026-05-05):
+OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
+via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
+responsive to sound, and pressing BOOT triggers a 3-second recording
+that gets POSTed to `/converse?omit_audio_base64=1` with the
+workstation's Realtek output speaking the reply. All three subsystems
+(`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI` in
+`firmware/main/app_state.h`) are flipped on. Next milestone is M3
+(VAD-bounded recording instead of fixed 3 s).
 
 ### Build environment quirk (Windows)
 
@@ -191,26 +195,62 @@ unreferenced functions get `--gc-sections`-removed at link time.
 `firmware/sdkconfig` (gitignored) holds the WiFi creds + server IP +
 API key. `firmware/sdkconfig.defaults` (committed) has placeholders
 only. **`idf.py fullclean` deletes `sdkconfig`** and regenerates from
-defaults — wipes creds. After a fullclean, re-edit
-`CONFIG_WS_WIFI_SSID` / `CONFIG_WS_WIFI_PASS` /
-`CONFIG_WS_SERVER_HOST` / `CONFIG_WS_API_KEY` before rebuilding.
+defaults — wipes creds. After a fullclean, re-run `idf.py menuconfig`
+to set `WS_WIFI_SSID` / WiFi auth mode + creds (`WS_WIFI_PASS` for
+PSK, or `WS_WIFI_EAP_USERNAME` + `WS_WIFI_EAP_PASSWORD` for
+WPA2-Enterprise) / `WS_SERVER_HOST` / `WS_API_KEY` before rebuilding.
 
-### 🚧 Open blockers — investigate next session
+### WiFi auth modes (PSK + WPA2-Enterprise)
 
-1. **Dorm WiFi (WPA2-Enterprise) doesn't work.** The user is on a
-   university network that uses 802.1X / EAP (username + password +
-   device registration), not plain WPA2-PSK. Our firmware
-   (`firmware/main/wifi.c`) is hardcoded to `WIFI_AUTH_WPA2_PSK` and
-   passes a single password via `wifi_config.sta.password`. Current
-   workaround: **iPhone personal hotspot** (standard WPA2-PSK), which
-   works but means the server LAN-IP changes per session and the
-   hotspot sleeps after ~90 s idle. To support dorm WiFi properly,
-   need to switch to `esp_wifi_sta_wpa2_ent_set_*` APIs in IDF —
-   see [esp_wifi 802.1X docs](https://docs.espressif.com/projects/esp-idf/en/v5.3/esp32/api-reference/network/esp_wifi.html).
-   Look into this **before M2** so the device is usable in the
-   actual deployment environment.
+`firmware/main/Kconfig.projbuild` has a `choice WS_WIFI_AUTH_MODE`
+between `WPA2_PSK` (home / phone hotspot) and
+`WPA2_ENTERPRISE` (eduroam, dorm 802.1X). The default in
+`sdkconfig.defaults` is PSK. `firmware/main/wifi.c` branches on the
+choice — PSK sets `wifi_config.sta.password`; enterprise calls
+`esp_eap_client_set_username/password/identity` and
+`esp_wifi_sta_enterprise_enable()`. PEAP-MSCHAPv2 (the IDF default
+inner method) is what eduroam-style networks use; we don't support
+EAP-TLS / client certs. Server cert validation is **off** in v1
+(documented in `wifi.c`'s comment block) — works for a single known
+network; revisit if MITM threat model changes.
 
-2. **ELEGOO 830-tie-point breadboard has an internal mid-rail split.**
+To switch auth modes: `idf.py menuconfig` → "Whisper Stack Device" →
+"WiFi auth mode".
+
+### enterprise Wi-Fi deployment recipe (verified 2026-05-05)
+
+The dorm-WiFi-doesn't-work blocker is resolved. Recipe for connecting
+the device to an 802.1X enterprise network:
+
+1. **Auth mode:** WPA2-Enterprise. **Outer identity:** empty.
+   **Username:** bare username (e.g. `username`), **NOT** `username@example.edu`.
+   **Password:** network login password. **EAP method:** PEAP-MSCHAPv2
+   (IDF default — no extra config). **CA cert validation:** off (if local network policy omits certificate validation).
+2. **First boot will associate but DHCP stalls.** A device new to
+   enterprise Wi-Fi lands on a quarantine VLAN (`10.x.x.x`) with no
+   route to the workstation subnet (`10.x.x.x`). The first
+   `wifi_init_sta_blocking` may even time out before DHCP completes
+   the second time around — bumped the timeout to 90 s (`wifi.c`)
+   to cover FortiNAC's reclassification window.
+3. **Register the device's MAC at**
+   [https://network-access.example.edu/registration/](https://network-access.example.edu/registration/)
+   (MAC printed at boot in serial log + by `esptool.py read_mac`).
+   Network policy may limit devices per user. **The device must have associated
+   to enterprise Wi-Fi once before** this page accepts the MAC — if you
+   try to pre-register, you'll get "Unable to locate client for
+   Physical Address". Flash → boot → see WiFi assoc → THEN register.
+4. **After registration, reboot the ESP-32.** FortiNAC will issue a
+   `10.x.x.x` lease (same /16 as the workstation). The first wifi
+   attempt may still fail while FortiNAC reclassifies; the firmware's
+   retry logic + 90 s timeout handle it.
+5. **There is also a `IoT-Network` SSID** for IoT devices (WPA2-PSK,
+   no netid, separate VLAN). Not used here — cross-VLAN reachability
+   to a workstation on enterprise Wi-Fi was unverified, and the same
+   netid-based 802.1X path was simpler. Documented for future devices.
+
+### 🚧 Notes / gotchas
+
+1. **ELEGOO 830-tie-point breadboard has an internal mid-rail split.**
    The colored line on each rail runs continuously edge-to-edge, BUT
    the metal contact strip is split in half around the middle of the
    board (~row 30). Connections on opposite halves of the same rail
@@ -219,6 +259,12 @@ defaults — wipes creds. After a fullclean, re-edit
    middle to bridge them. This burned us during M1 hardening — the
    OLED dropped dark because its VCC bridge landed on the opposite
    half from the 3V3 feed.
+
+2. **Server must bind to `0.0.0.0`, not the default `127.0.0.1`,**
+   for the ESP-32 to reach it from another LAN device. Run with
+   `HOST=0.0.0.0 .venv/Scripts/python.exe -m server.app`. The
+   `localhost`-only default is convenient for desktop dev but tripped
+   up the first dorm bring-up.
 
 ## TTS output device
 
