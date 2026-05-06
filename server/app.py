@@ -956,7 +956,27 @@ def main():
             print(f"WARNING: wakeword warmup skipped: {exc!r}", flush=True)
         print("Warmup complete.", flush=True)
     print(f"Listening on http://{config.HOST}:{config.PORT}", flush=True)
-    app.run(host=config.HOST, port=config.PORT, debug=False, use_reloader=False)
+    # threaded=True so a slow /listen (which holds wakeword._LOCK for the
+    # life of the request) doesn't queue all other handlers behind it.
+    # The Werkzeug dev server is single-threaded by default — without
+    # this flag, one stuck firmware /listen request can wedge /converse,
+    # /health, and every other endpoint indefinitely. (Discovered during
+    # M4 firmware bench-up: a TCP-backpressure deadlock left a /listen
+    # request hung in request.stream.read forever, locking out new
+    # connections from the firmware's reconnect loop.)
+    #
+    # Custom request handler with a 5 s socket timeout. Werkzeug's default
+    # is 60 s, which is far too long — when the firmware RSTs an idle
+    # /listen connection, the server-side recv blocks until that 60 s
+    # elapses, holding wakeword._LOCK for a minute and starving every
+    # subsequent /listen request. With 5 s, dead connections die fast
+    # and the lock recycles within seconds.
+    from werkzeug.serving import WSGIRequestHandler
+    class FastFailHandler(WSGIRequestHandler):
+        timeout = 5
+    app.run(host=config.HOST, port=config.PORT, debug=False,
+            use_reloader=False, threaded=True,
+            request_handler=FastFailHandler)
 
 
 if __name__ == "__main__":

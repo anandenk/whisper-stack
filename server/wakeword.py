@@ -86,7 +86,14 @@ def stream_predict(read_chunk: Callable[[int], bytes]) -> dict:
     """
     import numpy as np
 
-    with _LOCK:
+    # Short-acquire so a wedged previous request (stuck in read_chunk
+    # on a dead client socket) doesn't queue every new /listen behind
+    # it forever. If the lock is contended, fail fast — the firmware
+    # will retry on its next reconnect cycle, by which point the
+    # zombie should have hit Werkzeug's request-handler timeout.
+    if not _LOCK.acquire(timeout=2.0):
+        return {"wake": False, "reason": "busy"}
+    try:
         model = _ensure_model()
         # Reset between arms so leftover scores from the previous
         # request can't carry into this one as a phantom detection.
@@ -100,7 +107,13 @@ def stream_predict(read_chunk: Callable[[int], bytes]) -> dict:
             if time.monotonic() >= deadline:
                 return {"wake": False, "reason": "idle_timeout"}
 
-            chunk = read_chunk(READ_CHUNK_BYTES)
+            try:
+                chunk = read_chunk(READ_CHUNK_BYTES)
+            except (OSError, IOError):
+                # Underlying socket errored (ECONNRESET when the firmware
+                # uses SO_LINGER=0, etc.) — same as a graceful close from
+                # our perspective: the client is gone.
+                return {"wake": False, "reason": "client_closed"}
             if not chunk:
                 # Client closed the connection. Treat as graceful per the
                 # /listen spec — the firmware uses TCP close to cancel.
@@ -122,3 +135,5 @@ def stream_predict(read_chunk: Callable[[int], bytes]) -> dict:
                         "score": score,
                         "model": _MODEL_NAME,
                     }
+    finally:
+        _LOCK.release()

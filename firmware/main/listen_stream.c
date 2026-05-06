@@ -124,14 +124,31 @@ static int connect_listen_socket(void)
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof cnt);
 
-    // Send/recv timeouts. Without these, send() blocks forever when the
-    // server's TCP recv buffer fills (e.g. server holds wakeword._LOCK
-    // from a previous request whose client died ungracefully). Originally
-    // omitted — caused the "device freezes after a few wakes" hang
-    // observed during M4 bench-up.
+    // Recv timeout only — send blocks until the server drains, which
+    // is what we want for sustained streaming. (We initially also set
+    // SO_SNDTIMEO=5 s as defense in depth, but it caused periodic
+    // EAGAIN every ~17 s when transient TCP backpressure was normal,
+    // which dropped wake-word audio during reconnects. The server
+    // now has its own FastFailHandler + lock-acquire timeout, so a
+    // wedged server can't wedge us; we're safe to wait indefinitely
+    // on send.)
     struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+
+    // SO_LINGER with l_linger=0: close() sends TCP RST and discards any
+    // unACK'd data instead of queuing FIN behind it. Critical for the
+    // failure-recovery path: when SO_SNDTIMEO fires, lwIP's tx buffer
+    // has ~5 KB of unACK'd audio sitting in it. Without LINGER, FIN
+    // queues behind that data, the server's request.stream.read keeps
+    // blocking on a connection that's effectively dead, and wakeword.
+    // _LOCK stays held for many seconds — every reconnect queues
+    // behind the zombie. With LINGER=0, close() sends RST, server's
+    // recv returns ECONNRESET on the next read, treats as
+    // client_closed, releases the lock immediately. RST is appropriate
+    // here because we have nothing to flush — the in-flight audio is
+    // already old and the server doesn't care about it.
+    struct linger lg = { .l_onoff = 1, .l_linger = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_LINGER, &lg, sizeof lg);
 
     return sock;
 }

@@ -70,4 +70,16 @@ menu "Whisper Stack Device"
             Must match server's API_KEY in .env. Empty disables auth
             (LAN-only mode).
 
+    config WS_SESSION_ID
+        string "Session ID for multi-turn conversation memory"
+        default "esp32"
+        help
+            Passed as ?session_id=<value> on /converse. The server
+            keeps a per-session conversation history (markdown file
+            on disk, idle-bounded TTL — see notes/sessions-plan.md).
+            Default "esp32" enables follow-up questions like
+            "what about tomorrow?" to remember the previous turn.
+            Set to empty to opt out (every turn stateless).
+            Must match [A-Za-z0-9_-]{1,64}.
+
 endmenu

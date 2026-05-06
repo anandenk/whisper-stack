@@ -55,10 +55,13 @@ esp_err_t http_post_converse(const int16_t *pcm, size_t n_samples, converse_resp
     if (!pcm || !resp || n_samples == 0) return ESP_ERR_INVALID_ARG;
     memset(resp, 0, sizeof *resp);
 
-    char url[160];
-    snprintf(url, sizeof url,
-             "http://%s:%d/converse?omit_audio_base64=1",
-             CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+    char url[256];
+    int url_n = snprintf(url, sizeof url,
+                         "http://%s:%d/converse?omit_audio_base64=1",
+                         CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+    if (CONFIG_WS_SESSION_ID[0] != '\0' && url_n > 0 && url_n < (int)sizeof url) {
+        snprintf(url + url_n, sizeof url - url_n, "&session_id=%s", CONFIG_WS_SESSION_ID);
+    }
 
     char *resp_buf = malloc(HTTP_RESP_CAP);
     if (!resp_buf) {
@@ -188,14 +191,17 @@ esp_err_t http_converse_stream_open(http_converse_stream_handle_t *out)
     struct http_converse_stream_s *s = calloc(1, sizeof *s);
     if (!s) return ESP_ERR_NO_MEM;
 
-    s->url = malloc(160);
+    s->url = malloc(256);
     s->resp_buf = malloc(HTTP_RESP_CAP);
     if (!s->url || !s->resp_buf) {
         free(s->url); free(s->resp_buf); free(s);
         return ESP_ERR_NO_MEM;
     }
-    snprintf(s->url, 160, "http://%s:%d/converse?omit_audio_base64=1",
-             CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+    int url_n = snprintf(s->url, 256, "http://%s:%d/converse?omit_audio_base64=1",
+                         CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+    if (CONFIG_WS_SESSION_ID[0] != '\0' && url_n > 0 && url_n < 256) {
+        snprintf(s->url + url_n, 256 - url_n, "&session_id=%s", CONFIG_WS_SESSION_ID);
+    }
 
     esp_http_client_config_t cfg = {
         .url            = s->url,
