@@ -124,6 +124,15 @@ static int connect_listen_socket(void)
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof cnt);
 
+    // Send/recv timeouts. Without these, send() blocks forever when the
+    // server's TCP recv buffer fills (e.g. server holds wakeword._LOCK
+    // from a previous request whose client died ungracefully). Originally
+    // omitted — caused the "device freezes after a few wakes" hang
+    // observed during M4 bench-up.
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+
     return sock;
 }
 
@@ -260,6 +269,8 @@ static listen_result_t run_listen_session(int sock, preroll_t *preroll)
 {
     static int16_t frame[LISTEN_FRAME_SAMPLES];
     int prev_button_low = (gpio_get_level(BUTTON_GPIO) == 0) ? 1 : 0;
+    uint32_t frames_sent = 0;
+    int64_t  last_heartbeat_us = esp_timer_get_time();
 
     i2s_mic_drain();
 
@@ -280,6 +291,18 @@ static listen_result_t run_listen_session(int sock, preroll_t *preroll)
                 ESP_LOGW(TAG, "send_chunk failed (errno=%d) — reconnecting", errno);
                 return LISTEN_RESULT_RECONNECT;
             }
+            frames_sent++;
+        }
+
+        // Heartbeat every 30 s so we can spot hangs in the serial monitor.
+        // Silent listen_stream looks identical to a stuck listen_stream
+        // without this; it bit us during M4 bench-up.
+        int64_t now_us = esp_timer_get_time();
+        if (now_us - last_heartbeat_us >= 30LL * 1000 * 1000) {
+            ESP_LOGI(TAG, "alive — %lu frames streamed (free heap %u B)",
+                     (unsigned long)frames_sent,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+            last_heartbeat_us = now_us;
         }
 
         if (sock_has_response(sock)) {

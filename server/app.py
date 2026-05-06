@@ -940,6 +940,20 @@ def main():
         modes.get_llm("complex").warmup()
         print("Warming up TTS...", flush=True)
         modes.get_tts().warmup()
+        # Pre-load the openwakeword model so the first /listen request
+        # doesn't pay a ~1.2 s lazy-load cost while the firmware is already
+        # streaming chunks at it. Without this pre-warm, the firmware's
+        # send buffer fills before the server starts draining, send()
+        # times out under SO_SNDTIMEO, and the device enters a runaway
+        # reconnect loop. Best-effort: if openwakeword isn't installed,
+        # /listen returns 503 anyway, so silently skip.
+        try:
+            import server.wakeword as _ww
+            if _ww.is_available():
+                print("Warming up wake-word model...", flush=True)
+                _ww._ensure_model()
+        except Exception as exc:
+            print(f"WARNING: wakeword warmup skipped: {exc!r}", flush=True)
         print("Warmup complete.", flush=True)
     print(f"Listening on http://{config.HOST}:{config.PORT}", flush=True)
     app.run(host=config.HOST, port=config.PORT, debug=False, use_reloader=False)

@@ -144,27 +144,53 @@ firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 + M2 + M3 shipped** (workstation session
+classic, NOT s3). **M1 + M2 + M3 + M4 shipped** (workstation session
 2026-05-05). State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
   responsive to sound.
-- Pressing BOOT starts a **VAD-bounded** recording (was fixed 3 s in
-  M2) that streams over **HTTP chunked-transfer** as it's captured —
-  no heap cap on length. VAD stops on 2.5 s of silence (`vad.h`)
-  after voice has been heard, or returns NO_SPEECH after 15 s of
-  initial silence, or BUTTON_CANCEL on a ≥1 s long-press during
-  recording.
+- **Hands-free wake** (M4): say "hey jarvis", server-side openWakeWord
+  fires, device transitions to LISTENING with a 500 ms pre-roll so the
+  question after the wake word isn't truncated. BOOT button is preserved
+  as a manual-wake fallback.
+- VAD-bounded recording (M3) streams over **HTTP chunked-transfer**
+  as it's captured — no heap cap on length. VAD stops on 2.5 s of
+  silence (`vad.h`) after voice has been heard, or returns NO_SPEECH
+  after 15 s of initial silence, or BUTTON_CANCEL on a ≥1 s long-press.
 - Server replies (`/converse?omit_audio_base64=1`) come back as
   small JSON; workstation Realtek output speaks the answer; OLED
   shows transcript + speaking countdown.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
 
-Next milestone is M4 (server-side openWakeWord via the existing
-`POST /listen`; firmware adds a `listen_stream_task` that holds a
-chunked-transfer connection open while IDLE).
+Next milestone is M5 (continuous mode after wake — follow-ups don't
+need re-waking) or M6 (OLED polish + VU bar). Both are smaller than
+M1-M4 individually.
+
+### M4 / wake-word gotchas (worth preserving)
+
+1. **`/listen` cannot use `esp_http_client`** — it's a full-duplex
+   pattern (firmware writes chunks indefinitely, server may reply
+   mid-stream), and IDF's HTTP client doesn't expose the underlying
+   transport handle so we can't `select()` for a mid-stream response.
+   `firmware/main/listen_stream.c` uses raw lwIP sockets with a
+   manual chunked-encode + recv-until-FIN parser. `/converse` keeps
+   `esp_http_client` because its one-shot upload pattern works fine.
+2. **Socket needs `SO_SNDTIMEO`.** Without it, `send()` blocks
+   forever when the server's TCP recv buffer fills (any backpressure
+   = permanent device freeze). Set to 5 s; transient congestion
+   surfaces as `errno=11 EAGAIN`, the firmware logs and reconnects.
+3. **The server MUST pre-warm openWakeWord** in its startup
+   sequence (`server/app.py` `main()`). The model takes ~1.2 s to
+   lazy-load on first use; if the firmware is already streaming
+   chunks at it during that window, kernel buffers fill and the
+   firmware's send times out before the server starts draining.
+   The pre-warm + the `SO_SNDTIMEO` are belt-and-suspenders.
+4. **30-second `listen: alive — N frames streamed` heartbeat** in
+   `run_listen_session`. Silent listen_stream looks identical to a
+   stuck listen_stream without it. The heartbeat is the diagnostic
+   signal — if frames-streamed stops climbing, something is wrong.
 
 ### VAD tuning notes (worth preserving for future-Claude)
 
