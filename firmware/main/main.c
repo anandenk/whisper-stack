@@ -12,6 +12,12 @@
 // the start of the user's question (which often overlaps the tail of
 // "...jarvis") isn't lost when VAD takes over.
 //
+// M5: after each reply finishes SPEAKING, do_round_trip_streaming_with_preroll
+// loops into another VAD recording (no preroll, longer initial timeout)
+// so follow-up questions don't need re-waking. Silent for
+// WS_CONVERSATION_TIMEOUT_MS → return to IDLE and let listen_stream_task
+// re-arm /listen for the next wake word. Mirrors tests/jarvis.py 6B.
+//
 // M3 path is preserved as do_round_trip_streaming_with_preroll(...,
 // NULL, 0) — i.e. preroll-less. M2's buffered fallback is still gated
 // on M2_BUFFERED_FALLBACK if the streaming path needs to be reverted.
@@ -41,6 +47,11 @@ static const char *TAG = "whisper-stack";
 
 #define BUTTON_GPIO              GPIO_NUM_0
 #define LONG_PRESS_CANCEL_MS     1000
+// M5: how long to wait for a follow-up question before dropping back to
+// wake-word listening. Match tests/jarvis.py's WAKEWORD_CONVERSATION_TIMEOUT_S
+// default (30 s). The first turn after wake still uses the standard 15 s
+// VAD_INITIAL_TIMEOUT_MS — short, in case wake was a false positive.
+#define WS_CONVERSATION_TIMEOUT_MS  30000
 
 #ifndef M2_BUFFERED_FALLBACK
 #define M2_BUFFERED_FALLBACK     0
@@ -118,26 +129,34 @@ static bool cb_cancel(void *user)
     return (now - ctx->low_started_us) >= ((int64_t)LONG_PRESS_CANCEL_MS * 1000);
 }
 
-// --- Public round-trip entry point (called from listen_stream) ------------
+// --- One round-trip turn (capture → upload → reply → speak countdown) -----
+//
+// Returns ESP_OK iff the turn completed successfully (we got a reply and
+// finished SPEAKING). vr_out is always populated so the caller can see the
+// VAD stop reason — a NO_SPEECH on a follow-up turn is the M5 signal to
+// drop back to wake-word listening, not an error.
 
-void do_round_trip_streaming_with_preroll(const char *ip,
-                                          const int16_t *preroll,
-                                          size_t preroll_n)
+static esp_err_t do_one_turn(const char *ip,
+                             const int16_t *preroll, size_t preroll_n,
+                             int initial_timeout_ms,
+                             bool is_followup,
+                             vad_result_t *vr_out)
 {
     s_state = APP_STATE_LISTENING;
-    oled_status("listening...", "speak now", ip);
+    oled_status(is_followup ? "follow-up..." : "listening...",
+                is_followup ? "speak or wait"  : "speak now", ip);
 
     round_trip_ctx_t ctx = { 0 };
     esp_err_t err = http_converse_stream_open(&ctx.stream);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "stream open failed: %s", esp_err_to_name(err));
         oled_status("server error", "open failed", ip);
-        s_state = APP_STATE_IDLE;
-        return;
+        return err;
     }
 
     // Ship the preroll first so the server's STT sees the lead-in to the
     // user's question (the tail of "...jarvis, what's the weather").
+    // Follow-up turns never have a preroll.
     if (preroll && preroll_n > 0) {
         ESP_LOGI(TAG, "preroll: %u samples", (unsigned)preroll_n);
         if (http_converse_stream_write_preroll(ctx.stream, preroll, preroll_n) != ESP_OK) {
@@ -145,14 +164,13 @@ void do_round_trip_streaming_with_preroll(const char *ip,
         }
     }
 
-    vad_result_t vr;
-    err = vad_record(cb_frame, cb_cancel, &ctx, &vr);
+    err = vad_record(cb_frame, cb_cancel, &ctx, initial_timeout_ms, vr_out);
 
     if (err != ESP_OK) {
         http_converse_stream_abort(ctx.stream);
         const char *line2 = "idle";
         const char *line3 = "press BOOT to talk";
-        switch (vr.reason) {
+        switch (vr_out->reason) {
             case VAD_STOP_BUTTON_CANCEL:    line2 = "cancelled"; break;
             case VAD_STOP_NO_SPEECH:        line2 = "no speech"; line3 = "press + speak"; break;
             case VAD_STOP_FRAME_CB_ERROR:   line2 = "upload err"; line3 = "check wifi";   break;
@@ -160,8 +178,7 @@ void do_round_trip_streaming_with_preroll(const char *ip,
             default: break;
         }
         oled_status(line2, line3, ip);
-        s_state = APP_STATE_IDLE;
-        return;
+        return err;
     }
 
     s_state = APP_STATE_THINKING;
@@ -174,8 +191,7 @@ void do_round_trip_streaming_with_preroll(const char *ip,
         char l3[OLED_CHARS_PER_LINE + 1];
         snprintf(l3, sizeof l3, "status %d", resp.http_status);
         oled_status("server error", l3, ip);
-        s_state = APP_STATE_IDLE;
-        return;
+        return err;
     }
 
     ESP_LOGI(TAG, "transcript: %s", resp.transcript);
@@ -194,6 +210,38 @@ void do_round_trip_streaming_with_preroll(const char *ip,
 #else
     vTaskDelay(pdMS_TO_TICKS(speak_s * 1000));
 #endif
+
+    return ESP_OK;
+}
+
+// --- Public round-trip entry point (called from listen_stream) ------------
+//
+// First turn uses the supplied preroll (from /listen's pre-roll ring) and
+// the standard 15 s NO_SPEECH timeout — short, in case wake fired falsely.
+// On a successful reply, M5 keeps the conversation hot: subsequent turns
+// run preroll-less with a 30 s timeout so the user can ask follow-ups
+// without re-saying "hey jarvis". Silent for the timeout, button cancel,
+// or any error → exit to IDLE and listen_stream_task re-arms /listen.
+
+void do_round_trip_streaming_with_preroll(const char *ip,
+                                          const int16_t *preroll,
+                                          size_t preroll_n)
+{
+    vad_result_t vr;
+    esp_err_t err = do_one_turn(ip, preroll, preroll_n,
+                                /*initial_timeout_ms=*/0, /*is_followup=*/false, &vr);
+
+    while (err == ESP_OK) {
+        // Last turn returned a real reply. Stay open for a follow-up.
+        err = do_one_turn(ip, NULL, 0,
+                          WS_CONVERSATION_TIMEOUT_MS, /*is_followup=*/true, &vr);
+        if (err != ESP_OK && vr.reason == VAD_STOP_NO_SPEECH) {
+            // Conversation timed out — normal exit, not an error.
+            ESP_LOGI(TAG, "continuous mode: silent %dms; back to wake mode",
+                     WS_CONVERSATION_TIMEOUT_MS);
+            break;
+        }
+    }
 
     s_state = APP_STATE_IDLE;
     oled_status("idle", "say 'hey jarvis'", ip);

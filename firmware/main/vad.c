@@ -34,7 +34,7 @@ static inline uint32_t frame_peak(const int16_t *p, size_t n)
 }
 
 esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
-                     void *user, vad_result_t *out)
+                     void *user, int initial_timeout_ms, vad_result_t *out)
 {
     if (!on_frame || !out) return ESP_ERR_INVALID_ARG;
 
@@ -44,8 +44,9 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
 
     i2s_mic_drain();
 
-    const int64_t start_us       = esp_timer_get_time();
-    const int64_t initial_deadline_us = start_us + (int64_t)VAD_INITIAL_TIMEOUT_MS * 1000;
+    const int initial_ms = initial_timeout_ms > 0 ? initial_timeout_ms : VAD_INITIAL_TIMEOUT_MS;
+    const int64_t start_us            = esp_timer_get_time();
+    const int64_t initial_deadline_us = start_us + (int64_t)initial_ms * 1000;
     const int64_t max_deadline_us     = start_us + (int64_t)VAD_MAX_RECORD_MS * 1000;
 
     bool     voice_started      = false;

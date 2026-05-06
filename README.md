@@ -209,7 +209,7 @@ plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       local vs cloud refactor (mostly shipped)
 notes/sessions-plan.md       multi-turn conversation memory (shipped)
 notes/voice-agent-plan.md    streaming TTS, VAD, continuous, interrupt, wake (all shipped)
-notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M4 shipped)
+notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M5 shipped)
 CLAUDE.md                    project instructions for Claude Code agents
 firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
 ├── main/                    application code:
@@ -271,7 +271,7 @@ requires an `X-API-Key` header. The web page persists the key in
   streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
   see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
 
-- **ESP-WROOM-32 firmware — M1, M2, M3, M4 all shipped on real
+- **ESP-WROOM-32 firmware — M1, M2, M3, M4, M5 all shipped on real
   hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
   - **M1** — full module skeleton: SSD1306 OLED via
     `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
@@ -291,15 +291,19 @@ requires an `X-API-Key` header. The web page persists the key in
     with pre-warmed model, threaded mode, fast-fail request handler,
     and lock-acquire timeouts so a wedged client connection can't lock
     out other handlers.
+  - **M5** — **continuous mode after wake**. Once a turn finishes
+    speaking, the device stays open for a follow-up — no re-wake
+    needed — for 30 s of silence (`WS_CONVERSATION_TIMEOUT_MS` in
+    `main.c`), then drops back to /listen. Mirrors `tests/jarvis.py`
+    Phase 6B.
   - **Multi-turn memory** — firmware passes `?session_id=esp32` on
-    `/converse`, so follow-up wakes remember context (10 min idle TTL
-    by default).
+    `/converse`, so wakes (and follow-ups within continuous mode)
+    remember context (10 min idle TTL by default).
 
 ### Planned but not shipped
-- **ESP-WROOM-32 firmware M5–M6** — continuous mode after wake
-  (follow-ups within 30 s of silence skip the re-wake), and OLED
-  polish (live VU bar, transcript display, snappier "wake!" indicator
-  before the round-trip starts). See
+- **ESP-WROOM-32 firmware M6** — OLED polish (live VU bar,
+  transcript display, snappier "wake!" indicator before the
+  round-trip starts). See
   [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
 - **Two-mode plan phases 5, 7, 9** — Deepgram STT, OpenAI TTS, Fly.io
   deploy. Queued behind cloud-provider signups. Only relevant if you

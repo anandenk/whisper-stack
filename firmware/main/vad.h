@@ -17,13 +17,19 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-// 300 instead of jarvis.py's 600 because INMP441 has no AGC and mounting
-// distance (~12+ in. from the user) puts most conversational-speech peaks
-// right around the original 600 threshold — quieter syllables fall below
-// it, so the silence-dwell counter resets too rarely and the dwell trips
-// mid-utterance. 300 is still ~3× the idle-ambient peak (~100) measured
-// in M1's snap test, so room noise won't false-trigger voice detection.
-#define VAD_PEAK_THRESHOLD       300
+// 200 instead of jarvis.py's 600. INMP441 has no AGC, and at typical
+// reading distance (~12+ in.) conversational-speech peaks span a wide
+// range — bench data from M5 continuous-mode session: 680 / 669 / 564
+// / 430 / 393 / 282 across a 6-turn conversation as the user got
+// quieter. Earlier 300 default missed the 282 turn entirely (whole
+// 30 s window of real speech read as silence → dropped out of
+// continuous mode). 200 stays ~2× the idle-ambient peak (~100 from
+// M1's snap test) so room noise still won't false-trigger, but a
+// tired-voice follow-up at the back end of a long chat still clears.
+// Failure asymmetry: a false-positive (noise crosses threshold) costs
+// one wasted /converse round-trip; a false-negative drops the user
+// out of continuous mode. Tilt toward catching speech.
+#define VAD_PEAK_THRESHOLD       200
 // 2500 ms instead of jarvis.py's 1500 ms because users naturally pause
 // >1.5 s mid-sentence when reading from a screen or thinking. The cost
 // is 1 s of extra wait at end-of-utterance before upload starts; the
@@ -63,5 +69,10 @@ typedef bool (*vad_cancel_cb_t)(void *user);
 // until a stop condition fires. `on_cancel` is polled between frames.
 // `user` is passed to both callbacks. `out` is filled in either way.
 // Returns ESP_OK iff the result is one of the OK stops.
+//
+// `initial_timeout_ms` overrides the no-speech bail timeout for this
+// call only; pass 0 to use VAD_INITIAL_TIMEOUT_MS. Continuous-mode
+// follow-up turns (M5) pass WS_CONVERSATION_TIMEOUT_MS here so a
+// thinking pause doesn't drop the user back to wake-word listening.
 esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
-                     void *user, vad_result_t *out);
+                     void *user, int initial_timeout_ms, vad_result_t *out);

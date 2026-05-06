@@ -467,16 +467,40 @@ wake-detection counter.
 
 ### Milestone 5 — Continuous mode after wake
 
+**Status:** ✅ **fully shipped (workstation session 2026-05-06)** —
+5-turn continuous conversation verified end-to-end with session
+memory carrying across turns; clean drop back to /listen wake mode
+on 30 s silence; long-press cancel preserved as escape hatch.
+
 **Goal:** mid-conversation follow-ups don't need re-waking.
 
-- After SPEAKING ends, transition straight to LISTENING (M3 again)
-  with a longer initial timeout (`WAKEWORD_CONVERSATION_TIMEOUT_S`,
-  default 30s on server)
-- 30s of initial silence → drop back to wake-word listening (M4)
-- Same shape as `jarvis.py` Phase 6B, just over a different wake source
+- ✅ After SPEAKING ends, transition straight to LISTENING (M3 again)
+  with a longer initial timeout (`WS_CONVERSATION_TIMEOUT_MS = 30000`
+  in `main.c`, default 30 s — matches server's
+  `WAKEWORD_CONVERSATION_TIMEOUT_S`).
+- ✅ 30 s of initial silence → drop back to wake-word listening (M4).
+  `listen_stream_task` re-arms automatically once `s_state` returns
+  to `APP_STATE_IDLE`.
+- ✅ Implementation: `vad_record()` gained an `initial_timeout_ms`
+  parameter (0 = use default `VAD_INITIAL_TIMEOUT_MS`); `main.c`'s
+  round-trip was split into a `do_one_turn()` helper plus a
+  continuous-mode loop in `do_round_trip_streaming_with_preroll()`.
+  Follow-up turns use no preroll and the 30 s timeout; first
+  post-wake turn keeps the standard 15 s timeout (so a false-wake
+  bails fast).
+- ✅ Same shape as `jarvis.py` Phase 6B over a different wake source.
 
-**Verification:** Wake, ask, hear reply, ask follow-up *without* re-
-waking, hear reply. Stay quiet 30s → back to wake mode.
+**Verification:** ✅ Wake → "what's the capital of France?" → Paris;
+"and Germany?" → Berlin (session memory); 3 follow-ups continued
+fluently. 30 s silence → device returned to /listen wake mode and
+heartbeat resumed.
+
+**Bench finding (worth preserving):** original `VAD_PEAK_THRESHOLD =
+300` dropped quiet end-of-conversation turns. Lowered to 200; full
+rationale in CLAUDE.md "VAD tuning notes". The continuous-mode loop
+exposed this — single-question M2/M3 turns rarely tripped it because
+users start a fresh question energetically. Sustained chat is
+quieter.
 
 ### Milestone 6 — OLED polish + diagnostics
 
@@ -635,7 +659,7 @@ diagnose "is my mic working" with the VU bar.
 | 4 | `firmware/main/listen_stream.c` | ✅ shipped — raw-socket chunked POST to /listen, 500 ms pre-roll ring, SO_LINGER l_linger=0, 30 s heartbeat. NOT esp_http_client (full-duplex pattern). |
 | **WPA2-Enterprise** | `firmware/main/wifi.c` + `Kconfig.projbuild` | ✅ shipped — Kconfig choice between PSK and WPA2-Enterprise (PEAP-MSCHAPv2 via `esp_eap_client_*`). enterprise Wi-Fi deployment recipe in CLAUDE.md. |
 | **Sessions** | `firmware/main/Kconfig.projbuild` + `http_client.c` | ✅ shipped — `WS_SESSION_ID` Kconfig (default `"esp32"`); appended to /converse URL as `?session_id=...` for multi-turn memory. |
-| 5 | `firmware/main/main.c` (or new helper) | edit — continuous mode loop: after SPEAKING, transition to LISTENING (M3 VAD) for `WAKEWORD_CONVERSATION_TIMEOUT_S`, drop back to /listen on initial-silence timeout. |
+| 5 | `firmware/main/main.c` + `vad.h`/`vad.c` | ✅ shipped — `do_one_turn()` helper + continuous-mode loop in `do_round_trip_streaming_with_preroll()`; `vad_record()` gained `initial_timeout_ms` param; `WS_CONVERSATION_TIMEOUT_MS = 30000`. Drop back to /listen on `VAD_STOP_NO_SPEECH` after the 30 s window. Also lowered `VAD_PEAK_THRESHOLD` 300 → 200 based on bench data from continuous-chat sessions. |
 | 6 | `firmware/main/oled.c` | edit — VU bar + transcript overlay. Plus the "wake!" snappy indicator we discussed in the M4 retro. |
 | - | `firmware/sdkconfig.defaults` | ✅ shipped — committed defaults with placeholders; user fills via menuconfig. |
 | - | `firmware/CMakeLists.txt` | ✅ shipped — ESP-IDF project file with all components in REQUIRES. |

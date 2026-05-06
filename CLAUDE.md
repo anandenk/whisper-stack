@@ -144,8 +144,9 @@ firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 + M2 + M3 + M4 shipped** (workstation session
-2026-05-05). State of the device:
+classic, NOT s3). **M1 + M2 + M3 + M4 + M5 shipped** (M5 verified
+on hardware 2026-05-06: 5-turn continuous chat with session memory,
+clean drop back to wake mode on silent timeout). State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
@@ -161,12 +162,16 @@ classic, NOT s3). **M1 + M2 + M3 + M4 shipped** (workstation session
 - Server replies (`/converse?omit_audio_base64=1`) come back as
   small JSON; workstation Realtek output speaks the answer; OLED
   shows transcript + speaking countdown.
+- **Continuous mode after wake** (M5): once a turn finishes SPEAKING,
+  the device stays open for a follow-up question — no re-wake needed —
+  for `WS_CONVERSATION_TIMEOUT_MS` (30 s, in `main.c`). 30 s of silence
+  → drop back to /listen wake mode. Mirrors `tests/jarvis.py` Phase 6B.
+  Session memory carries across turns via `session_id=esp32`.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
 
-Next milestone is M5 (continuous mode after wake — follow-ups don't
-need re-waking) or M6 (OLED polish + VU bar). Both are smaller than
-M1-M4 individually.
+Next milestone is M6 (OLED polish + VU bar — pleasant to use, helps
+diagnose mic at a glance). Smaller than M1-M5 individually.
 
 ### M4 / wake-word gotchas (worth preserving)
 
@@ -221,13 +226,18 @@ sessions of /listen now.
 `firmware/main/vad.h` defaults differ from `tests/jarvis.py` based on
 real-mic real-room behavior at the workstation:
 
-- **`VAD_PEAK_THRESHOLD = 300`** (jarvis.py uses 600). INMP441 has no
-  AGC and at typical reading distance (~12+ in.) most conversational-
-  speech peaks land around 300-700. Threshold of 600 caused the dwell
-  counter to reset only on the loudest syllables, so quieter inter-
-  word audio looked like silence and the dwell tripped mid-utterance.
-  300 catches every syllable; idle ambient peak (~100 from M1's snap
-  test) is well below.
+- **`VAD_PEAK_THRESHOLD = 200`** (jarvis.py uses 600). INMP441 has no
+  AGC and at typical reading distance (~12+ in.) conversational-speech
+  peaks span a wide range. First lowered from 600 → 300 (600 made the
+  silence-dwell counter reset only on the loudest syllables, tripping
+  mid-utterance). Lowered again to 200 after M5 bench data showed
+  conversational peaks declining across a long chat (680 / 669 / 564
+  / 430 / 393 / 282 across six turns) — the 282 turn was real speech
+  the user said but VAD ignored, dropping out of continuous mode.
+  200 keeps ~2× margin over the idle ambient peak (~100 from M1's
+  snap test). The trade is more permissive: false-positive (noise
+  crosses threshold) costs one wasted /converse upload; false-negative
+  drops the user mid-conversation. Tilt toward catching speech.
 - **`VAD_SILENCE_DWELL_MS = 2500`** (jarvis.py uses 1500). When a
   user pauses to think mid-sentence — common when reading from a
   screen — 1.5 s isn't enough. 2.5 s is the trade-off floor: shorter
