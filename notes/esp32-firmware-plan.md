@@ -523,8 +523,12 @@ card, wake splash, live VU bar, partial-row OLED flushes, and
   rest of the screen stays still — no flicker from full-frame redraws.
 - ✅ SPEAKING screen replaced. Old layout truncated transcript + reply
   to ~17 chars each (mush). New layout: model name (e.g.
-  `claude-sonnet-4-6`) + token usage (`in:N out:N`). Full transcript +
-  reply still in the serial log.
+  `claude-sonnet-4-6`), per-call USD cost (`cost  $0.0021`), token
+  usage (`in:N out:N`). Cost is computed server-side via a new
+  `usage.estimated_cost_usd()` helper and surfaced on the `/converse`
+  response as `estimated_cost_usd` so pricing constants stay in one
+  place — local Llama and unknown models return 0.0. Full transcript
+  + reply still in the serial log.
 - ✅ Layout standardization: `oled_frame_begin/end` helpers used by
   every screen so header (`whisper-stack`) and footer (`ip:...`) live
   in one place.

@@ -160,6 +160,13 @@ static void oled_show_reply(const converse_resp_t *r, int speaking_remaining_s, 
     // clipped after "instruct" which still tells you it was Llama.
     oled_draw_text(4, r->model[0] ? r->model : "(model unknown)");
 
+    // Per-call cost in USD. Server returns 0.0 for local Llama and unknown
+    // models. 4 decimals shows Haiku replies (~$0.0001) without losing
+    // resolution; Sonnet's typical ~$0.001-0.05 fits the same width. Long
+    // queries that push past $0.99 just print as $1.0234 etc.
+    snprintf(buf, sizeof buf, "cost  $%.4f", (double)r->estimated_cost_usd);
+    oled_draw_text(5, buf);
+
     // "in:42 out:128" — server sends -1 for either if absent.
     if (r->input_tokens >= 0 || r->output_tokens >= 0) {
         snprintf(buf, sizeof buf, "in:%d out:%d",

@@ -71,6 +71,27 @@ def _model_rates(model: str) -> dict[str, float] | None:
     return None
 
 
+def estimated_cost_usd(model: str | None,
+                       input_tokens: int | float | None,
+                       output_tokens: int | float | None) -> float:
+    """Per-call USD cost estimate for one LLM invocation.
+
+    Returns 0.0 for local models (Llama, etc.) and for unknown models we
+    don't have pricing for. Same pricing constants and matching rules as
+    snapshot(), so per-call values reconcile with the running totals.
+    """
+    if not model:
+        return 0.0
+    if any(m in model.lower() for m in _LOCAL_MODEL_MARKERS):
+        return 0.0
+    rates = _model_rates(model)
+    if rates is None:
+        return 0.0
+    in_t = int(input_tokens or 0)
+    out_t = int(output_tokens or 0)
+    return in_t / 1e6 * rates["input"] + out_t / 1e6 * rates["output"]
+
+
 def snapshot() -> dict:
     """Return a dict shaped for embedding in /health responses."""
     with _LOCK:

@@ -533,6 +533,11 @@ def converse():
             "input": llm_result.get("input_tokens"),
             "output": llm_result.get("output_tokens"),
         },
+        "estimated_cost_usd": usage.estimated_cost_usd(
+            llm_result["model"],
+            llm_result.get("input_tokens"),
+            llm_result.get("output_tokens"),
+        ),
     }
     if audio_b64 is not None:
         body["audio_base64"] = audio_b64

@@ -39,6 +39,7 @@ typedef struct {
     float total_s;
     int   input_tokens;                // <0 if absent
     int   output_tokens;               // <0 if absent
+    float estimated_cost_usd;          // 0 for local Llama / unknown models
 } converse_resp_t;
 
 // POST `pcm` (n_samples int16) to /converse, fill `resp`.

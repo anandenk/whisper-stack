@@ -66,6 +66,8 @@ verified on real hardware.
   output speaks the reply — no on-device DAC in v1.
 - **Per-process token / cost accounting.** `GET /health` returns a
   `usage` block with input/output tokens + USD-cost-since-boot per model.
+  `/converse` also returns a per-call `estimated_cost_usd` so clients
+  (e.g. the ESP-32 device) can show what each individual turn cost.
   Resets on restart; meant for "is this turning into a money fire"
   visibility, not billing accuracy.
 - **Auth.** Optional `API_KEY` shared-secret on `/converse`,
@@ -308,9 +310,12 @@ requires an `X-API-Key` header. The web page persists the key in
     wake model / session id), brief "WAKE / score N.NN" splash on
     each wake event, live VU bar during LISTENING with a threshold
     marker so you can see your voice clearing the VAD floor, and a
-    SPEAKING screen that shows the model name + token usage instead
-    of truncated transcript fragments. Partial-row OLED flushes
-    keep the bar flicker-free.
+    SPEAKING screen that shows the model name + per-call USD cost
+    + token usage instead of truncated transcript fragments. Cost
+    comes from the server (`estimated_cost_usd` on `/converse`) so
+    pricing lives in one place; local Llama replies print
+    `cost  $0.0000`. Partial-row OLED flushes keep the bar
+    flicker-free.
   - **Multi-turn memory** — firmware passes `?session_id=esp32` on
     `/converse`, so wakes (and follow-ups within continuous mode)
     remember context (10 min idle TTL by default).

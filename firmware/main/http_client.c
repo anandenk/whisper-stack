@@ -163,6 +163,7 @@ static esp_err_t parse_converse_json(const char *body, size_t body_len, converse
     resp->stt_s = resp->llm_s = resp->tts_s = resp->total_s = 0.0f;
     resp->input_tokens  = -1;
     resp->output_tokens = -1;
+    resp->estimated_cost_usd = 0.0f;
 
     cJSON *root = cJSON_ParseWithLength(body, body_len);
     if (!root) {
@@ -203,6 +204,9 @@ static esp_err_t parse_converse_json(const char *body, size_t body_len, converse
         if (cJSON_IsNumber(in))  resp->input_tokens  = in->valueint;
         if (cJSON_IsNumber(out)) resp->output_tokens = out->valueint;
     }
+
+    const cJSON *cost = cJSON_GetObjectItemCaseSensitive(root, "estimated_cost_usd");
+    if (cJSON_IsNumber(cost)) resp->estimated_cost_usd = (float)cost->valuedouble;
 
     cJSON_Delete(root);
     return ESP_OK;

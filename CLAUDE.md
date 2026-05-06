@@ -184,9 +184,13 @@ model+tokens speaking screen). State of the device:
   event (200 ms hold); live VU bar on line 6 during LISTENING /
   follow-up turns with a 1-px-wide threshold marker (you literally
   see whether your voice is clearing `VAD_PEAK_THRESHOLD`); SPEAKING
-  screen shows model name + token usage instead of truncated
-  transcript chunks. Bar updates use `oled_flush_row()` (~3.5 ms
-  partial flush) to avoid full-frame flicker.
+  screen shows model name + per-call USD cost + token usage instead
+  of truncated transcript chunks. Cost comes from the server via a
+  new `estimated_cost_usd` field on `/converse` (computed from
+  `usage.estimated_cost_usd()` so prices live in one place). Local
+  Llama replies show `cost  $0.0000`; Sonnet/Haiku show real per-
+  turn cost. Bar updates use `oled_flush_row()` (~3.5 ms partial
+  flush) to avoid full-frame flicker.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
 
