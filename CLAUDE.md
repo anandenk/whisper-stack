@@ -144,15 +144,47 @@ firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 + M2 shipped** (workstation session 2026-05-05):
-OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
-via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
-responsive to sound, and pressing BOOT triggers a 3-second recording
-that gets POSTed to `/converse?omit_audio_base64=1` with the
-workstation's Realtek output speaking the reply. All three subsystems
-(`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI` in
-`firmware/main/app_state.h`) are flipped on. Next milestone is M3
-(VAD-bounded recording instead of fixed 3 s).
+classic, NOT s3). **M1 + M2 + M3 shipped** (workstation session
+2026-05-05). State of the device:
+
+- OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
+  via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
+  responsive to sound.
+- Pressing BOOT starts a **VAD-bounded** recording (was fixed 3 s in
+  M2) that streams over **HTTP chunked-transfer** as it's captured —
+  no heap cap on length. VAD stops on 2.5 s of silence (`vad.h`)
+  after voice has been heard, or returns NO_SPEECH after 15 s of
+  initial silence, or BUTTON_CANCEL on a ≥1 s long-press during
+  recording.
+- Server replies (`/converse?omit_audio_base64=1`) come back as
+  small JSON; workstation Realtek output speaks the answer; OLED
+  shows transcript + speaking countdown.
+- All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
+  in `firmware/main/app_state.h`) are on.
+
+Next milestone is M4 (server-side openWakeWord via the existing
+`POST /listen`; firmware adds a `listen_stream_task` that holds a
+chunked-transfer connection open while IDLE).
+
+### VAD tuning notes (worth preserving for future-Claude)
+
+`firmware/main/vad.h` defaults differ from `tests/jarvis.py` based on
+real-mic real-room behavior at the workstation:
+
+- **`VAD_PEAK_THRESHOLD = 300`** (jarvis.py uses 600). INMP441 has no
+  AGC and at typical reading distance (~12+ in.) most conversational-
+  speech peaks land around 300-700. Threshold of 600 caused the dwell
+  counter to reset only on the loudest syllables, so quieter inter-
+  word audio looked like silence and the dwell tripped mid-utterance.
+  300 catches every syllable; idle ambient peak (~100 from M1's snap
+  test) is well below.
+- **`VAD_SILENCE_DWELL_MS = 2500`** (jarvis.py uses 1500). When a
+  user pauses to think mid-sentence — common when reading from a
+  screen — 1.5 s isn't enough. 2.5 s is the trade-off floor: shorter
+  cuts off mid-thought; longer feels sluggish at end-of-utterance.
+- **`M2_BUFFERED_FALLBACK`** in `main.c` defaults to 0 (M3 streaming).
+  Flip to 1 and rebuild to revert to M2's fixed-3 s buffered POST if
+  the streaming path turns out flaky on a different network.
 
 ### Build environment quirk (Windows)
 

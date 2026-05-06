@@ -17,8 +17,18 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-#define VAD_PEAK_THRESHOLD       600
-#define VAD_SILENCE_DWELL_MS     1500
+// 300 instead of jarvis.py's 600 because INMP441 has no AGC and mounting
+// distance (~12+ in. from the user) puts most conversational-speech peaks
+// right around the original 600 threshold — quieter syllables fall below
+// it, so the silence-dwell counter resets too rarely and the dwell trips
+// mid-utterance. 300 is still ~3× the idle-ambient peak (~100) measured
+// in M1's snap test, so room noise won't false-trigger voice detection.
+#define VAD_PEAK_THRESHOLD       300
+// 2500 ms instead of jarvis.py's 1500 ms because users naturally pause
+// >1.5 s mid-sentence when reading from a screen or thinking. The cost
+// is 1 s of extra wait at end-of-utterance before upload starts; the
+// alternative — being cut off mid-sentence — is the worse failure mode.
+#define VAD_SILENCE_DWELL_MS     2500
 #define VAD_INITIAL_TIMEOUT_MS   15000
 #define VAD_MAX_RECORD_MS        30000   // safety cap; streaming means heap doesn't constrain this
 
