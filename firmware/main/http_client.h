@@ -58,3 +58,11 @@ esp_err_t http_converse_stream_write (http_converse_stream_handle_t h,
 esp_err_t http_converse_stream_finish(http_converse_stream_handle_t h,
                                       converse_resp_t *resp);
 void      http_converse_stream_abort (http_converse_stream_handle_t h);
+
+// Optional pre-roll: append `n_samples` int16 from `preroll` before any
+// VAD frames are written. Used by M4's wake-word path so the start of
+// the user's question — which often overlaps the tail of "...jarvis" —
+// isn't lost. Same return shape as _write.
+esp_err_t http_converse_stream_write_preroll(http_converse_stream_handle_t h,
+                                             const int16_t *preroll,
+                                             size_t n_samples);

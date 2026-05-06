@@ -12,6 +12,7 @@ idf_component_register(
         "i2s_mic.c"
         "http_client.c"
         "vad.c"
+        "listen_stream.c"
     INCLUDE_DIRS "."
     REQUIRES
         # OLED stack

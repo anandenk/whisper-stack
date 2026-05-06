@@ -1,18 +1,20 @@
 // whisper-stack ESP-WROOM-32 firmware — main entry point.
 //
-// Each subsystem is gated on its ENABLE_X flag in app_state.h. The .c
-// files always compile and link, but the peripheral init only runs when
-// its flag is 1.
+// Each subsystem is gated on its ENABLE_X flag in app_state.h.
 //
 // State machine: IDLE → LISTENING → THINKING → SPEAKING → IDLE.
 //
-// M2 (button + fixed 3s recording, buffered POST) is preserved under
-// the M2_BUFFERED_FALLBACK toggle. Default is M3 streaming:
-//   BOOT press → VAD-bounded record (peak threshold + silence dwell)
-//              → chunked HTTP POST written frame-by-frame
-//              → JSON reply parsed
-//              → OLED transcript / reply / speaking timer
-// During recording, holding the button ≥1 s cancels the round-trip.
+// M4: while IDLE, listen_stream_task holds an open chunked-transfer
+// POST to /listen, draining the audio_in ring buffer. On wake fired
+// (or BOOT button as a manual fallback), it transitions to LISTENING
+// and calls do_round_trip_streaming_with_preroll(). The pre-roll is
+// the last ~500 ms of audio that was already streamed to /listen so
+// the start of the user's question (which often overlaps the tail of
+// "...jarvis") isn't lost when VAD takes over.
+//
+// M3 path is preserved as do_round_trip_streaming_with_preroll(...,
+// NULL, 0) — i.e. preroll-less. M2's buffered fallback is still gated
+// on M2_BUFFERED_FALLBACK if the streaming path needs to be reverted.
 
 #include <stdio.h>
 #include <string.h>
@@ -33,28 +35,19 @@
 #include "i2s_mic.h"
 #include "http_client.h"
 #include "vad.h"
+#include "listen_stream.h"
 
 static const char *TAG = "whisper-stack";
 
 #define BUTTON_GPIO              GPIO_NUM_0
-#define BUTTON_POLL_MS           20
-#define BUTTON_DEBOUNCE_TICKS    2          // 2 × 20 ms = 40 ms
-#define LONG_PRESS_CANCEL_MS     1000       // hold-to-cancel during recording
+#define LONG_PRESS_CANCEL_MS     1000
 
-// Set to 1 to fall back to M2's fixed-length buffered POST instead of
-// the M3 streaming path. Useful if the chunked upload turns out to be
-// flaky on real WiFi — flipping this define and rebuilding gets us
-// back to the M2 known-good behavior without code surgery.
 #ifndef M2_BUFFERED_FALLBACK
 #define M2_BUFFERED_FALLBACK     0
 #endif
 
-#if M2_BUFFERED_FALLBACK
-#define M2_RECORD_SECONDS        3
-#define M2_RECORD_TIMEOUT_MS     5000
-#endif
-
-static volatile app_state_t s_state = APP_STATE_BOOT;
+// shared state — listen_stream.c references s_state via extern
+app_state_t s_state = APP_STATE_BOOT;
 
 #if ENABLE_OLED
 static void oled_status(const char *line2, const char *line3, const char *ip)
@@ -100,8 +93,8 @@ static inline void oled_status(const char *l2, const char *l3, const char *ip) {
 
 typedef struct {
     http_converse_stream_handle_t stream;
-    int64_t low_started_us;   // wall time when button most recently went LOW (0 = currently released)
-    bool    has_released;     // true once we've seen the button HIGH after the recording started
+    int64_t low_started_us;
+    bool    has_released;
 } round_trip_ctx_t;
 
 static esp_err_t cb_frame(const int16_t *pcm, size_t n, void *user)
@@ -113,74 +106,23 @@ static esp_err_t cb_frame(const int16_t *pcm, size_t n, void *user)
 static bool cb_cancel(void *user)
 {
     round_trip_ctx_t *ctx = user;
-    int level = gpio_get_level(BUTTON_GPIO);  // 0 pressed, 1 released
+    int level = gpio_get_level(BUTTON_GPIO);
     int64_t now = esp_timer_get_time();
     if (level == 1) {
         ctx->has_released = true;
         ctx->low_started_us = 0;
         return false;
     }
-    // pressed; only count toward cancel once we've seen at least one release
-    // since the recording started (otherwise the same press that triggered
-    // the recording would immediately cancel it).
     if (!ctx->has_released) return false;
     if (ctx->low_started_us == 0) ctx->low_started_us = now;
     return (now - ctx->low_started_us) >= ((int64_t)LONG_PRESS_CANCEL_MS * 1000);
 }
 
-#if M2_BUFFERED_FALLBACK
-// M2 fallback: fixed-length buffered POST. Kept for A/B if streaming flakes.
-static void do_round_trip_buffered(const char *ip)
-{
-    const size_t n_samples = I2S_MIC_SAMPLE_RATE * M2_RECORD_SECONDS;
-    const size_t pcm_bytes = n_samples * sizeof(int16_t);
+// --- Public round-trip entry point (called from listen_stream) ------------
 
-    int16_t *pcm = malloc(pcm_bytes);
-    if (!pcm) {
-        ESP_LOGE(TAG, "OOM for %u-byte PCM buffer", (unsigned)pcm_bytes);
-        oled_status("error", "no memory", ip);
-        return;
-    }
-
-    s_state = APP_STATE_LISTENING;
-    oled_status("listening...", "speak now", ip);
-    esp_err_t err = i2s_mic_capture(pcm, n_samples, M2_RECORD_TIMEOUT_MS);
-    if (err != ESP_OK) {
-        oled_status("error", "mic capture", ip);
-        free(pcm); s_state = APP_STATE_IDLE; return;
-    }
-
-    s_state = APP_STATE_THINKING;
-    oled_status("uploading...", "/converse", ip);
-    converse_resp_t resp;
-    err = http_post_converse(pcm, n_samples, &resp);
-    free(pcm);
-    if (err != ESP_OK) {
-        char l3[OLED_CHARS_PER_LINE + 1];
-        snprintf(l3, sizeof l3, "status %d", resp.http_status);
-        oled_status("server error", l3, ip);
-        s_state = APP_STATE_IDLE; return;
-    }
-    ESP_LOGI(TAG, "transcript: %s", resp.transcript);
-    ESP_LOGI(TAG, "reply:      %s", resp.reply_text);
-
-    s_state = APP_STATE_SPEAKING;
-    int speak_s = (int)(resp.audio_duration_s + 0.5f);
-    if (speak_s < 1) speak_s = 1;
-#if ENABLE_OLED
-    for (int rem = speak_s; rem > 0; --rem) {
-        oled_show_reply(&resp, rem, ip);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-#else
-    vTaskDelay(pdMS_TO_TICKS(speak_s * 1000));
-#endif
-    s_state = APP_STATE_IDLE;
-    oled_status("idle", "press BOOT to talk", ip);
-}
-#endif // M2_BUFFERED_FALLBACK
-
-static void do_round_trip_streaming(const char *ip)
+void do_round_trip_streaming_with_preroll(const char *ip,
+                                          const int16_t *preroll,
+                                          size_t preroll_n)
 {
     s_state = APP_STATE_LISTENING;
     oled_status("listening...", "speak now", ip);
@@ -194,20 +136,28 @@ static void do_round_trip_streaming(const char *ip)
         return;
     }
 
+    // Ship the preroll first so the server's STT sees the lead-in to the
+    // user's question (the tail of "...jarvis, what's the weather").
+    if (preroll && preroll_n > 0) {
+        ESP_LOGI(TAG, "preroll: %u samples", (unsigned)preroll_n);
+        if (http_converse_stream_write_preroll(ctx.stream, preroll, preroll_n) != ESP_OK) {
+            ESP_LOGW(TAG, "preroll write failed; continuing");
+        }
+    }
+
     vad_result_t vr;
     err = vad_record(cb_frame, cb_cancel, &ctx, &vr);
 
     if (err != ESP_OK) {
-        // Non-OK stop: cancel / no-speech / cb-error / mic-error.
         http_converse_stream_abort(ctx.stream);
         const char *line2 = "idle";
         const char *line3 = "press BOOT to talk";
         switch (vr.reason) {
-            case VAD_STOP_BUTTON_CANCEL:    line2 = "cancelled"; line3 = "press BOOT to talk"; break;
-            case VAD_STOP_NO_SPEECH:        line2 = "no speech"; line3 = "press + speak";       break;
-            case VAD_STOP_FRAME_CB_ERROR:   line2 = "upload err"; line3 = "check wifi";         break;
-            case VAD_STOP_MIC_ERROR:        line2 = "mic error";  line3 = "reboot";              break;
-            default:                                                                                break;
+            case VAD_STOP_BUTTON_CANCEL:    line2 = "cancelled"; break;
+            case VAD_STOP_NO_SPEECH:        line2 = "no speech"; line3 = "press + speak"; break;
+            case VAD_STOP_FRAME_CB_ERROR:   line2 = "upload err"; line3 = "check wifi";   break;
+            case VAD_STOP_MIC_ERROR:        line2 = "mic error";  line3 = "reboot";        break;
+            default: break;
         }
         oled_status(line2, line3, ip);
         s_state = APP_STATE_IDLE;
@@ -246,47 +196,7 @@ static void do_round_trip_streaming(const char *ip)
 #endif
 
     s_state = APP_STATE_IDLE;
-    oled_status("idle", "press BOOT to talk", ip);
-}
-
-static void button_task(void *arg)
-{
-    const char *ip = (const char *)arg;
-
-    gpio_config_t io = {
-        .pin_bit_mask = 1ULL << BUTTON_GPIO,
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&io);
-
-    int low_count = 0;
-    int prev_pressed = 0;
-
-    while (1) {
-        int level = gpio_get_level(BUTTON_GPIO);
-
-        if (level == 0) {
-            if (low_count < BUTTON_DEBOUNCE_TICKS) low_count++;
-        } else {
-            low_count = 0;
-        }
-        int pressed = (low_count >= BUTTON_DEBOUNCE_TICKS);
-
-        if (pressed && !prev_pressed && s_state == APP_STATE_IDLE) {
-            ESP_LOGI(TAG, "button press detected");
-#if M2_BUFFERED_FALLBACK
-            do_round_trip_buffered(ip);
-#else
-            do_round_trip_streaming(ip);
-#endif
-        }
-        prev_pressed = pressed;
-
-        vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
-    }
+    oled_status("idle", "say 'hey jarvis'", ip);
 }
 
 void app_main(void)
@@ -298,7 +208,7 @@ void app_main(void)
              esp_get_idf_version());
     ESP_LOGI(TAG, "subsystems: OLED=%d MIC=%d WIFI=%d  upload=%s",
              ENABLE_OLED, ENABLE_MIC, ENABLE_WIFI,
-             M2_BUFFERED_FALLBACK ? "M2-buffered" : "M3-streaming");
+             M2_BUFFERED_FALLBACK ? "M2-buffered" : "M3-streaming + M4-wake");
 
 #if ENABLE_OLED
     if (oled_init() == ESP_OK) {
@@ -326,15 +236,25 @@ void app_main(void)
     }
 #endif
 
+    // BOOT button — needs to be configured before listen_stream_task starts
+    // since listen_stream polls GPIO 0 directly for the manual-wake fallback.
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << BUTTON_GPIO,
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+
     s_state = APP_STATE_IDLE;
-    oled_status("idle", "press BOOT to talk", ip);
+    oled_status("idle", "say 'hey jarvis'", ip);
 
     ESP_LOGI(TAG, "free heap: %u B", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
 #if ENABLE_MIC && ENABLE_WIFI
-    BaseType_t ok = xTaskCreate(button_task, "button", 8192, ip, 4, NULL);
-    if (ok != pdPASS) {
-        ESP_LOGE(TAG, "xTaskCreate(button) failed");
+    if (listen_stream_init(ip) != ESP_OK) {
+        ESP_LOGE(TAG, "listen_stream_init failed");
     }
 #endif
 

@@ -252,6 +252,16 @@ esp_err_t http_converse_stream_write(http_converse_stream_handle_t s,
     return err;
 }
 
+esp_err_t http_converse_stream_write_preroll(http_converse_stream_handle_t s,
+                                             const int16_t *preroll, size_t n_samples)
+{
+    // Same wire shape — preroll is just audio, identical chunk encoding.
+    // Lives as a separate function so future tuning (e.g. mark the
+    // preroll boundary in metadata) has somewhere to land without
+    // touching the per-frame hot path.
+    return http_converse_stream_write(s, preroll, n_samples);
+}
+
 esp_err_t http_converse_stream_finish(http_converse_stream_handle_t s, converse_resp_t *resp)
 {
     if (!s || !resp) return ESP_ERR_INVALID_ARG;
