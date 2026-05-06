@@ -36,10 +36,13 @@ static const char *TAG = "listen";
 extern app_state_t s_state;  // defined in main.c
 
 // Forward-declared in main.c. preroll may be NULL/zero for button-triggered
-// (no pre-roll needed) round-trips.
+// (no pre-roll needed) round-trips. wake_score is the openWakeWord score
+// from the /listen response (0..1); pass <= 0 for button-triggered turns
+// where there is no wake event to display.
 extern void do_round_trip_streaming_with_preroll(const char *ip,
                                                  const int16_t *preroll,
-                                                 size_t preroll_n);
+                                                 size_t preroll_n,
+                                                 double wake_score);
 
 // --- Pre-roll ring buffer -------------------------------------------------
 
@@ -213,8 +216,12 @@ static bool sock_has_response(int sock)
 // Slurp the response until the server FINs (recv == 0) or buffer fills.
 // Then locate the JSON body and parse the wake field. Returns true if
 // `wake==true` in the response, false otherwise (logs the reason).
-static bool read_and_parse_response(int sock)
+// On wake==true, also writes the openWakeWord score (0..1) to *score_out
+// so the caller can display it on the OLED splash.
+static bool read_and_parse_response(int sock, double *score_out)
 {
+    if (score_out) *score_out = 0.0;
+
     static char buf[LISTEN_RESP_BUF_SIZE];
     size_t total = 0;
     while (total < sizeof(buf) - 1) {
@@ -261,7 +268,9 @@ static bool read_and_parse_response(int sock)
     cJSON *reason = cJSON_GetObjectItemCaseSensitive(root, "reason");
     bool wake_b = cJSON_IsTrue(wake);
     if (wake_b) {
-        ESP_LOGI(TAG, "WAKE fired (score=%.2f)", cJSON_IsNumber(score) ? score->valuedouble : 0);
+        double s = cJSON_IsNumber(score) ? score->valuedouble : 0.0;
+        if (score_out) *score_out = s;
+        ESP_LOGI(TAG, "WAKE fired (score=%.2f)", s);
     } else {
         ESP_LOGI(TAG, "no wake (reason=%s)",
                  cJSON_IsString(reason) ? reason->valuestring : "unknown");
@@ -281,9 +290,12 @@ typedef enum {
 // Stream audio to /listen until something terminates the connection.
 // On WAKE or BUTTON, the preroll is left populated for the caller to
 // snapshot. On RECONNECT, the preroll is best-effort (caller will
-// reset it on the next arm).
-static listen_result_t run_listen_session(int sock, preroll_t *preroll)
+// reset it on the next arm). On WAKE, *score_out gets the openWakeWord
+// score (0..1); zeroed otherwise.
+static listen_result_t run_listen_session(int sock, preroll_t *preroll,
+                                          double *score_out)
 {
+    if (score_out) *score_out = 0.0;
     static int16_t frame[LISTEN_FRAME_SAMPLES];
     int prev_button_low = (gpio_get_level(BUTTON_GPIO) == 0) ? 1 : 0;
     uint32_t frames_sent = 0;
@@ -323,7 +335,7 @@ static listen_result_t run_listen_session(int sock, preroll_t *preroll)
         }
 
         if (sock_has_response(sock)) {
-            return read_and_parse_response(sock) ? LISTEN_RESULT_WAKE : LISTEN_RESULT_RECONNECT;
+            return read_and_parse_response(sock, score_out) ? LISTEN_RESULT_WAKE : LISTEN_RESULT_RECONNECT;
         }
     }
 }
@@ -392,19 +404,20 @@ static void listen_stream_task(void *arg)
             continue;
         }
 
-        listen_result_t r = run_listen_session(sock, &preroll);
+        double wake_score = 0.0;
+        listen_result_t r = run_listen_session(sock, &preroll, &wake_score);
         close(sock);
 
         switch (r) {
             case LISTEN_RESULT_WAKE: {
                 size_t n = preroll_snapshot(&preroll, snapshot);
                 ESP_LOGI(TAG, "WAKE → round-trip with %u-sample preroll", (unsigned)n);
-                do_round_trip_streaming_with_preroll(ip, snapshot, n);
+                do_round_trip_streaming_with_preroll(ip, snapshot, n, wake_score);
                 break;
             }
             case LISTEN_RESULT_BUTTON: {
                 ESP_LOGI(TAG, "BUTTON → round-trip without preroll");
-                do_round_trip_streaming_with_preroll(ip, NULL, 0);
+                do_round_trip_streaming_with_preroll(ip, NULL, 0, 0.0);
                 break;
             }
             case LISTEN_RESULT_RECONNECT:

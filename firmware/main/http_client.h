@@ -13,16 +13,32 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 
 #define CONVERSE_TRANSCRIPT_MAX 192
 #define CONVERSE_REPLY_MAX      384
+#define CONVERSE_MODEL_MAX       64
+#define CONVERSE_ROUTE_MAX       16
 
 typedef struct {
     int   http_status;             // 200 on success
     char  transcript[CONVERSE_TRANSCRIPT_MAX];
     char  reply_text[CONVERSE_REPLY_MAX];
     float audio_duration_s;        // 0 if absent / not played
+
+    // M6: route + model + timings + tokens, used for the SPEAKING-screen
+    // overlay so the user can see what the server actually did instead
+    // of a transcript fragment that's truncated past usefulness.
+    char  route[CONVERSE_ROUTE_MAX];   // "simple" | "complex"
+    char  model[CONVERSE_MODEL_MAX];   // e.g. "claude-sonnet-4-6"
+    bool  auto_escalated;              // simple-route query escalated to complex
+    float stt_s;
+    float llm_s;
+    float tts_s;
+    float total_s;
+    int   input_tokens;                // <0 if absent
+    int   output_tokens;               // <0 if absent
 } converse_resp_t;
 
 // POST `pcm` (n_samples int16) to /converse, fill `resp`.

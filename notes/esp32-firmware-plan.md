@@ -504,17 +504,46 @@ quieter.
 
 ### Milestone 6 — OLED polish + diagnostics
 
+**Status:** ✅ **shipped (workstation session 2026-05-06)** — boot
+card, wake splash, live VU bar, partial-row OLED flushes, and
+"what model + tokens" SPEAKING screen all landed.
+
 **Goal:** the device is pleasant to use.
 
-- States rendered with consistent layout (status line + small icon)
-- A live VU bar on the OLED during LISTENING (mirrors the web client's
-  VAD meter — useful for tuning peak threshold per environment)
-- Last transcript + last reply (truncated, scrolling on overflow) in
-  debug build
-- Boot screen shows IP, server URL, wake mode
+- ✅ Boot card held ~2 s after WiFi up: shows IP, server `host:port`,
+  wake model, session id. Lets you confirm what server the device
+  booted against without a serial monitor.
+- ✅ Brief "*** WAKE *** / score 0.NN" splash on each wake event,
+  with a 200 ms hold so the score is readable. Audio cost is bounded
+  by the existing 500 ms preroll.
+- ✅ Live VU bar on OLED line 6 during LISTENING and follow-up turns,
+  with a 1-px-wide threshold marker showing where `VAD_PEAK_THRESHOLD`
+  sits — you literally see whether your speech is clearing the bar.
+  Updates every 3rd VAD frame (~240 ms) via `oled_flush_row()` so the
+  rest of the screen stays still — no flicker from full-frame redraws.
+- ✅ SPEAKING screen replaced. Old layout truncated transcript + reply
+  to ~17 chars each (mush). New layout: model name (e.g.
+  `claude-sonnet-4-6`) + token usage (`in:N out:N`). Full transcript +
+  reply still in the serial log.
+- ✅ Layout standardization: `oled_frame_begin/end` helpers used by
+  every screen so header (`whisper-stack`) and footer (`ip:...`) live
+  in one place.
+- ❌ Skipped for v1: scrolling long transcripts (would need a UI task
+  + state machine refactor; truncation is fine for now), bitmap icons
+  (cute, low info-density on a 128×64 panel).
 
-**Verification:** OLED is informative without being noisy. You can
-diagnose "is my mic working" with the VU bar.
+**Verification:** ✅ Boot card visible for ~2 s; "say hey jarvis" →
+splash flashes readably → bar moves with voice → speaking screen
+shows model name + tokens. No flicker. Continuous-mode follow-ups
+still get the bar.
+
+**Bench finding worth preserving:** the SPEAKING screen content went
+through two iterations (full route+timings → model+tokens-only) on
+user feedback that the screen was too busy. The simplest and most
+useful three pieces of info on a tiny OLED, in order of value to a
+voice-product user, are: model name, token usage, ip footer.
+Anything else is bench-only diagnostics that belong in the serial
+log.
 
 ---
 
@@ -660,7 +689,10 @@ diagnose "is my mic working" with the VU bar.
 | **WPA2-Enterprise** | `firmware/main/wifi.c` + `Kconfig.projbuild` | ✅ shipped — Kconfig choice between PSK and WPA2-Enterprise (PEAP-MSCHAPv2 via `esp_eap_client_*`). enterprise Wi-Fi deployment recipe in CLAUDE.md. |
 | **Sessions** | `firmware/main/Kconfig.projbuild` + `http_client.c` | ✅ shipped — `WS_SESSION_ID` Kconfig (default `"esp32"`); appended to /converse URL as `?session_id=...` for multi-turn memory. |
 | 5 | `firmware/main/main.c` + `vad.h`/`vad.c` | ✅ shipped — `do_one_turn()` helper + continuous-mode loop in `do_round_trip_streaming_with_preroll()`; `vad_record()` gained `initial_timeout_ms` param; `WS_CONVERSATION_TIMEOUT_MS = 30000`. Drop back to /listen on `VAD_STOP_NO_SPEECH` after the 30 s window. Also lowered `VAD_PEAK_THRESHOLD` 300 → 200 based on bench data from continuous-chat sessions. |
-| 6 | `firmware/main/oled.c` | edit — VU bar + transcript overlay. Plus the "wake!" snappy indicator we discussed in the M4 retro. |
+| 6 | `firmware/main/oled.{c,h}` | ✅ shipped — added `oled_draw_bar(line, fill_px, marker_px)` + `oled_flush_row(line)` for partial-row updates. |
+| 6 | `firmware/main/main.c` | ✅ shipped — `oled_frame_begin/end` consolidation; `oled_wake_splash`, `oled_boot_screen`, `oled_listening_screen` helpers; cb_frame VU-bar redraw throttled to every 3rd frame; SPEAKING screen now shows model + tokens. |
+| 6 | `firmware/main/listen_stream.c` | ✅ shipped — `read_and_parse_response` now surfaces openWakeWord score; plumbed through to `do_round_trip_streaming_with_preroll`. |
+| 6 | `firmware/main/http_client.{c,h}` | ✅ shipped — `converse_resp_t` extended with `route`, `model`, `auto_escalated`, per-stage timings, token counts. Both buffered (M2) and streaming (M3) parse paths share `parse_converse_json()`. |
 | - | `firmware/sdkconfig.defaults` | ✅ shipped — committed defaults with placeholders; user fills via menuconfig. |
 | - | `firmware/CMakeLists.txt` | ✅ shipped — ESP-IDF project file with all components in REQUIRES. |
 | - | `CLAUDE.md` | ✅ shipped — "Firmware" section, M4 gotchas, VAD tuning, enterprise Wi-Fi recipe. |

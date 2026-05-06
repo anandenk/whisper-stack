@@ -53,6 +53,21 @@ static const char *TAG = "whisper-stack";
 // VAD_INITIAL_TIMEOUT_MS — short, in case wake was a false positive.
 #define WS_CONVERSATION_TIMEOUT_MS  30000
 
+// M6: VU-bar tuning.
+//   * Bar lives on OLED line 6 during LISTENING/follow-up turns; line 7
+//     stays "ip:..." footer; lines 0-5 stay the status text.
+//   * BAR_PEAK_DIVISOR maps mic peak (uint16) to pixels (0..128).
+//     Linear: 200 → 12 px (threshold marker), 600 → 37 px, 2048 → 128 px.
+//     Tune at bench if real conversational peaks bunch up at one end.
+//   * BAR_REDRAW_EVERY_N throttles updates so OLED I²C doesn't dominate
+//     the VAD frame budget (~80 ms/frame). Every 3 frames = ~240 ms.
+#define WS_BAR_LINE              6
+#define WS_BAR_PEAK_DIVISOR      16
+#define WS_BAR_REDRAW_EVERY_N    3
+// Boot card displayed for ~2 s before transitioning to idle, so the user
+// can confirm what server the device is talking to without serial monitor.
+#define WS_BOOT_SCREEN_HOLD_MS   2000
+
 #ifndef M2_BUFFERED_FALLBACK
 #define M2_BUFFERED_FALLBACK     0
 #endif
@@ -61,43 +76,104 @@ static const char *TAG = "whisper-stack";
 app_state_t s_state = APP_STATE_BOOT;
 
 #if ENABLE_OLED
-static void oled_status(const char *line2, const char *line3, const char *ip)
+// All on-screen frames share this header + footer wrapper. Header is
+// always "whisper-stack"; footer is the device IP (so the user can ping
+// /confirm reachability at a glance from any state).
+static void oled_frame_begin(const char *header)
 {
     oled_clear();
-    oled_draw_text(0, "whisper-stack");
-    if (line2) oled_draw_text(2, line2);
-    if (line3) oled_draw_text(3, line3);
-    if (ip) {
+    oled_draw_text(0, header ? header : "whisper-stack");
+}
+static void oled_frame_end(const char *ip)
+{
+    if (ip && *ip) {
         char ip_line[OLED_CHARS_PER_LINE + 1];
         snprintf(ip_line, sizeof ip_line, "ip:%s", ip);
         oled_draw_text(7, ip_line);
     }
     oled_flush();
 }
+static void oled_status(const char *line2, const char *line3, const char *ip)
+{
+    oled_frame_begin(NULL);
+    if (line2) oled_draw_text(2, line2);
+    if (line3) oled_draw_text(3, line3);
+    oled_frame_end(ip);
+}
+// LISTENING / follow-up screen — same layout as oled_status but seeds line 6
+// with an empty VU bar (0 px filled, threshold marker visible). Subsequent
+// cb_frame calls update the bar via oled_flush_row(WS_BAR_LINE).
+static void oled_listening_screen(const char *line2, const char *line3, const char *ip)
+{
+    oled_frame_begin(NULL);
+    if (line2) oled_draw_text(2, line2);
+    if (line3) oled_draw_text(3, line3);
+    int marker_px = VAD_PEAK_THRESHOLD / WS_BAR_PEAK_DIVISOR;
+    oled_draw_bar(WS_BAR_LINE, 0, marker_px);
+    oled_frame_end(ip);
+}
+// Brief flash on every wake event. No explicit delay — the http stream open
+// + preroll write that follow this call (~90 ms) hold the splash on screen
+// long enough to register before the listening screen overwrites it.
+static void oled_wake_splash(double score, const char *ip)
+{
+    char score_line[OLED_CHARS_PER_LINE + 1];
+    snprintf(score_line, sizeof score_line, "    score %.2f", score);
+    oled_frame_begin(NULL);
+    oled_draw_text(2, "    *** WAKE ***");
+    oled_draw_text(3, score_line);
+    oled_frame_end(ip);
+}
+// Boot card — held for WS_BOOT_SCREEN_HOLD_MS so the user can confirm
+// what server / wake model / session id the device booted with.
+// Buffer is intentionally larger than OLED_CHARS_PER_LINE; long hostnames
+// or session IDs get truncated visually by oled_draw_text without losing
+// the leading prefix. Avoids -Wformat-truncation on Kconfig strings of
+// arbitrary length.
+static void oled_boot_screen(const char *ip)
+{
+    char line[80];
+    oled_frame_begin("whisper-stack v0.1");
+    snprintf(line, sizeof line, "ip:    %s", ip[0] ? ip : "(none)");
+    oled_draw_text(2, line);
+    snprintf(line, sizeof line, "srv:   %s:%d", CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+    oled_draw_text(3, line);
+    oled_draw_text(4, "wake:  hey_jarvis");
+    snprintf(line, sizeof line, "ses:   %s", CONFIG_WS_SESSION_ID);
+    oled_draw_text(5, line);
+    oled_draw_text(7, "booting...");
+    oled_flush();
+}
+// SPEAKING-state screen — model name + token usage. The full transcript +
+// reply still go to the serial log; the OLED is for at-a-glance "what
+// model is the server using and how much did this turn cost".
 static void oled_show_reply(const converse_resp_t *r, int speaking_remaining_s, const char *ip)
 {
-    char heard[OLED_CHARS_PER_LINE + 1];
-    char said [OLED_CHARS_PER_LINE + 1];
-    char timer[OLED_CHARS_PER_LINE + 1];
-    const int n = (int)sizeof(heard) - 3;
-    snprintf(heard, sizeof heard, "u:%.*s", n, r->transcript);
-    snprintf(said,  sizeof said,  "a:%.*s", n, r->reply_text);
-    snprintf(timer, sizeof timer, "speaking %ds", speaking_remaining_s);
+    char buf[64];
 
-    oled_clear();
-    oled_draw_text(0, "whisper-stack");
-    oled_draw_text(2, timer);
-    oled_draw_text(5, heard);
-    oled_draw_text(6, said);
-    if (ip) {
-        char ip_line[OLED_CHARS_PER_LINE + 1];
-        snprintf(ip_line, sizeof ip_line, "ip:%s", ip);
-        oled_draw_text(7, ip_line);
+    oled_frame_begin(NULL);
+    snprintf(buf, sizeof buf, "speaking %ds", speaking_remaining_s);
+    oled_draw_text(2, buf);
+
+    // Model name — truncated to fit by oled_draw_text (clips at 21 chars).
+    // "claude-sonnet-4-6" fits whole; "llama3.1:8b-instruct-q5_K_M" gets
+    // clipped after "instruct" which still tells you it was Llama.
+    oled_draw_text(4, r->model[0] ? r->model : "(model unknown)");
+
+    // "in:42 out:128" — server sends -1 for either if absent.
+    if (r->input_tokens >= 0 || r->output_tokens >= 0) {
+        snprintf(buf, sizeof buf, "in:%d out:%d",
+                 r->input_tokens, r->output_tokens);
+        oled_draw_text(6, buf);
     }
-    oled_flush();
+
+    oled_frame_end(ip);
 }
 #else
 static inline void oled_status(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
+static inline void oled_listening_screen(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
+static inline void oled_wake_splash(double s, const char *ip) { (void)s; (void)ip; }
+static inline void oled_boot_screen(const char *ip) { (void)ip; }
 #endif
 
 // --- Round-trip context (frame + cancel callbacks share this) -------------
@@ -111,7 +187,25 @@ typedef struct {
 static esp_err_t cb_frame(const int16_t *pcm, size_t n, void *user)
 {
     round_trip_ctx_t *ctx = user;
-    return http_converse_stream_write(ctx->stream, pcm, n);
+    esp_err_t err = http_converse_stream_write(ctx->stream, pcm, n);
+
+#if ENABLE_OLED
+    // Live VU-bar update — every Nth frame so OLED I²C doesn't dominate
+    // the VAD frame budget. ~25 ms full flush would, but oled_flush_row
+    // is ~3.5 ms so this is comfortable even at every-frame cadence; we
+    // throttle anyway to reduce visible bar quantization noise.
+    static unsigned frame_counter = 0;
+    if ((frame_counter++ % WS_BAR_REDRAW_EVERY_N) == 0) {
+        uint32_t peak = i2s_mic_last_peak();
+        int fill_px = (int)(peak / WS_BAR_PEAK_DIVISOR);
+        if (fill_px > OLED_W) fill_px = OLED_W;
+        int marker_px = VAD_PEAK_THRESHOLD / WS_BAR_PEAK_DIVISOR;
+        oled_draw_bar(WS_BAR_LINE, fill_px, marker_px);
+        oled_flush_row(WS_BAR_LINE);
+    }
+#endif
+
+    return err;
 }
 
 static bool cb_cancel(void *user)
@@ -143,8 +237,8 @@ static esp_err_t do_one_turn(const char *ip,
                              vad_result_t *vr_out)
 {
     s_state = APP_STATE_LISTENING;
-    oled_status(is_followup ? "follow-up..." : "listening...",
-                is_followup ? "speak or wait"  : "speak now", ip);
+    oled_listening_screen(is_followup ? "follow-up..." : "listening...",
+                          is_followup ? "speak or wait"  : "speak now", ip);
 
     round_trip_ctx_t ctx = { 0 };
     esp_err_t err = http_converse_stream_open(&ctx.stream);
@@ -225,8 +319,26 @@ static esp_err_t do_one_turn(const char *ip,
 
 void do_round_trip_streaming_with_preroll(const char *ip,
                                           const int16_t *preroll,
-                                          size_t preroll_n)
+                                          size_t preroll_n,
+                                          double wake_score)
 {
+    // M6: brief splash on every wake event so the user has positive
+    // feedback that the wake fired before the listening screen takes
+    // over. Skipped (score <= 0) for button-triggered turns.
+    //
+    // The 200 ms hold makes the splash readable. Audio cost: vad_record
+    // calls i2s_mic_drain() at start, so live audio captured during the
+    // hold is dropped — but the 500 ms preroll already covers the wake
+    // word + a bit after, so as long as the user doesn't keep speaking
+    // *immediately* through the wake without pause, this is invisible.
+    // If users routinely run "hey jarvis what's the weather" with no
+    // gap, lower this; default human pacing has a brief pause after
+    // the wake word.
+    if (wake_score > 0) {
+        oled_wake_splash(wake_score, ip);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
     vad_result_t vr;
     esp_err_t err = do_one_turn(ip, preroll, preroll_n,
                                 /*initial_timeout_ms=*/0, /*is_followup=*/false, &vr);
@@ -282,6 +394,14 @@ void app_main(void)
     if (i2s_mic_init() != ESP_OK) {
         ESP_LOGE(TAG, "mic init failed");
     }
+#endif
+
+#if ENABLE_OLED
+    // M6 boot card — held for ~2 s so the user can confirm IP / server
+    // host / wake model / session id at a glance before the device drops
+    // into the idle screen and starts /listen.
+    oled_boot_screen(ip);
+    vTaskDelay(pdMS_TO_TICKS(WS_BOOT_SCREEN_HOLD_MS));
 #endif
 
     // BOOT button — needs to be configured before listen_stream_task starts

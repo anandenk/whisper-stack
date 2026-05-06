@@ -50,6 +50,10 @@ static void copy_str(char *dst, size_t dst_sz, const char *src)
     dst[dst_sz - 1] = '\0';
 }
 
+// Forward decl — both http_post_converse (M2 buffered) and the M3 streaming
+// finish() share this parser.
+static esp_err_t parse_converse_json(const char *body, size_t body_len, converse_resp_t *resp);
+
 esp_err_t http_post_converse(const int16_t *pcm, size_t n_samples, converse_resp_t *resp)
 {
     if (!pcm || !resp || n_samples == 0) return ESP_ERR_INVALID_ARG;
@@ -115,27 +119,10 @@ esp_err_t http_post_converse(const int16_t *pcm, size_t n_samples, converse_resp
         return ESP_FAIL;
     }
 
-    cJSON *root = cJSON_ParseWithLength(acc.buf, acc.len);
-    if (!root) {
-        ESP_LOGE(TAG, "cJSON_Parse failed; body head: %.*s",
-                 (int)(acc.len > 120 ? 120 : acc.len), acc.buf);
-        esp_http_client_cleanup(cli);
-        free(resp_buf);
-        return ESP_FAIL;
-    }
-
-    const cJSON *t = cJSON_GetObjectItemCaseSensitive(root, "transcript");
-    const cJSON *r = cJSON_GetObjectItemCaseSensitive(root, "reply_text");
-    const cJSON *d = cJSON_GetObjectItemCaseSensitive(root, "audio_duration_s");
-
-    if (cJSON_IsString(t)) copy_str(resp->transcript,  sizeof resp->transcript,  t->valuestring);
-    if (cJSON_IsString(r)) copy_str(resp->reply_text,  sizeof resp->reply_text,  r->valuestring);
-    if (cJSON_IsNumber(d)) resp->audio_duration_s = (float)d->valuedouble;
-
-    cJSON_Delete(root);
+    esp_err_t parse_err = parse_converse_json(acc.buf, acc.len, resp);
     esp_http_client_cleanup(cli);
     free(resp_buf);
-    return ESP_OK;
+    return parse_err;
 }
 
 // --- Streaming /converse upload (M3) --------------------------------------
@@ -167,6 +154,16 @@ struct http_converse_stream_s {
 
 static esp_err_t parse_converse_json(const char *body, size_t body_len, converse_resp_t *resp)
 {
+    // Default the M6 fields to "absent" so callers can render placeholder
+    // values when the server omitted a field (forward-compat with older
+    // server builds).
+    resp->route[0] = '\0';
+    resp->model[0] = '\0';
+    resp->auto_escalated = false;
+    resp->stt_s = resp->llm_s = resp->tts_s = resp->total_s = 0.0f;
+    resp->input_tokens  = -1;
+    resp->output_tokens = -1;
+
     cJSON *root = cJSON_ParseWithLength(body, body_len);
     if (!root) {
         ESP_LOGE(TAG, "cJSON_Parse failed; body head: %.*s",
@@ -179,6 +176,34 @@ static esp_err_t parse_converse_json(const char *body, size_t body_len, converse
     if (cJSON_IsString(t)) copy_str(resp->transcript, sizeof resp->transcript, t->valuestring);
     if (cJSON_IsString(r)) copy_str(resp->reply_text, sizeof resp->reply_text, r->valuestring);
     if (cJSON_IsNumber(d)) resp->audio_duration_s = (float)d->valuedouble;
+
+    const cJSON *route_node = cJSON_GetObjectItemCaseSensitive(root, "route");
+    const cJSON *model_node = cJSON_GetObjectItemCaseSensitive(root, "model");
+    const cJSON *esc_node   = cJSON_GetObjectItemCaseSensitive(root, "auto_escalated");
+    if (cJSON_IsString(route_node)) copy_str(resp->route, sizeof resp->route, route_node->valuestring);
+    if (cJSON_IsString(model_node)) copy_str(resp->model, sizeof resp->model, model_node->valuestring);
+    if (cJSON_IsBool(esc_node))     resp->auto_escalated = cJSON_IsTrue(esc_node);
+
+    const cJSON *timings = cJSON_GetObjectItemCaseSensitive(root, "timings");
+    if (cJSON_IsObject(timings)) {
+        const cJSON *stt = cJSON_GetObjectItemCaseSensitive(timings, "stt");
+        const cJSON *llm = cJSON_GetObjectItemCaseSensitive(timings, "llm");
+        const cJSON *tts = cJSON_GetObjectItemCaseSensitive(timings, "tts");
+        const cJSON *tot = cJSON_GetObjectItemCaseSensitive(timings, "total");
+        if (cJSON_IsNumber(stt)) resp->stt_s   = (float)stt->valuedouble;
+        if (cJSON_IsNumber(llm)) resp->llm_s   = (float)llm->valuedouble;
+        if (cJSON_IsNumber(tts)) resp->tts_s   = (float)tts->valuedouble;
+        if (cJSON_IsNumber(tot)) resp->total_s = (float)tot->valuedouble;
+    }
+
+    const cJSON *tok = cJSON_GetObjectItemCaseSensitive(root, "llm_tokens");
+    if (cJSON_IsObject(tok)) {
+        const cJSON *in  = cJSON_GetObjectItemCaseSensitive(tok, "input");
+        const cJSON *out = cJSON_GetObjectItemCaseSensitive(tok, "output");
+        if (cJSON_IsNumber(in))  resp->input_tokens  = in->valueint;
+        if (cJSON_IsNumber(out)) resp->output_tokens = out->valueint;
+    }
+
     cJSON_Delete(root);
     return ESP_OK;
 }

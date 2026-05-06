@@ -210,6 +210,29 @@ void oled_draw_text(int line, const char *text)
     while (col < OLED_W) row[col++] = 0x00;
 }
 
+void oled_draw_bar(int line, int fill_px, int marker_px)
+{
+    if (line < 0 || line >= OLED_LINES) return;
+    if (fill_px < 0) fill_px = 0;
+    if (fill_px > OLED_W) fill_px = OLED_W;
+
+    // Page byte layout: bit 0 = top pixel, bit 7 = bottom pixel of the row.
+    //   FILL_PATTERN = 4 middle pixels (rows 2-5) — looks bar-like.
+    //   MARKER_PATTERN = full 8 pixels — pokes above and below the fill so
+    //                    it stays visible whether the bar has reached it
+    //                    or not.
+    const uint8_t FILL_PATTERN   = 0x3C;  // 0b00111100
+    const uint8_t MARKER_PATTERN = 0xFF;
+
+    uint8_t *row = &s_fb[line * OLED_W];
+    for (int x = 0; x < OLED_W; ++x) {
+        row[x] = (x < fill_px) ? FILL_PATTERN : 0x00;
+    }
+    if (marker_px >= 0 && marker_px < OLED_W) {
+        row[marker_px] = MARKER_PATTERN;
+    }
+}
+
 void oled_flush(void)
 {
     if (!s_initialized) return;
@@ -217,4 +240,16 @@ void oled_flush(void)
     // end is exclusive. For SSD1306 the panel driver reframes the FB into the
     // chip's own page layout — we just hand it our 1024-byte buffer.
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, OLED_W, OLED_H, s_fb);
+}
+
+void oled_flush_row(int line)
+{
+    if (!s_initialized) return;
+    if (line < 0 || line >= OLED_LINES) return;
+    // Ship only the 128 bytes covering one 8-pixel-tall page. ~3.5 ms vs
+    // 25 ms for the full-frame flush — keeps live VU-bar updates flicker-
+    // free during VAD recording.
+    const int y0 = line * 8;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, y0, OLED_W, y0 + 8,
+                              &s_fb[line * OLED_W]);
 }

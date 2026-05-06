@@ -86,6 +86,17 @@ no faster-whisper.
 
 Hard stop at the end of every stage to check in with the user. Do not progress autonomously between stages — push back on bad assumptions before moving on.
 
+## Known issues / TODO
+
+- **Router misroutes very short queries to complex.** Observed
+  2026-05-06 on the ESP-32 voice client: `"1+1"` goes to the complex
+  route. Diagnosis and a tiered improvement plan (Tier 1 example
+  curation + regex shortcut, Tier 2 build a real eval set, Tier 3
+  LLM classifier — only if 1+2 plateau) live at the top of
+  [server/router.py](server/router.py). Don't skip ahead to Tier 3
+  without measuring first; the embedding router is fast (~30 ms) and
+  the LLM-classifier latency tax adds to *every* voice turn forever.
+
 ## Critical gotchas
 
 1. **CTranslate2 Windows wheels do NOT bundle cuBLAS/cuDNN.** Before `import faster_whisper`, add the pip-installed NVIDIA DLL dirs to the search path:
@@ -144,9 +155,10 @@ firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 + M2 + M3 + M4 + M5 shipped** (M5 verified
-on hardware 2026-05-06: 5-turn continuous chat with session memory,
-clean drop back to wake mode on silent timeout). State of the device:
+classic, NOT s3). **M1 + M2 + M3 + M4 + M5 + M6 shipped** (M5 + M6
+both landed in the same workstation session 2026-05-06: continuous
+chat, then OLED polish — boot card, wake splash, live VU bar,
+model+tokens speaking screen). State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
@@ -167,11 +179,21 @@ clean drop back to wake mode on silent timeout). State of the device:
   for `WS_CONVERSATION_TIMEOUT_MS` (30 s, in `main.c`). 30 s of silence
   → drop back to /listen wake mode. Mirrors `tests/jarvis.py` Phase 6B.
   Session memory carries across turns via `session_id=esp32`.
+- **OLED polish** (M6): boot card (~2 s) shows IP / server / wake
+  model / session id; brief "WAKE / score N.NN" splash on each wake
+  event (200 ms hold); live VU bar on line 6 during LISTENING /
+  follow-up turns with a 1-px-wide threshold marker (you literally
+  see whether your voice is clearing `VAD_PEAK_THRESHOLD`); SPEAKING
+  screen shows model name + token usage instead of truncated
+  transcript chunks. Bar updates use `oled_flush_row()` (~3.5 ms
+  partial flush) to avoid full-frame flicker.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
 
-Next milestone is M6 (OLED polish + VU bar — pleasant to use, helps
-diagnose mic at a glance). Smaller than M1-M5 individually.
+All planned firmware milestones are shipped. The device is feature-
+complete for v1; further work is hardware (e.g. ESP32-S3 with PSRAM
+to enable on-device wake word, or MAX98357A for standalone audio
+out) or quality-of-life polish.
 
 ### M4 / wake-word gotchas (worth preserving)
 

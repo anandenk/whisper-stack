@@ -19,6 +19,57 @@ mode-independent. The Phase 3 factory wires either OllamaEmbedder
 
 Examples below are a starting draft. Re-label / re-curate against the
 test fixture in tests/stage5_router.py — that fixture is also editable.
+
+KNOWN ISSUE (observed 2026-05-06 from the ESP-32 voice client):
+Very short queries route to complex more often than they should.
+Concrete failure: "1+1" goes to complex. Three things stack:
+
+  1. Lexically alien — closest SIMPLE example is "What's 23 plus 47?"
+     (full English question), so a 3-character math expression scores
+     low against it.
+  2. Semantic adjacency to code — embeddings of "1+1" land closer to
+     "Write a Python function..." or "Refactor this function" than to
+     anything in SIMPLE, so s_complex is unexpectedly high.
+  3. Margin asymmetry — even if s_simple > s_complex, it has to win by
+     ROUTER_MARGIN_S (default 0.05). Tight matches go to complex.
+
+Staged improvement plan (none implemented yet):
+
+  TIER 1 — cheap, do first:
+    a. Add short-arithmetic / single-word / brief-greeting examples to
+       SIMPLE_EXAMPLES — currently 1 of 12 simple examples is math, and
+       that one is wordy. Add: "1+1", "5 times 7", "what's 2 plus 2",
+       "100 divided by 4", "what's 15 percent of 80".
+    b. Add a regex shortcut at the top of classify() for unambiguous-
+       simple patterns (mirror is_tool_likely's shape):
+         - pure arithmetic: r"^\s*\d+\s*[+\-*/x]\s*\d+\s*=?\s*\??\s*$"
+         - single-word lookups: r"^\s*\w+\s*\??\s*$"
+       Both auto-route to simple before the embedding path runs.
+    c. Optionally lower ROUTER_MARGIN_S from 0.05 to 0.02 (or 0). One
+       env-var dial. Risk: more under-routing on borderline cases.
+
+  TIER 2 — measurement before more changes:
+    d. Build a real eval set. tests/stage5_router.py's fixture is
+       30 queries and self-admits "several paraphrase the example sets",
+       which inflates accuracy. Expand to ~100 queries with NO lexical
+       overlap with SIMPLE_EXAMPLES / COMPLEX_EXAMPLES. Cover weak
+       categories: very short queries, bare facts, conversational
+       fillers, short translations.
+    e. Re-curate example sets to ~20-30 per class once the eval set
+       exposes which neighborhoods are under-represented.
+
+  TIER 3 — only if Tier 1+2 plateau (do NOT skip ahead to here):
+    f. Replace embedding classifier with a 2-shot LLM call (Llama 3.1
+       8B is already loaded). Costs ~150 ms per turn (added to every
+       voice round-trip), and in cloud mode doubles per-turn token
+       spend. Worth it only with eval-set data showing the embedding
+       approach has fundamental gaps that curation can't close.
+
+Pushback on jumping straight to Tier 3: the embedding router is fast
+(~30 ms) and the routing cost-of-being-wrong is bounded (a fraction
+of a cent or one weird answer). Tier 1 is five minutes of work and
+might solve the observed cases entirely. Measure before paying the
+voice-latency tax of an LLM-classifier path.
 """
 
 from __future__ import annotations

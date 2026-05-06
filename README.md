@@ -209,7 +209,7 @@ plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       local vs cloud refactor (mostly shipped)
 notes/sessions-plan.md       multi-turn conversation memory (shipped)
 notes/voice-agent-plan.md    streaming TTS, VAD, continuous, interrupt, wake (all shipped)
-notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M5 shipped)
+notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M6 all shipped)
 CLAUDE.md                    project instructions for Claude Code agents
 firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
 ├── main/                    application code:
@@ -271,7 +271,7 @@ requires an `X-API-Key` header. The web page persists the key in
   streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
   see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
 
-- **ESP-WROOM-32 firmware — M1, M2, M3, M4, M5 all shipped on real
+- **ESP-WROOM-32 firmware — M1 through M6 all shipped on real
   hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
   - **M1** — full module skeleton: SSD1306 OLED via
     `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
@@ -296,15 +296,21 @@ requires an `X-API-Key` header. The web page persists the key in
     needed — for 30 s of silence (`WS_CONVERSATION_TIMEOUT_MS` in
     `main.c`), then drops back to /listen. Mirrors `tests/jarvis.py`
     Phase 6B.
+  - **M6** — OLED polish: 2-second boot card (IP / server /
+    wake model / session id), brief "WAKE / score N.NN" splash on
+    each wake event, live VU bar during LISTENING with a threshold
+    marker so you can see your voice clearing the VAD floor, and a
+    SPEAKING screen that shows the model name + token usage instead
+    of truncated transcript fragments. Partial-row OLED flushes
+    keep the bar flicker-free.
   - **Multi-turn memory** — firmware passes `?session_id=esp32` on
     `/converse`, so wakes (and follow-ups within continuous mode)
     remember context (10 min idle TTL by default).
 
 ### Planned but not shipped
-- **ESP-WROOM-32 firmware M6** — OLED polish (live VU bar,
-  transcript display, snappier "wake!" indicator before the
-  round-trip starts). See
-  [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
+- **Router improvements** — short queries (e.g. `"1+1"`) misroute to
+  complex. Tiered investigation + plan documented at the top of
+  [server/router.py](server/router.py); not started yet.
 - **Two-mode plan phases 5, 7, 9** — Deepgram STT, OpenAI TTS, Fly.io
   deploy. Queued behind cloud-provider signups. Only relevant if you
   ever want to host the brain on a VPS instead of your workstation.
