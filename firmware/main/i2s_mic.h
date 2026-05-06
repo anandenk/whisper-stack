@@ -33,3 +33,17 @@ uint32_t i2s_mic_last_peak(void);
 // on a complete fill, ESP_ERR_TIMEOUT otherwise. Caller owns `out` (must
 // hold n_samples * 2 bytes).
 esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms);
+
+// Drop any audio sitting in the ring buffer. M3+ calls this just before
+// starting a fresh recording so the captured window starts at "now"
+// rather than including idle audio that piled up between recordings.
+void i2s_mic_drain(void);
+
+// Pull up to `max_samples` int16 samples from the ring buffer, blocking
+// up to `timeout_ms` for the FIRST byte. Returns the number actually
+// retrieved via `*out_samples` (may be less than `max_samples` if a
+// short chunk was returned — caller is expected to call again for more).
+// Used by VAD to peek at one frame at a time without committing to a
+// fixed total length up front.
+esp_err_t i2s_mic_capture_frame(int16_t *out, size_t max_samples,
+                                size_t *out_samples, uint32_t timeout_ms);

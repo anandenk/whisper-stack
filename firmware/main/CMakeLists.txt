@@ -11,6 +11,7 @@ idf_component_register(
         "wifi.c"
         "i2s_mic.c"
         "http_client.c"
+        "vad.c"
     INCLUDE_DIRS "."
     REQUIRES
         # OLED stack
@@ -33,4 +34,6 @@ idf_component_register(
         esp_driver_gpio
         esp_http_client
         json
+        # M3: VAD timing (esp_timer_get_time)
+        esp_timer
 )

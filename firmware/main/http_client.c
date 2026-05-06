@@ -134,3 +134,172 @@ esp_err_t http_post_converse(const int16_t *pcm, size_t n_samples, converse_resp
     free(resp_buf);
     return ESP_OK;
 }
+
+// --- Streaming /converse upload (M3) --------------------------------------
+//
+// Pattern, hard-won from reading the ESP-IDF v5.3 source:
+//   1. esp_http_client_open(client, -1) auto-injects the
+//      `Transfer-Encoding: chunked` header (esp_http_client.c:1532) but
+//      does NOT chunk-frame subsequent writes — esp_http_client_write()
+//      dumps raw bytes straight to esp_transport_write().
+//   2. So WE frame each chunk on the wire ourselves:
+//        <hex_size>\r\n<data>\r\n
+//      and the terminator at finish:
+//        0\r\n\r\n
+//   3. After the terminator: esp_http_client_fetch_headers() pulls the
+//      response status + headers, then esp_http_client_read() drains
+//      the body into our buffer.
+//   4. esp_http_client_close + esp_http_client_cleanup tears down.
+//
+// We do NOT use the event_handler pattern here because fetch_headers /
+// read give us synchronous control over response ingestion, which is
+// cleaner alongside the manual chunked-write loop.
+
+struct http_converse_stream_s {
+    esp_http_client_handle_t cli;
+    char                    *url;
+    char                    *resp_buf;
+    bool                     opened;
+};
+
+static esp_err_t parse_converse_json(const char *body, size_t body_len, converse_resp_t *resp)
+{
+    cJSON *root = cJSON_ParseWithLength(body, body_len);
+    if (!root) {
+        ESP_LOGE(TAG, "cJSON_Parse failed; body head: %.*s",
+                 (int)(body_len > 120 ? 120 : body_len), body);
+        return ESP_FAIL;
+    }
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(root, "transcript");
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(root, "reply_text");
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(root, "audio_duration_s");
+    if (cJSON_IsString(t)) copy_str(resp->transcript, sizeof resp->transcript, t->valuestring);
+    if (cJSON_IsString(r)) copy_str(resp->reply_text, sizeof resp->reply_text, r->valuestring);
+    if (cJSON_IsNumber(d)) resp->audio_duration_s = (float)d->valuedouble;
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+esp_err_t http_converse_stream_open(http_converse_stream_handle_t *out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    *out = NULL;
+
+    struct http_converse_stream_s *s = calloc(1, sizeof *s);
+    if (!s) return ESP_ERR_NO_MEM;
+
+    s->url = malloc(160);
+    s->resp_buf = malloc(HTTP_RESP_CAP);
+    if (!s->url || !s->resp_buf) {
+        free(s->url); free(s->resp_buf); free(s);
+        return ESP_ERR_NO_MEM;
+    }
+    snprintf(s->url, 160, "http://%s:%d/converse?omit_audio_base64=1",
+             CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
+
+    esp_http_client_config_t cfg = {
+        .url            = s->url,
+        .method         = HTTP_METHOD_POST,
+        .timeout_ms     = 30000,
+        .buffer_size    = 1024,
+        .buffer_size_tx = 1024,
+    };
+    s->cli = esp_http_client_init(&cfg);
+    if (!s->cli) {
+        free(s->url); free(s->resp_buf); free(s);
+        return ESP_FAIL;
+    }
+
+    esp_http_client_set_header(s->cli, "Content-Type", "audio/l16; rate=16000; channels=1");
+    if (CONFIG_WS_API_KEY[0] != '\0') {
+        esp_http_client_set_header(s->cli, "X-API-Key", CONFIG_WS_API_KEY);
+    }
+
+    esp_err_t err = esp_http_client_open(s->cli, -1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "stream open: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(s->cli);
+        free(s->url); free(s->resp_buf); free(s);
+        return err;
+    }
+    s->opened = true;
+
+    ESP_LOGI(TAG, "stream open: %s (chunked)", s->url);
+    *out = s;
+    return ESP_OK;
+}
+
+// Frame and write one HTTP chunk: "<hex_size>\r\n<data>\r\n".
+// Returns ESP_OK iff every byte made it onto the wire.
+static esp_err_t write_chunk(esp_http_client_handle_t cli, const void *data, size_t n)
+{
+    char hdr[16];
+    int hdr_len = snprintf(hdr, sizeof hdr, "%x\r\n", (unsigned)n);
+    if (esp_http_client_write(cli, hdr, hdr_len) != hdr_len)             return ESP_FAIL;
+    if (n > 0 &&
+        esp_http_client_write(cli, (const char *)data, n) != (int)n)     return ESP_FAIL;
+    if (esp_http_client_write(cli, "\r\n", 2) != 2)                       return ESP_FAIL;
+    return ESP_OK;
+}
+
+esp_err_t http_converse_stream_write(http_converse_stream_handle_t s,
+                                     const int16_t *pcm, size_t n_samples)
+{
+    if (!s || !s->opened || !pcm) return ESP_ERR_INVALID_STATE;
+    if (n_samples == 0) return ESP_OK;
+    esp_err_t err = write_chunk(s->cli, pcm, n_samples * sizeof(int16_t));
+    if (err != ESP_OK) ESP_LOGE(TAG, "stream chunk write failed (n=%u)", (unsigned)n_samples);
+    return err;
+}
+
+esp_err_t http_converse_stream_finish(http_converse_stream_handle_t s, converse_resp_t *resp)
+{
+    if (!s || !resp) return ESP_ERR_INVALID_ARG;
+    memset(resp, 0, sizeof *resp);
+    esp_err_t rc = ESP_OK;
+
+    if (!s->opened) { rc = ESP_ERR_INVALID_STATE; goto cleanup; }
+
+    // Chunked-transfer terminator: zero-length chunk + final CRLF.
+    if (esp_http_client_write(s->cli, "0\r\n\r\n", 5) != 5) {
+        ESP_LOGE(TAG, "stream terminator write failed");
+        rc = ESP_FAIL;
+        goto cleanup;
+    }
+
+    int64_t cl = esp_http_client_fetch_headers(s->cli);
+    int status = esp_http_client_get_status_code(s->cli);
+    resp->http_status = status;
+    ESP_LOGI(TAG, "stream finish: status=%d content_length=%lld", status, (long long)cl);
+
+    size_t body_len = 0;
+    int chunk;
+    while (body_len < HTTP_RESP_CAP - 1 &&
+           (chunk = esp_http_client_read(s->cli, s->resp_buf + body_len, HTTP_RESP_CAP - 1 - body_len)) > 0) {
+        body_len += chunk;
+    }
+    s->resp_buf[body_len] = '\0';
+
+    if (status / 100 != 2) {
+        ESP_LOGE(TAG, "stream non-2xx; body: %.*s",
+                 (int)(body_len > 200 ? 200 : body_len), s->resp_buf);
+        rc = ESP_FAIL;
+        goto cleanup;
+    }
+
+    rc = parse_converse_json(s->resp_buf, body_len, resp);
+
+cleanup:
+    if (s->opened) esp_http_client_close(s->cli);
+    esp_http_client_cleanup(s->cli);
+    free(s->url); free(s->resp_buf); free(s);
+    return rc;
+}
+
+void http_converse_stream_abort(http_converse_stream_handle_t s)
+{
+    if (!s) return;
+    if (s->opened) esp_http_client_close(s->cli);
+    esp_http_client_cleanup(s->cli);
+    free(s->url); free(s->resp_buf); free(s);
+}

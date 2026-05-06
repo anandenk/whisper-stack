@@ -129,16 +129,20 @@ esp_err_t i2s_mic_init(void)
 uint32_t i2s_mic_last_rms(void)  { return s_last_rms; }
 uint32_t i2s_mic_last_peak(void) { return s_last_peak; }
 
-esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms)
+void i2s_mic_drain(void)
 {
-    if (!s_rb || !out) return ESP_ERR_INVALID_STATE;
-
-    // Drain stale audio so the captured window starts at "now".
+    if (!s_rb) return;
     size_t stale_n;
     void *stale;
     while ((stale = xRingbufferReceive(s_rb, &stale_n, 0)) != NULL) {
         vRingbufferReturnItem(s_rb, stale);
     }
+}
+
+esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms)
+{
+    if (!s_rb || !out) return ESP_ERR_INVALID_STATE;
+    i2s_mic_drain();
 
     const size_t bytes_needed = n_samples * sizeof(int16_t);
     size_t bytes_got = 0;
@@ -161,4 +165,23 @@ esp_err_t i2s_mic_capture(int16_t *out, size_t n_samples, uint32_t timeout_ms)
     }
 
     return (bytes_got == bytes_needed) ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t i2s_mic_capture_frame(int16_t *out, size_t max_samples,
+                                size_t *out_samples, uint32_t timeout_ms)
+{
+    if (!s_rb || !out || !out_samples) return ESP_ERR_INVALID_STATE;
+    *out_samples = 0;
+
+    size_t chunk_n = 0;
+    void *chunk = xRingbufferReceive(s_rb, &chunk_n, pdMS_TO_TICKS(timeout_ms));
+    if (!chunk) return ESP_ERR_TIMEOUT;
+
+    size_t bytes_max = max_samples * sizeof(int16_t);
+    size_t copy = chunk_n < bytes_max ? chunk_n : bytes_max;
+    memcpy(out, chunk, copy);
+    vRingbufferReturnItem(s_rb, chunk);
+
+    *out_samples = copy / sizeof(int16_t);
+    return ESP_OK;
 }
