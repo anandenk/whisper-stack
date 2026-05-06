@@ -209,11 +209,19 @@ plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       local vs cloud refactor (mostly shipped)
 notes/sessions-plan.md       multi-turn conversation memory (shipped)
 notes/voice-agent-plan.md    streaming TTS, VAD, continuous, interrupt, wake (all shipped)
-notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1 partial; mic deferred)
+notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M4 shipped)
 CLAUDE.md                    project instructions for Claude Code agents
 firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
-├── main/                    application code (main.c + oled/wifi/i2s_mic modules)
-├── sdkconfig.defaults       committed defaults; copy to ./sdkconfig and edit creds
+├── main/                    application code:
+│   ├── main.c                state machine, button polling, OLED orchestration
+│   ├── oled.c/.h             SSD1306 + 6×8 ASCII font
+│   ├── wifi.c/.h             WPA2-PSK or WPA2-Enterprise STA, Kconfig-selected
+│   ├── i2s_mic.c/.h          INMP441 → 16 kHz int16 ring buffer
+│   ├── http_client.c/.h      esp_http_client wrapper for /converse (M3 streaming)
+│   ├── vad.c/.h              peak-threshold VAD with cancel hook (M3)
+│   ├── listen_stream.c/.h    raw-socket /listen client + 500 ms pre-roll (M4)
+│   └── Kconfig.projbuild     WiFi creds, server addr, API key, session id
+├── sdkconfig.defaults       committed defaults; idf.py menuconfig to fill creds
 ├── partitions: built-in two-OTA layout (CONFIG_PARTITION_TABLE_TWO_OTA)
 └── .gitignore               build/, sdkconfig (creds), managed_components/
 ```
@@ -263,25 +271,35 @@ requires an `X-API-Key` header. The web page persists the key in
   streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
   see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
 
-- **ESP-32 firmware plan, M4 server-side scope** — `POST /listen`
-  (server-side openWakeWord), `?omit_audio_base64=1` on `/converse`,
-  `wake_detections` counter in `/health.usage`. Smoke test at
-  `tests/stage11_listen.py`.
-- **ESP-32 firmware M1** — ESP-IDF 5.3.5 project at
-  [`firmware/`](firmware/) with the full module skeleton (main + OLED
-  + WiFi + I²S mic). All three subsystems verified on real hardware:
-  0.96" SSD1306 renders text via `esp_lcd_panel_ssd1306` + a 6×8
-  ASCII font; WiFi STA associates and `/health` is reachable from the
-  device; INMP441 captures audio with RMS/peak responsive to sound on
-  the OLED. Open blocker for production deployment: dorm WiFi is
-  WPA2-Enterprise (firmware currently only supports WPA2-PSK) — see
-  the open-blockers note in [CLAUDE.md](CLAUDE.md) and
-  [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
+- **ESP-WROOM-32 firmware — M1, M2, M3, M4 all shipped on real
+  hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
+  - **M1** — full module skeleton: SSD1306 OLED via
+    `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
+    **WPA2-PSK or WPA2-Enterprise** (Kconfig choice; verified on WPA2-Enterprise
+    College's 802.1X dorm network with PEAP-MSCHAPv2), INMP441 mic
+    capture with RMS/peak response.
+  - **M2** — BOOT button → 3 s recording → `/converse` round-trip,
+    workstation Realtek output speaks the reply. Preserved as a
+    fallback under `#define M2_BUFFERED_FALLBACK`.
+  - **M3** — VAD-bounded recording (peak ≥ 300, silence dwell 2.5 s)
+    streamed over HTTP chunked-transfer — no heap cap on length.
+    Long-press BOOT (≥ 1 s) cancels mid-recording.
+  - **M4** — hands-free **"hey jarvis"** via server-side openWakeWord
+    over a long-lived chunked POST to `/listen`, with a 500 ms pre-roll
+    so the start of the question after the wake word isn't truncated.
+    BOOT button retained as a manual-wake fallback. Server hardened
+    with pre-warmed model, threaded mode, fast-fail request handler,
+    and lock-acquire timeouts so a wedged client connection can't lock
+    out other handlers.
+  - **Multi-turn memory** — firmware passes `?session_id=esp32` on
+    `/converse`, so follow-up wakes remember context (10 min idle TTL
+    by default).
 
 ### Planned but not shipped
-- **ESP-WROOM-32 firmware M2-M6** — button + `/converse` round-trip,
-  VAD-bounded recording, server-side wake via `/listen` client,
-  continuous mode, OLED polish — see
+- **ESP-WROOM-32 firmware M5–M6** — continuous mode after wake
+  (follow-ups within 30 s of silence skip the re-wake), and OLED
+  polish (live VU bar, transcript display, snappier "wake!" indicator
+  before the round-trip starts). See
   [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md).
 - **Two-mode plan phases 5, 7, 9** — Deepgram STT, OpenAI TTS, Fly.io
   deploy. Queued behind cloud-provider signups. Only relevant if you
