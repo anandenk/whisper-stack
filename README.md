@@ -2,9 +2,9 @@
 
 A self-hosted voice assistant backend. Whisper for STT, a router on top
 of two LLMs, Piper for streaming TTS — full mic-to-speaker loop on one
-machine. Speak into a phone, terminal, or (eventually) an ESP-32
-device; the server transcribes, routes the query to the right LLM,
-runs tools when needed, streams synthesized speech back.
+machine. Speak into a phone, a terminal, or a custom ESP-WROOM-32
+voice device; the server transcribes, routes the query to the right
+LLM, runs tools when needed, streams synthesized speech back.
 
 ```
 audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → audio out
@@ -13,9 +13,12 @@ audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → 
                                           + tools, when needed)
 ```
 
-Designed as the workstation-side brains for a future ESP-WROOM-32 + INMP441
-voice device — but fully usable today through a web page or push-to-talk
-CLI, with optional "hey jarvis" hands-free mode on the workstation.
+Four voice clients reach the same server, all working today: a self-
+contained web page (any browser, including phones), a push-to-talk CLI,
+a workstation-side "hey jarvis" wake-word loop, and a custom
+ESP-WROOM-32 + INMP441 + SSD1306 voice device — bring-up through M6
+shipped, hands-free wake + continuous follow-ups + live VU bar all
+verified on real hardware.
 
 ## What works today
 
@@ -52,10 +55,15 @@ CLI, with optional "hey jarvis" hands-free mode on the workstation.
   a $5–10/mo VPS). Local mode is fully shipped; cloud mode is partial —
   Deepgram STT and OpenAI TTS backends raise `NotImplementedError` until
   signed up.
-- **Three voice clients.** Self-contained web page at `GET /` (records on
+- **Four voice clients.** Self-contained web page at `GET /` (records on
   phone, plays through Web Audio); push-to-talk CLI (`tests/talk.py`);
-  hands-free wake-word loop (`tests/jarvis.py`). All three reuse the same
-  server.
+  hands-free wake-word loop (`tests/jarvis.py`); and a custom
+  **ESP-WROOM-32 + INMP441 mic + SSD1306 OLED** firmware
+  ([`firmware/`](firmware/)) — hands-free "hey jarvis", continuous
+  follow-ups, live VU bar showing your voice clearing the VAD floor,
+  speaking-screen overlay with model name + token usage. WPA2-Enterprise
+  WiFi verified on a real dorm network. The workstation's Realtek
+  output speaks the reply — no on-device DAC in v1.
 - **Per-process token / cost accounting.** `GET /health` returns a
   `usage` block with input/output tokens + USD-cost-since-boot per model.
   Resets on restart; meant for "is this turning into a money fire"
