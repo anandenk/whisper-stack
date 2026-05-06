@@ -418,21 +418,28 @@ ends ~1.5s after you stop talking. Long-press cancels.
 
 ### Milestone 4 — Wake word via server-side `/listen`
 
+**Status:** ✅ **fully shipped (workstation session 2026-05-05)** —
+hands-free "hey jarvis" works end-to-end on enterprise dorm WiFi with
+500 ms pre-roll, multi-turn session memory, and sustained idle
+streaming that doesn't wedge. See [CLAUDE.md](../CLAUDE.md) "M4 /
+wake-word gotchas" subsection for the bench-up lessons.
+
 **Goal:** hands-free trigger. No button press needed. **Path B locked
 (see §"Wake word" above) — Path A and Path C are not in scope for this
 milestone.**
 
 This milestone has both server-side and firmware-side scope. Server-
-side **shipped during the MacBook planning session 2026-05-04** (see
-§"Server surface" above for the landed file list); the firmware-side
-half is the work below.
+side shipped during the MacBook planning session 2026-05-04;
+firmware-side shipped during the workstation session 2026-05-05.
 
 **Server-side scope** — see §"Server surface" → "Milestone 4 server-
 side scope (✅ shipped)" above. Summary: `POST /listen`,
 `server/wakeword.py`, `usage.wake_detections` counter,
-`tests/stage11_listen.py`.
+`tests/stage11_listen.py`. Hardened in 2026-05-05's session with
+pre-warm at boot, `threaded=True`, `FastFailHandler` (timeout=5),
+lock-acquire timeout, and `OSError` catch in the read loop.
 
-**Firmware-side scope:**
+**Firmware-side scope (✅ shipped):**
 - New `listen_stream_task`: while IDLE, holds an open
   chunked-transfer POST to `/listen`, draining the audio_in ring buffer
   in 1280-sample chunks. Backed by `esp_http_client` with
@@ -618,20 +625,21 @@ diagnose "is my mic working" with the VU bar.
 | 1 | `firmware/main/main.c` | ✅ shipped — task setup, ENABLE_X-gated subsystem init, heartbeat |
 | 1 | `firmware/main/app_state.h` | ✅ shipped — state enum + ENABLE_OLED/MIC/WIFI toggles |
 | 1 | `firmware/main/Kconfig.projbuild` | ✅ shipped — exposes WS_WIFI_SSID/PASS, WS_SERVER_HOST/PORT, WS_API_KEY in menuconfig |
-| 2 | `firmware/main/http_client.c` | new — POST raw audio/l16 to /converse |
-| 2 | `firmware/main/json_parse.c` | new — extract transcript/reply_text |
-| 3 | `firmware/main/vad.c` | new — peak threshold + silence dwell |
+| 2 | `firmware/main/http_client.c` | ✅ shipped — esp_http_client wrapper for /converse, with both buffered (M2) and chunked-streaming (M3) APIs. JSON parse uses cJSON inline (no separate json_parse.c). |
+| 3 | `firmware/main/vad.c` | ✅ shipped — peak threshold (300) + silence dwell (2500 ms) + cancel hook. Differs from jarvis.py defaults; see CLAUDE.md "VAD tuning notes". |
 | **2** | **`server/app.py`** | ✅ **shipped** — `?omit_audio_base64=1` query param on `/converse` so firmware JSON responses fit in heap. |
-| **4** | **`server/wakeword.py`** | ✅ **shipped** — singleton openWakeWord Model + frame-buffered predict loop. |
-| **4** | **`server/app.py`** | ✅ **shipped** — `POST /listen` route, added to `PROTECTED_PATHS`. |
+| **4** | **`server/wakeword.py`** | ✅ **shipped** — singleton openWakeWord Model + frame-buffered predict loop. Hardened with lock-acquire timeout + OSError catch. |
+| **4** | **`server/app.py`** | ✅ **shipped** — `POST /listen` route, `PROTECTED_PATHS`, pre-warm at boot, `threaded=True`, `FastFailHandler` with 5 s socket timeout. |
 | **4** | **`server/usage.py`** | ✅ **shipped** — `record_wake_detection()` + `wake_detections` field in `/health.usage`. |
 | **4** | **`tests/stage11_listen.py`** | ✅ **shipped** — wire-format negatives, EOF path, best-effort detection, in-process idle-timeout test. |
-| 4 | `firmware/main/listen_stream.c` | new — `listen_stream_task`: chunked POST to /listen, parses JSON wake response, retains pre-roll window for the LISTENING transition. |
-| 5 | `firmware/main/state_machine.c` | edit — continuous mode loop |
-| 6 | `firmware/main/oled.c` | edit — VU bar + transcript overlay |
-| - | `firmware/sdkconfig.defaults` | new — WiFi creds, partition table |
-| - | `firmware/CMakeLists.txt` | new — ESP-IDF project file |
-| - | `CLAUDE.md` | edit — "Firmware" section once M1 lands |
+| 4 | `firmware/main/listen_stream.c` | ✅ shipped — raw-socket chunked POST to /listen, 500 ms pre-roll ring, SO_LINGER l_linger=0, 30 s heartbeat. NOT esp_http_client (full-duplex pattern). |
+| **WPA2-Enterprise** | `firmware/main/wifi.c` + `Kconfig.projbuild` | ✅ shipped — Kconfig choice between PSK and WPA2-Enterprise (PEAP-MSCHAPv2 via `esp_eap_client_*`). enterprise Wi-Fi deployment recipe in CLAUDE.md. |
+| **Sessions** | `firmware/main/Kconfig.projbuild` + `http_client.c` | ✅ shipped — `WS_SESSION_ID` Kconfig (default `"esp32"`); appended to /converse URL as `?session_id=...` for multi-turn memory. |
+| 5 | `firmware/main/main.c` (or new helper) | edit — continuous mode loop: after SPEAKING, transition to LISTENING (M3 VAD) for `WAKEWORD_CONVERSATION_TIMEOUT_S`, drop back to /listen on initial-silence timeout. |
+| 6 | `firmware/main/oled.c` | edit — VU bar + transcript overlay. Plus the "wake!" snappy indicator we discussed in the M4 retro. |
+| - | `firmware/sdkconfig.defaults` | ✅ shipped — committed defaults with placeholders; user fills via menuconfig. |
+| - | `firmware/CMakeLists.txt` | ✅ shipped — ESP-IDF project file with all components in REQUIRES. |
+| - | `CLAUDE.md` | ✅ shipped — "Firmware" section, M4 gotchas, VAD tuning, enterprise Wi-Fi recipe. |
 | - | `notes/esp32-firmware-plan.md` | this file |
 
 ---

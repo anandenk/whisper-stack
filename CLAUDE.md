@@ -170,6 +170,10 @@ M1-M4 individually.
 
 ### M4 / wake-word gotchas (worth preserving)
 
+These were all bench-verified during the M4 hardening session
+2026-05-05; the device works hands-free for arbitrarily long
+sessions of /listen now.
+
 1. **`/listen` cannot use `esp_http_client`** — it's a full-duplex
    pattern (firmware writes chunks indefinitely, server may reply
    mid-stream), and IDF's HTTP client doesn't expose the underlying
@@ -177,20 +181,40 @@ M1-M4 individually.
    `firmware/main/listen_stream.c` uses raw lwIP sockets with a
    manual chunked-encode + recv-until-FIN parser. `/converse` keeps
    `esp_http_client` because its one-shot upload pattern works fine.
-2. **Socket needs `SO_SNDTIMEO`.** Without it, `send()` blocks
-   forever when the server's TCP recv buffer fills (any backpressure
-   = permanent device freeze). Set to 5 s; transient congestion
-   surfaces as `errno=11 EAGAIN`, the firmware logs and reconnects.
-3. **The server MUST pre-warm openWakeWord** in its startup
-   sequence (`server/app.py` `main()`). The model takes ~1.2 s to
-   lazy-load on first use; if the firmware is already streaming
-   chunks at it during that window, kernel buffers fill and the
-   firmware's send times out before the server starts draining.
-   The pre-warm + the `SO_SNDTIMEO` are belt-and-suspenders.
-4. **30-second `listen: alive — N frames streamed` heartbeat** in
-   `run_listen_session`. Silent listen_stream looks identical to a
-   stuck listen_stream without it. The heartbeat is the diagnostic
-   signal — if frames-streamed stops climbing, something is wrong.
+2. **`SO_LINGER` with `l_linger=0` on the /listen socket.** Makes
+   `close()` send TCP RST instead of FIN. Critical: when something
+   forces an unclean close (e.g. transient transport error), there's
+   no FIN-queued-behind-unACK'd-data deadlock that would leave the
+   server's `request.stream.read` blocked indefinitely. RST is
+   appropriate — in-flight audio is already old and the server
+   doesn't care about it.
+3. **Do NOT set `SO_SNDTIMEO` on /listen.** The socket needs to wait
+   indefinitely for the server to drain — sustained streaming has
+   normal periods of TCP backpressure. We tried `SO_SNDTIMEO=5s` as
+   defense in depth and it caused periodic ~17 s reconnect cycles
+   that dropped wake-word audio. The server-side defenses (item 4)
+   make a wedged server unable to wedge the firmware, so we don't
+   need a firmware-side timeout.
+4. **Server hardening for /listen** (`server/app.py` + `wakeword.py`):
+   - Pre-warm openWakeWord model in `main()`'s WARMUP sequence so the
+     first request doesn't pay the ~1.2 s lazy-load cost.
+   - `app.run(threaded=True)` — Werkzeug dev server is single-threaded
+     by default; one stuck /listen would queue everything.
+   - Custom `FastFailHandler(WSGIRequestHandler)` with `timeout = 5`
+     — Werkzeug's default 60 s socket timeout is too long for our
+     pattern; 5 s lets dead connections die fast and recycle the
+     wakeword lock.
+   - `wakeword.stream_predict` acquires `_LOCK` with `timeout=2.0`;
+     if contended, returns `{"wake": false, "reason": "busy"}` so the
+     firmware retries on its next reconnect cycle without piling up.
+   - `read_chunk` wrapped in `try/except (OSError, IOError)` so an
+     ECONNRESET (from the firmware's SO_LINGER=0 close) is caught
+     and treated as `client_closed`, releasing the lock cleanly.
+5. **30-second `listen: alive — N frames streamed (free heap M B)`
+   heartbeat** in `run_listen_session`. Silent listen_stream looks
+   identical to a stuck listen_stream without it. The heartbeat is
+   the diagnostic signal — if frames-streamed stops climbing, the
+   device is wedged.
 
 ### VAD tuning notes (worth preserving for future-Claude)
 
