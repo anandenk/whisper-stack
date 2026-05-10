@@ -82,4 +82,132 @@ menu "Whisper Stack Device"
             Set to empty to opt out (every turn stateless).
             Must match [A-Za-z0-9_-]{1,64}.
 
+    menu "M7 — HC-SR04 ultrasonic gesture wake"
+
+        config WAKE_GESTURE_ENABLED
+            bool "Enable HC-SR04 wave-to-wake"
+            default n
+            help
+                When set, the firmware spawns a polling task that pulses
+                the trigger pin every WAKE_GESTURE_POLL_INTERVAL_MS,
+                times the echo, and fires a wake event on a "wave"
+                gesture (down-up-down threshold crossing within
+                WAKE_GESTURE_WINDOW_MS). Off by default — existing
+                builds without an HC-SR04 wired keep their pre-M7
+                behavior.
+
+        config WAKE_GESTURE_TRIG_GPIO
+            int "HC-SR04 trigger GPIO"
+            depends on WAKE_GESTURE_ENABLED
+            default 32
+            help
+                Output pin pulsed for ≥10 µs to start a measurement.
+                Pick from free GPIOs 5/18/19/23/32. Default 32 because
+                it leaves the input-only 34-39 range available for the
+                echo line.
+
+        config WAKE_GESTURE_ECHO_GPIO
+            int "HC-SR04 echo GPIO"
+            depends on WAKE_GESTURE_ENABLED
+            default 35
+            help
+                Input pin reading the echo pulse. Echo line is 5V
+                logic — REQUIRES a voltage divider (1kΩ + 2kΩ to GND)
+                between the sensor and the ESP32 input. Pick from
+                input-capable GPIOs (any digital pin, including the
+                input-only 34-39 range — 35 is the default).
+
+        config WAKE_GESTURE_THRESHOLD_CM
+            int "Wave detection distance threshold (cm)"
+            depends on WAKE_GESTURE_ENABLED
+            default 15
+            help
+                A reading at or below this distance counts as "below"
+                in the down-up-down state machine. 15 cm is roughly
+                "hand passing right in front of the device".
+
+        config WAKE_GESTURE_WINDOW_MS
+            int "Wave detection window (ms)"
+            depends on WAKE_GESTURE_ENABLED
+            default 1500
+            help
+                Maximum time between the first and second below-
+                threshold crossing for a wave to register. Filters
+                static obstacles (one cross then stays put — never
+                fires) while accepting real waves.
+
+        config WAKE_GESTURE_POLL_INTERVAL_MS
+            int "HC-SR04 poll interval (ms)"
+            depends on WAKE_GESTURE_ENABLED
+            default 50
+            help
+                How often to pulse trigger and measure. 50 ms gives
+                ~20 samples per second — enough resolution to catch
+                a fast wave without saturating the CPU.
+
+    endmenu
+
+    menu "M8 — IR remote (mute / snooze / cancel)"
+
+        config IR_ENABLED
+            bool "Enable NEC IR remote receiver"
+            default n
+            help
+                When set, the firmware brings up an RMT-RX channel on
+                IR_GPIO_PIN, decodes NEC frames, and dispatches the
+                three configured codes into the mute / snooze / cancel
+                handlers. Off by default — existing builds without an
+                IR receiver wired keep their pre-M8 behavior.
+
+        config IR_GPIO_PIN
+            int "IR receiver signal GPIO"
+            depends on IR_ENABLED
+            default 19
+            help
+                Pin connected to the IR receiver module's signal output.
+                The module demodulates the 38 kHz carrier internally and
+                outputs an active-low envelope — directly readable by
+                the ESP32 with no level shifting (it idles HIGH at VCC,
+                which is 3.3V).
+
+        config IR_MUTE_BUTTON_CODE
+            hex "NEC code for mute toggle"
+            depends on IR_ENABLED
+            default 0x0
+            help
+                Full 32-bit NEC frame for the mute button. Default 0
+                disables — a value of 0 in the firmware means "code
+                not yet identified". First-time setup: leave at 0,
+                flash, point remote at receiver, press the button you
+                want to assign, read the "IR rx: 0x..." line from the
+                serial monitor, set that hex value here, reflash.
+
+        config IR_SNOOZE_BUTTON_CODE
+            hex "NEC code for snooze"
+            depends on IR_ENABLED
+            default 0x0
+            help
+                Full 32-bit NEC frame for the snooze button. See
+                IR_MUTE_BUTTON_CODE for the mapping-pass procedure.
+
+        config IR_CANCEL_BUTTON_CODE
+            hex "NEC code for mid-turn cancel"
+            depends on IR_ENABLED
+            default 0x0
+            help
+                Full 32-bit NEC frame for the cancel button. See
+                IR_MUTE_BUTTON_CODE for the mapping-pass procedure.
+
+        config IR_SNOOZE_DURATION_MIN
+            int "Snooze duration (minutes)"
+            depends on IR_ENABLED
+            default 30
+            help
+                When the snooze button fires, both wake sources are
+                paused for this many minutes, then auto-resume.
+                Pressing snooze again while already snoozed resets
+                the timer to a fresh duration.
+
+    endmenu
+
 endmenu

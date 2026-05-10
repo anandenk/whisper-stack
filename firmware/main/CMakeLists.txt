@@ -13,6 +13,15 @@ idf_component_register(
         "http_client.c"
         "vad.c"
         "listen_stream.c"
+        # M7 — HC-SR04 ultrasonic gesture wake (compiled-in always;
+        # runtime-gated on CONFIG_WAKE_GESTURE_ENABLED inside gesture.c).
+        "gesture.c"
+        # M8 — IR remote (NEC decoder via RMT). Same pattern as gesture.c —
+        # compiled-in always, runtime-gated on CONFIG_IR_ENABLED.
+        "ir_remote.c"
+        # Cross-task mute/snooze/cancel state shared by M8, listen_stream,
+        # main.c's cancel hook, and the SPEAKING countdown.
+        "control_state.c"
     INCLUDE_DIRS "."
     REQUIRES
         # OLED stack
@@ -37,4 +46,6 @@ idf_component_register(
         json
         # M3: VAD timing (esp_timer_get_time)
         esp_timer
+        # M8: NEC IR decoding via the RMT peripheral
+        esp_driver_rmt
 )

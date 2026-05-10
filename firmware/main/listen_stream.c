@@ -5,6 +5,9 @@
 #include "http_client.h"
 #include "vad.h"
 #include "app_state.h"
+#include "wake_source.h"
+#include "control_state.h"
+#include "gesture.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -41,14 +44,21 @@ static const char *TAG = "listen";
 
 extern app_state_t s_state;  // defined in main.c
 
-// Forward-declared in main.c. preroll may be NULL/zero for button-triggered
-// (no pre-roll needed) round-trips. wake_score is the openWakeWord score
-// from the /listen response (0..1); pass <= 0 for button-triggered turns
-// where there is no wake event to display.
+// Forward-declared in main.c. The preroll is passed as TWO segments
+// because the source ring buffer wraps — segment 1 is start..end, segment
+// 2 is the wrap-around 0..write_idx. Either segment may be NULL/0; non-
+// voice wake sources (button, gesture) pass NULL/0 for both. Avoids the
+// always-live 32 KB snapshot copy that previously sat alongside the
+// preroll ring for no reason but to flatten it. wake_source records
+// which input fired (VOICE/GESTURE/BUTTON) so the OLED splash and serial
+// logs can distinguish paths.
 extern void do_round_trip_streaming_with_preroll(const char *ip,
-                                                 const int16_t *preroll,
-                                                 size_t preroll_n,
-                                                 double wake_score);
+                                                 const int16_t *preroll_seg1,
+                                                 size_t preroll_seg1_n,
+                                                 const int16_t *preroll_seg2,
+                                                 size_t preroll_seg2_n,
+                                                 double wake_score,
+                                                 wake_source_t wake_source);
 
 // --- Pre-roll ring buffer -------------------------------------------------
 
@@ -82,19 +92,26 @@ static void preroll_push(preroll_t *p, const int16_t *src, size_t n)
     }
 }
 
-// Copy the most recent `min(total, capacity)` samples into `out`,
-// in chronological order. `out` must hold capacity samples.
-// Returns the count actually copied.
-static size_t preroll_snapshot(const preroll_t *p, int16_t *out)
+// Compute the two contiguous segments that together form the preroll
+// in chronological order. Either may be empty. Caller streams seg1 first,
+// then seg2. Avoids allocating a snapshot copy — the ring buffer's own
+// memory is what we hand to the HTTP write.
+//
+// Lifetime: the segments are valid until preroll_push() is next called.
+// During a turn the listen_stream task isn't pushing (it's running the
+// round-trip in do_one_turn), so segments stay stable across the writes.
+static void preroll_segments(const preroll_t *p,
+                             const int16_t **seg1, size_t *seg1_n,
+                             const int16_t **seg2, size_t *seg2_n)
 {
     size_t avail = p->total < p->capacity ? p->total : p->capacity;
     size_t start = p->total < p->capacity ? 0 : p->write_idx;
-    size_t first_n = p->capacity - start;
-    if (first_n > avail) first_n = avail;
-    if (first_n > 0) memcpy(out, p->buf + start, first_n * sizeof(int16_t));
-    size_t second_n = avail - first_n;
-    if (second_n > 0) memcpy(out + first_n, p->buf, second_n * sizeof(int16_t));
-    return avail;
+    size_t first_cap = p->capacity - start;
+    size_t a_n = avail < first_cap ? avail : first_cap;
+    *seg1 = p->buf + start;
+    *seg1_n = a_n;
+    *seg2 = p->buf;
+    *seg2_n = avail - a_n;
 }
 
 static void preroll_free(preroll_t *p)
@@ -288,8 +305,10 @@ static bool read_and_parse_response(int sock, double *score_out)
 // --- Main loop ------------------------------------------------------------
 
 typedef enum {
-    LISTEN_RESULT_WAKE,           // server fired wake=true
+    LISTEN_RESULT_WAKE,           // server fired wake=true (voice)
     LISTEN_RESULT_BUTTON,         // user pressed BOOT to short-circuit
+    LISTEN_RESULT_GESTURE,        // M7 — HC-SR04 detected a wave
+    LISTEN_RESULT_MUTED,          // M8 — control_state went muted; close socket and idle
     LISTEN_RESULT_RECONNECT,      // server replied wake=false (idle/closed) or transport error
 } listen_result_t;
 
@@ -317,6 +336,19 @@ static listen_result_t run_listen_session(int sock, preroll_t *preroll,
             return LISTEN_RESULT_BUTTON;
         }
         prev_button_low = now_low;
+
+        // M7 — gesture polling task signals via a one-shot flag.
+        if (gesture_check_and_clear()) {
+            ESP_LOGI(TAG, "gesture-triggered wake (HC-SR04 wave)");
+            return LISTEN_RESULT_GESTURE;
+        }
+
+        // M8 — if mute was requested, close the /listen socket cleanly
+        // and let the outer loop handle drawing the muted screen.
+        if (control_is_muted_now()) {
+            ESP_LOGI(TAG, "muted — closing /listen, will idle until unmuted");
+            return LISTEN_RESULT_MUTED;
+        }
 
         size_t got = 0;
         esp_err_t err = i2s_mic_capture_frame(frame, LISTEN_FRAME_SAMPLES, &got, 100);
@@ -360,8 +392,50 @@ static void oled_listen_status(const char *label, const char *ip)
     }
     oled_flush();
 }
+// M8 — IDLE-screen variant for the muted state. Replaces the wake-word
+// hint with a MUTED indicator + (when snoozed) a "Xm left" countdown
+// the listen_stream main loop redraws every second.
+static void oled_muted_status(control_mute_state_t st, int mins_left, const char *ip)
+{
+    oled_clear();
+    oled_draw_text(0, "whisper-stack");
+    oled_draw_text(2, "*** MUTED ***");
+    if (st == CONTROL_MUTE_SNOOZE) {
+        char buf[OLED_CHARS_PER_LINE + 1];
+        snprintf(buf, sizeof buf, "    %dm left", mins_left);
+        oled_draw_text(3, buf);
+    } else {
+        oled_draw_text(3, "    press mute btn");
+    }
+    if (ip) {
+        char ip_line[OLED_CHARS_PER_LINE + 1];
+        snprintf(ip_line, sizeof ip_line, "ip:%s", ip);
+        oled_draw_text(7, ip_line);
+    }
+    oled_flush();
+}
+// M8 — transient mute/snooze toggle splash, ~800 ms. Replaces the
+// idle screen entirely so the user gets visible confirmation that the
+// IR press registered (especially on toggles where the IDLE state
+// before and after looks similar — e.g. INDEFINITE → SNOOZE).
+static void oled_splash(const char *msg, const char *ip)
+{
+    oled_clear();
+    oled_draw_text(0, "whisper-stack");
+    oled_draw_text(3, msg ? msg : "");
+    if (ip) {
+        char ip_line[OLED_CHARS_PER_LINE + 1];
+        snprintf(ip_line, sizeof ip_line, "ip:%s", ip);
+        oled_draw_text(7, ip_line);
+    }
+    oled_flush();
+}
 #else
 static inline void oled_listen_status(const char *l, const char *ip) { (void)l; (void)ip; }
+static inline void oled_muted_status(control_mute_state_t st, int m, const char *ip) {
+    (void)st; (void)m; (void)ip;
+}
+static inline void oled_splash(const char *msg, const char *ip) { (void)msg; (void)ip; }
 #endif
 
 static void listen_stream_task(void *arg)
@@ -374,19 +448,57 @@ static void listen_stream_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    int16_t *snapshot = heap_caps_malloc(PREROLL_SAMPLES * sizeof(int16_t), MALLOC_CAP_8BIT);
-    if (!snapshot) {
-        ESP_LOGE(TAG, "snapshot alloc failed; task exiting");
-        preroll_free(&preroll);
-        vTaskDelete(NULL);
-        return;
-    }
+    // No snapshot buffer — preroll segments are streamed straight from
+    // the ring memory. Was 32 KB always-live; eliminating it lets us
+    // afford a bigger i2s_mic ring buffer (the actual fix to the
+    // chunked-upload-backpressure audio corruption).
 
     while (1) {
         // Only stream while idle. M3 round-trip mutates s_state through
         // LISTENING/THINKING/SPEAKING and returns it to IDLE.
         if (s_state != APP_STATE_IDLE) {
             vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        // M8 — transient toggle splash takes priority over both the
+        // muted screen and the live /listen path, so a mute/snooze
+        // press during an active /listen session shows confirmation
+        // the moment run_listen_session bails. Polled every 100 ms
+        // while active so the message visibly holds for ~800 ms before
+        // the underlying screen redraws.
+        char splash_buf[40];
+        if (control_get_active_splash(splash_buf, sizeof splash_buf)) {
+            oled_splash(splash_buf, ip);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        // M8 — when muted, idle the streaming entirely and update the
+        // OLED with the snooze countdown once a second. Both wake
+        // sources (voice via /listen, gesture via gesture.c) are
+        // expected to remain quiet until mute clears. Gesture polling
+        // already self-gates on control_is_muted_now(); we self-gate
+        // /listen here.
+        if (control_is_muted_now()) {
+            // Also poll BOOT button while muted — even with mute on,
+            // the manual wake should still work as an escape hatch
+            // if e.g. the IR remote is lost. Falling-edge detection.
+            static int prev_btn_low_muted = 0;
+            int now_low = (gpio_get_level(BUTTON_GPIO) == 0) ? 1 : 0;
+            if (now_low && !prev_btn_low_muted) {
+                ESP_LOGI(TAG, "BUTTON pressed while muted — overriding to wake");
+                prev_btn_low_muted = now_low;
+                preroll.write_idx = 0; preroll.total = 0;
+                do_round_trip_streaming_with_preroll(ip, NULL, 0, NULL, 0, 0.0, WAKE_BUTTON);
+                continue;
+            }
+            prev_btn_low_muted = now_low;
+
+            control_mute_state_t st = control_get_mute_state();
+            int mins = control_snooze_minutes_left();
+            oled_muted_status(st, mins, ip);
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
@@ -416,16 +528,30 @@ static void listen_stream_task(void *arg)
 
         switch (r) {
             case LISTEN_RESULT_WAKE: {
-                size_t n = preroll_snapshot(&preroll, snapshot);
-                ESP_LOGI(TAG, "WAKE → round-trip with %u-sample preroll", (unsigned)n);
-                do_round_trip_streaming_with_preroll(ip, snapshot, n, wake_score);
+                const int16_t *seg1, *seg2;
+                size_t n1, n2;
+                preroll_segments(&preroll, &seg1, &n1, &seg2, &n2);
+                ESP_LOGI(TAG, "WAKE (voice) → round-trip with %u-sample preroll",
+                         (unsigned)(n1 + n2));
+                do_round_trip_streaming_with_preroll(ip, seg1, n1, seg2, n2,
+                                                     wake_score, WAKE_VOICE);
                 break;
             }
-            case LISTEN_RESULT_BUTTON: {
+            case LISTEN_RESULT_BUTTON:
                 ESP_LOGI(TAG, "BUTTON → round-trip without preroll");
-                do_round_trip_streaming_with_preroll(ip, NULL, 0, 0.0);
+                do_round_trip_streaming_with_preroll(ip, NULL, 0, NULL, 0, 0.0, WAKE_BUTTON);
                 break;
-            }
+            case LISTEN_RESULT_GESTURE:
+                ESP_LOGI(TAG, "GESTURE → round-trip without preroll");
+                do_round_trip_streaming_with_preroll(ip, NULL, 0, NULL, 0, 0.0, WAKE_GESTURE);
+                break;
+            case LISTEN_RESULT_MUTED:
+                // Outer loop will handle the muted-screen redraw on
+                // the next iteration; just back off briefly so we
+                // don't spin reconnect-close cycles if mute clears
+                // the same tick we tore the socket down.
+                vTaskDelay(pdMS_TO_TICKS(100));
+                break;
             case LISTEN_RESULT_RECONNECT:
                 vTaskDelay(pdMS_TO_TICKS(BACKOFF_MS));
                 break;

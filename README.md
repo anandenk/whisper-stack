@@ -104,7 +104,14 @@ verified on real hardware.
   follow-ups, live VU bar showing your voice clearing the VAD floor,
   speaking-screen overlay with model name + token usage. WPA2-Enterprise
   WiFi verified on a real dorm network. The workstation's Realtek
-  output speaks the reply — no on-device DAC in v1.
+  output speaks the reply — no on-device DAC in v1. Two opt-in extras:
+  **HC-SR04 wave-to-wake** (alternative wake source — wave a hand 10 cm
+  in front of the sensor, no speaking required) and an **IR remote**
+  for mute / snooze / cancel (close the listening socket, auto-resume
+  after a configurable timer, or kill the current turn mid-LISTENING).
+  Both default OFF in `idf.py menuconfig`; the four wake-source paths
+  (VOICE / GESTURE / BUTTON / IR) all surface on the OLED splash so
+  you can tell which input fired.
 - **Per-process token / cost accounting.** `GET /health` returns a
   `usage` block with input/output tokens + USD-cost-since-boot per model.
   `/converse` also returns a per-call `estimated_cost_usd` so clients

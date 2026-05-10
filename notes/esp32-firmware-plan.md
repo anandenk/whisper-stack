@@ -549,6 +549,146 @@ voice-product user, are: model name, token usage, ip footer.
 Anything else is bench-only diagnostics that belong in the serial
 log.
 
+### Milestone 7 — HC-SR04 ultrasonic "wave to wake"
+
+**Goal:** an alternative wake source that doesn't require speaking —
+useful when the room is loud, the user is on a call, or voice wake
+is muted.
+
+- **Hardware:** HC-SR04 ultrasonic sensor. VCC → 5V (VIN), GND → GND,
+  Trig → output GPIO (default GPIO 32), Echo → voltage divider
+  (1kΩ + 2kΩ from the ELEGOO kit) → input GPIO (default GPIO 35,
+  in the input-only 34–39 range). Voltage divider is required —
+  echo is 5V logic, ESP32 inputs are 3.3V.
+- **Detection:** `gesture_poll_task` pulses Trig every
+  `WAKE_GESTURE_POLL_INTERVAL_MS` (default 50 ms), measures echo
+  pulse width, computes distance. A *wave* = distance crosses below
+  `WAKE_GESTURE_THRESHOLD_CM` (default 15), goes back above, crosses
+  below again, all within `WAKE_GESTURE_WINDOW_MS` (default 1500).
+  The down-up-down sequence rejects static obstacles (a wall close
+  to the sensor crosses below once and stays there — never fires).
+- **Wake plumbing:** task signals via a one-shot atomic flag
+  (`gesture_check_and_clear`). `listen_stream`'s main loop polls
+  it each iteration alongside the BOOT button check; on detection
+  it returns `LISTEN_RESULT_GESTURE` and the round-trip runs with
+  `wake_source=WAKE_GESTURE` (no preroll — there's no "tail of
+  hey jarvis" to recover).
+- **Cohabitation with mute (M8):** task self-gates on
+  `control_is_muted_now()` so a muted device doesn't fire from a
+  hand wave any more than from a wake word.
+- **Defaults-OFF:** `CONFIG_WAKE_GESTURE_ENABLED` defaults `n`. With
+  it unset, `gesture_init()` logs a "disabled" message and returns
+  ESP_OK without spawning the task — existing builds and any board
+  without an HC-SR04 wired keep their pre-M7 behavior.
+
+**New / changed files:**
+- `firmware/main/gesture.{c,h}` — driver + poll task
+- `firmware/main/wake_source.h` — new enum (VOICE/GESTURE/BUTTON/IR)
+  threaded through `do_round_trip_streaming_with_preroll`
+- `firmware/main/listen_stream.c` — gesture polling, new
+  `LISTEN_RESULT_GESTURE` arm
+- `firmware/main/main.c` — `oled_wake_splash` now takes
+  `wake_source_t` and shows a source label for non-voice paths
+- `firmware/main/Kconfig.projbuild` — submenu with the five
+  gesture configs
+
+**Verification (when an HC-SR04 is wired):**
+1. `idf.py menuconfig` → "M7 — HC-SR04 ultrasonic gesture wake" →
+   enable, set GPIOs, save, rebuild + flash.
+2. Wave a hand 10 cm from the sensor. Serial: `gesture: WAVE detected`.
+3. OLED splash: `*** WAKE *** / via GESTURE`. Round-trip proceeds.
+4. Hold a static object near the sensor — does NOT fire (single below,
+   no up-then-down-again).
+
+### Milestone 8 — IR remote (mute / snooze / cancel)
+
+**Goal:** device-level controls without going to the workstation —
+mute (when guests are over and you don't want the device listening),
+snooze (a meeting, then auto-resume), and a non-voice mid-turn cancel.
+
+- **Hardware:** IR receiver module from the ELEGOO kit. VCC → 3V3,
+  GND → GND, Signal → input GPIO (default GPIO 19). The receiver
+  module demodulates the 38 kHz carrier internally and outputs an
+  active-low envelope directly readable by the ESP32 — no level
+  shifting needed.
+- **Decoding:** ESP-IDF v5's `driver/rmt_rx.h` peripheral, 1 MHz
+  clock (1 tick = 1 µs). NEC parser in `ir_remote.c` decodes leader
+  + 32 bits + stop into a uint32 code; repeats (held button) are
+  detected by their short HIGH gap and ignored so a held button
+  doesn't toggle mute repeatedly. Soft 250 ms debounce on identical
+  codes.
+- **Mapping pass (first-time setup):** `IR_MUTE_BUTTON_CODE`,
+  `IR_SNOOZE_BUTTON_CODE`, and `IR_CANCEL_BUTTON_CODE` default to
+  0 in Kconfig. Flash, point remote at receiver, press buttons,
+  read `IR rx: 0x....` lines from serial monitor, set the three hex
+  codes in `idf.py menuconfig`, reflash. Code-type is `hex` (not
+  `int`) since NEC frames can exceed 0x7FFFFFFF.
+- **Mute (button 1):** `control_toggle_mute()`. NORMAL → INDEFINITE,
+  INDEFINITE → NORMAL, SNOOZE → INDEFINITE (cancels snooze). When
+  muted, `listen_stream_task` closes the `/listen` socket cleanly
+  via `LISTEN_RESULT_MUTED` and idles, redrawing a `MUTED` OLED
+  panel once a second. Gesture polling self-gates on the same
+  state. **Mute also cancels the active turn** if pressed during
+  LISTENING / THINKING / SPEAKING — matches standard voice-assistant
+  mute behavior ("shut up right now"). Same best-effort caveat as
+  the cancel button mid-SPEAKING (workstation playback may finish
+  the current sentence). BOOT button still works as a manual
+  override (escape hatch if the remote is lost). Mute does NOT
+  persist across reboots — intentional, so a forgotten-mute state
+  can't leave a powered device permanently silent.
+- **Snooze (button 2):** `control_start_snooze(N_min)` — same as
+  mute, but with an `IR_SNOOZE_DURATION_MIN`-minute timer (default
+  30). OLED shows `MUTED / Xm left`; the listen_stream redraw cadence
+  refreshes the countdown each second. Snooze auto-clears when
+  `esp_timer_get_time()` passes the deadline; pressing snooze again
+  while snoozed resets the timer; pressing mute while snoozed
+  cancels the snooze and goes indefinite.
+- **Cancel (button 3):** `control_request_cancel()` sets a one-shot
+  flag consumed by the first checker. Three checkpoints:
+    1. **LISTENING** — `cb_cancel` (the existing VAD cancel hook)
+       checks the flag each frame, returning true so `vad_record`
+       exits with `VAD_STOP_BUTTON_CANCEL`. Clean — no upload.
+    2. **THINKING** — best effort. We can't abort
+       `http_converse_stream_finish` mid-flight; the flag is checked
+       the moment finish returns. Server-side playback may have
+       already started (`play_locally=true` is async) so the
+       workstation finishes its current sentence — but the device
+       skips the SPEAKING countdown and exits the continuous loop.
+       Documented as "best-effort" in `do_one_turn`'s comment.
+    3. **SPEAKING** — countdown loop checks the flag each second
+       and breaks early, returning `ESP_FAIL` with reason
+       `VAD_STOP_BUTTON_CANCEL` so the continuous-mode loop in
+       `do_round_trip_streaming_with_preroll` exits.
+
+**New / changed files:**
+- `firmware/main/ir_remote.{c,h}` — RMT NEC decoder + dispatch task
+- `firmware/main/control_state.{c,h}` — shared mute/snooze/cancel
+  state with mutex and one-shot cancel flag
+- `firmware/main/listen_stream.c` — `LISTEN_RESULT_MUTED` arm,
+  muted-screen redraw loop, BOOT-button escape hatch in muted
+  mode, snooze-countdown OLED
+- `firmware/main/main.c` — cancel checks in `cb_cancel`,
+  THINKING-finish, SPEAKING countdown; `control_state_init` +
+  `ir_remote_init` calls in `app_main`
+- `firmware/main/CMakeLists.txt` — `esp_driver_rmt` REQUIRES,
+  three new SRCS
+- `firmware/main/Kconfig.projbuild` — submenu with six IR configs
+
+**Verification (when an IR receiver is wired):**
+1. `idf.py menuconfig` → "M8 — IR remote (mute / snooze / cancel)" →
+   enable, set the GPIO, leave codes at 0. Flash.
+2. Point remote at receiver, press a button. Serial:
+   `ir rx: 0x00FF18E7 (unmapped — ...)`.
+3. Set the three hex codes in menuconfig, reflash.
+4. Press mute → OLED `*** MUTED ***`. Say "hey jarvis" — no wake
+   (server's openWakeWord still listening but device's `/listen`
+   stream is paused). Press mute again → resumes.
+5. Press snooze → `MUTED / 30m left`, countdown updates each minute.
+   Press mute while snoozed → indefinite mute (cancels timer).
+6. Wake the device (voice or button), then press cancel mid-LISTENING
+   → returns to IDLE without uploading. Press cancel mid-SPEAKING →
+   countdown breaks early, no follow-up turn auto-engages.
+
 ---
 
 ## What's deliberately deferred to v2
@@ -697,6 +837,17 @@ log.
 | 6 | `firmware/main/main.c` | ✅ shipped — `oled_frame_begin/end` consolidation; `oled_wake_splash`, `oled_boot_screen`, `oled_listening_screen` helpers; cb_frame VU-bar redraw throttled to every 3rd frame; SPEAKING screen now shows model + tokens. |
 | 6 | `firmware/main/listen_stream.c` | ✅ shipped — `read_and_parse_response` now surfaces openWakeWord score; plumbed through to `do_round_trip_streaming_with_preroll`. |
 | 6 | `firmware/main/http_client.{c,h}` | ✅ shipped — `converse_resp_t` extended with `route`, `model`, `auto_escalated`, per-stage timings, token counts. Both buffered (M2) and streaming (M3) parse paths share `parse_converse_json()`. |
+| 7 | `firmware/main/wake_source.h` | New — `wake_source_t` enum threaded through round-trip so OLED splashes and logs distinguish VOICE/GESTURE/BUTTON/IR paths. |
+| 7 | `firmware/main/gesture.{c,h}` | New — HC-SR04 driver + `gesture_poll_task` with down-up-down state machine; runtime-gated on `CONFIG_WAKE_GESTURE_ENABLED`. |
+| 7 | `firmware/main/listen_stream.c` | Extended — `LISTEN_RESULT_GESTURE` arm; gesture flag polled each loop iteration. |
+| 7 | `firmware/main/main.c` | Extended — `oled_wake_splash` takes `wake_source_t` and shows source label for non-voice paths; splash now fires for all sources, not just voice. |
+| 7 | `firmware/main/Kconfig.projbuild` | Extended — "M7 — HC-SR04 ultrasonic gesture wake" submenu with five configs (enabled, trig/echo GPIO, threshold, window, poll interval). |
+| 8 | `firmware/main/control_state.{c,h}` | New — shared mute/snooze/cancel state with mutex; `control_is_muted_now`, `control_get_mute_state`, `control_snooze_minutes_left`, `control_toggle_mute`, `control_start_snooze`, `control_request_cancel`, `control_check_and_clear_cancel`. |
+| 8 | `firmware/main/ir_remote.{c,h}` | New — RMT-RX NEC decoder + dispatch task; runtime-gated on `CONFIG_IR_ENABLED`. Logs unmapped codes for first-time setup. |
+| 8 | `firmware/main/listen_stream.c` | Extended — `LISTEN_RESULT_MUTED` arm, muted-screen redraw with snooze countdown, BOOT-button escape hatch in muted mode. |
+| 8 | `firmware/main/main.c` | Extended — cancel check in `cb_cancel`, post-finish THINKING cancel, SPEAKING countdown cancel; new `_init` calls. |
+| 8 | `firmware/main/CMakeLists.txt` | Extended — `esp_driver_rmt` in REQUIRES; `gesture.c`, `ir_remote.c`, `control_state.c` in SRCS. |
+| 8 | `firmware/main/Kconfig.projbuild` | Extended — "M8 — IR remote (mute / snooze / cancel)" submenu with six configs (enabled, GPIO, three hex button codes, snooze duration). |
 | - | `firmware/sdkconfig.defaults` | ✅ shipped — committed defaults with placeholders; user fills via menuconfig. |
 | - | `firmware/CMakeLists.txt` | ✅ shipped — ESP-IDF project file with all components in REQUIRES. |
 | - | `CLAUDE.md` | ✅ shipped — "Firmware" section, M4 gotchas, VAD tuning, enterprise Wi-Fi recipe. |
@@ -714,3 +865,5 @@ log.
 | 4 | Don't touch BOOT. Say wake word, hear reply through workstation. Returns to wake-word-listening. |
 | 5 | After a reply, ask a follow-up *without* waking. Stay quiet 30s → wake mode resumes. |
 | 6 | OLED is pleasant to use; VU bar tracks your voice peak in LISTENING; debug build shows last transcript + reply. |
+| 7 | Wave 10 cm in front of HC-SR04 → "via GESTURE" splash, round-trip runs. Static obstacle close to sensor does not fire. |
+| 8 | Press IR mute button → MUTED screen, both wake sources idle. Snooze → "30m left" countdown. Cancel mid-LISTENING returns to IDLE without uploading. |

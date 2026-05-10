@@ -43,6 +43,10 @@
 #include "http_client.h"
 #include "vad.h"
 #include "listen_stream.h"
+#include "wake_source.h"
+#include "control_state.h"
+#include "gesture.h"
+#include "ir_remote.h"
 
 static const char *TAG = "whisper-stack";
 
@@ -116,13 +120,20 @@ static void oled_listening_screen(const char *line2, const char *line3, const ch
 // Brief flash on every wake event. No explicit delay — the http stream open
 // + preroll write that follow this call (~90 ms) hold the splash on screen
 // long enough to register before the listening screen overwrites it.
-static void oled_wake_splash(double score, const char *ip)
+//
+// M7/M8: shows which path fired. Voice wake additionally displays the
+// openWakeWord score; gesture/button paths just print the source name.
+static void oled_wake_splash(wake_source_t src, double score, const char *ip)
 {
-    char score_line[OLED_CHARS_PER_LINE + 1];
-    snprintf(score_line, sizeof score_line, "    score %.2f", score);
+    char line3[OLED_CHARS_PER_LINE + 1];
+    if (src == WAKE_VOICE) {
+        snprintf(line3, sizeof line3, "    score %.2f", score);
+    } else {
+        snprintf(line3, sizeof line3, "    via %s", wake_source_label(src));
+    }
     oled_frame_begin(NULL);
     oled_draw_text(2, "    *** WAKE ***");
-    oled_draw_text(3, score_line);
+    oled_draw_text(3, line3);
     oled_frame_end(ip);
 }
 // Boot card — held for WS_BOOT_SCREEN_HOLD_MS so the user can confirm
@@ -180,7 +191,7 @@ static void oled_show_reply(const converse_resp_t *r, int speaking_remaining_s, 
 #else
 static inline void oled_status(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
 static inline void oled_listening_screen(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
-static inline void oled_wake_splash(double s, const char *ip) { (void)s; (void)ip; }
+static inline void oled_wake_splash(wake_source_t src, double s, const char *ip) { (void)src; (void)s; (void)ip; }
 static inline void oled_boot_screen(const char *ip) { (void)ip; }
 #endif
 
@@ -219,6 +230,12 @@ static esp_err_t cb_frame(const int16_t *pcm, size_t n, void *user)
 static bool cb_cancel(void *user)
 {
     round_trip_ctx_t *ctx = user;
+
+    // M8 — IR remote cancel takes precedence and is consumed here so a
+    // single press of the cancel button bails out of the current
+    // LISTENING turn cleanly (vad_record returns BUTTON_CANCEL).
+    if (control_check_and_clear_cancel()) return true;
+
     int level = gpio_get_level(BUTTON_GPIO);
     int64_t now = esp_timer_get_time();
     if (level == 1) {
@@ -239,11 +256,17 @@ static bool cb_cancel(void *user)
 // drop back to wake-word listening, not an error.
 
 static esp_err_t do_one_turn(const char *ip,
-                             const int16_t *preroll, size_t preroll_n,
+                             const int16_t *preroll_seg1, size_t preroll_seg1_n,
+                             const int16_t *preroll_seg2, size_t preroll_seg2_n,
                              int initial_timeout_ms,
                              bool is_followup,
                              vad_result_t *vr_out)
 {
+    // Belt-and-suspenders: control_request_cancel ignores presses
+    // outside a turn, so the flag should already be clear. Force-clear
+    // anyway in case a press landed in the s_state-update window.
+    control_clear_cancel();
+
     s_state = APP_STATE_LISTENING;
     oled_listening_screen(is_followup ? "follow-up..." : "listening...",
                           is_followup ? "speak or wait"  : "speak now", ip);
@@ -258,12 +281,22 @@ static esp_err_t do_one_turn(const char *ip,
 
     // Ship the preroll first so the server's STT sees the lead-in to the
     // user's question (the tail of "...jarvis, what's the weather").
-    // Follow-up turns never have a preroll.
-    if (preroll && preroll_n > 0) {
-        ESP_LOGI(TAG, "preroll: %u samples", (unsigned)preroll_n);
-        if (http_converse_stream_write_preroll(ctx.stream, preroll, preroll_n) != ESP_OK) {
-            ESP_LOGW(TAG, "preroll write failed; continuing");
+    // Two segments because the source ring buffer wraps; each is a
+    // direct view into the listen_stream task's preroll memory (no
+    // intermediate copy). Follow-up turns pass NULL/0 for both.
+    if (preroll_seg1 && preroll_seg1_n > 0) {
+        if (http_converse_stream_write_preroll(ctx.stream, preroll_seg1, preroll_seg1_n) != ESP_OK) {
+            ESP_LOGW(TAG, "preroll seg1 write failed; continuing");
         }
+    }
+    if (preroll_seg2 && preroll_seg2_n > 0) {
+        if (http_converse_stream_write_preroll(ctx.stream, preroll_seg2, preroll_seg2_n) != ESP_OK) {
+            ESP_LOGW(TAG, "preroll seg2 write failed; continuing");
+        }
+    }
+    if ((preroll_seg1 && preroll_seg1_n > 0) || (preroll_seg2 && preroll_seg2_n > 0)) {
+        ESP_LOGI(TAG, "preroll: %u + %u samples",
+                 (unsigned)preroll_seg1_n, (unsigned)preroll_seg2_n);
     }
 
     err = vad_record(cb_frame, cb_cancel, &ctx, initial_timeout_ms, vr_out);
@@ -300,17 +333,46 @@ static esp_err_t do_one_turn(const char *ip,
     ESP_LOGI(TAG, "reply:      %s", resp.reply_text);
     ESP_LOGI(TAG, "audio_duration_s=%.2f", resp.audio_duration_s);
 
+    // M8 — best-effort cancel-during-THINKING. We can't kill the HTTP
+    // request mid-flight cleanly, so a cancel that arrived during the
+    // THINKING wait gets observed here, the moment finish() returns.
+    // The server's already started playback (play_locally=true means
+    // synth+play kicks off before the response posts back) so the
+    // workstation will finish its current sentence — but we skip the
+    // SPEAKING countdown and exit the continuous loop so the device
+    // doesn't lock into a turn the user already cancelled.
+    if (control_check_and_clear_cancel()) {
+        ESP_LOGI(TAG, "cancel observed post-finish — skipping SPEAKING");
+        oled_status("cancelled", "(playback cont.)", ip);
+        vr_out->reason = VAD_STOP_BUTTON_CANCEL;
+        return ESP_FAIL;
+    }
+
     s_state = APP_STATE_SPEAKING;
     int speak_s = (int)(resp.audio_duration_s + 0.5f);
     if (speak_s < 1) speak_s = 1;
 
 #if ENABLE_OLED
     for (int rem = speak_s; rem > 0; --rem) {
+        // M8 — cancel during SPEAKING breaks the countdown early so
+        // continuous-mode follow-ups don't auto-engage.
+        if (control_check_and_clear_cancel()) {
+            ESP_LOGI(TAG, "cancel during SPEAKING — exiting turn early");
+            oled_status("cancelled", "(playback cont.)", ip);
+            vr_out->reason = VAD_STOP_BUTTON_CANCEL;
+            return ESP_FAIL;
+        }
         oled_show_reply(&resp, rem, ip);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 #else
-    vTaskDelay(pdMS_TO_TICKS(speak_s * 1000));
+    for (int rem = speak_s; rem > 0; --rem) {
+        if (control_check_and_clear_cancel()) {
+            vr_out->reason = VAD_STOP_BUTTON_CANCEL;
+            return ESP_FAIL;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 #endif
 
     return ESP_OK;
@@ -326,13 +388,17 @@ static esp_err_t do_one_turn(const char *ip,
 // or any error → exit to IDLE and listen_stream_task re-arms /listen.
 
 void do_round_trip_streaming_with_preroll(const char *ip,
-                                          const int16_t *preroll,
-                                          size_t preroll_n,
-                                          double wake_score)
+                                          const int16_t *preroll_seg1,
+                                          size_t preroll_seg1_n,
+                                          const int16_t *preroll_seg2,
+                                          size_t preroll_seg2_n,
+                                          double wake_score,
+                                          wake_source_t wake_source)
 {
-    // M6: brief splash on every wake event so the user has positive
+    // M6/M7/M8: brief splash on every wake event so the user has positive
     // feedback that the wake fired before the listening screen takes
-    // over. Skipped (score <= 0) for button-triggered turns.
+    // over. Now shows the source label (VOICE/GESTURE/BUTTON) for all
+    // paths — pre-M7 only voice turns got a splash.
     //
     // The 200 ms hold makes the splash readable. Audio cost: vad_record
     // calls i2s_mic_drain() at start, so live audio captured during the
@@ -342,23 +408,31 @@ void do_round_trip_streaming_with_preroll(const char *ip,
     // If users routinely run "hey jarvis what's the weather" with no
     // gap, lower this; default human pacing has a brief pause after
     // the wake word.
-    if (wake_score > 0) {
-        oled_wake_splash(wake_score, ip);
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
+    ESP_LOGI(TAG, "round-trip starting via %s (score=%.2f)",
+             wake_source_label(wake_source), wake_score);
+    oled_wake_splash(wake_source, wake_score, ip);
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     vad_result_t vr;
-    esp_err_t err = do_one_turn(ip, preroll, preroll_n,
+    esp_err_t err = do_one_turn(ip,
+                                preroll_seg1, preroll_seg1_n,
+                                preroll_seg2, preroll_seg2_n,
                                 /*initial_timeout_ms=*/0, /*is_followup=*/false, &vr);
 
     while (err == ESP_OK) {
         // Last turn returned a real reply. Stay open for a follow-up.
-        err = do_one_turn(ip, NULL, 0,
+        err = do_one_turn(ip, NULL, 0, NULL, 0,
                           WS_CONVERSATION_TIMEOUT_MS, /*is_followup=*/true, &vr);
         if (err != ESP_OK && vr.reason == VAD_STOP_NO_SPEECH) {
             // Conversation timed out — normal exit, not an error.
             ESP_LOGI(TAG, "continuous mode: silent %dms; back to wake mode",
                      WS_CONVERSATION_TIMEOUT_MS);
+            break;
+        }
+        if (err != ESP_OK && vr.reason == VAD_STOP_BUTTON_CANCEL) {
+            // M8 — cancel exits the continuous loop too. Don't let a
+            // cancelled turn auto-engage another follow-up.
+            ESP_LOGI(TAG, "continuous mode: cancelled; back to wake mode");
             break;
         }
     }
@@ -473,6 +547,23 @@ void app_main(void)
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&io);
+
+    // M7 + M8 — shared mute/snooze/cancel state plus the two opt-in
+    // peripherals. control_state_init must run before either gesture
+    // or IR comes up since both refer to the shared mutex. gesture
+    // and ir_remote both check their *_ENABLED Kconfig internally and
+    // log a "disabled" message + return ESP_OK when off — keeping the
+    // call sites unconditional matches how oled_face_init() handles
+    // an unwired second OLED.
+    if (control_state_init() != ESP_OK) {
+        ESP_LOGE(TAG, "control_state_init failed");
+    }
+    if (gesture_init() != ESP_OK) {
+        ESP_LOGW(TAG, "gesture_init failed (HC-SR04 wiring?)");
+    }
+    if (ir_remote_init() != ESP_OK) {
+        ESP_LOGW(TAG, "ir_remote_init failed (RMT setup?)");
+    }
 
     s_state = APP_STATE_IDLE;
     oled_status("idle", "say 'hey jarvis'", ip);
