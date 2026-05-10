@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 models/
 samples/_*.wav
+tests/_*.png
 sessions/
 .claude/
 .vscode/

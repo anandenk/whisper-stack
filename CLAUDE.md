@@ -126,6 +126,40 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
 
 6. **Use `127.0.0.1`, never `localhost`, for Ollama / any local HTTP.** On this Windows box, `localhost` resolution adds ~2 seconds per request (IPv6/DNS fallback). Ollama itself is fast — `total_duration` reports 15ms — but the client wall-clock is 2050ms. Discovered at stage 5: classify latency was 2050ms with `localhost`, dropped to 30ms with `127.0.0.1`. Default in `server/config.py:OLLAMA_HOST` is `http://127.0.0.1:11434`.
 
+7. **Audio gain pipeline lives on the server, not the device.** INMP441 +
+   the firmware's natural `>>16` 24→16-bit conversion produces
+   conversational-speech peaks of only ~1500-2000 in int16 — clean but
+   so quiet that whisper hallucinates and openWakeWord misses wake
+   events. We compensate at *two* server-side stages:
+   - **`/converse`**: `_peak_normalize_wav()` in `server/app.py` reads
+     each upload, finds the peak, scales to a target peak (~24000)
+     with a max-gain cap (~12×) and silence floor (~200). Adaptive,
+     never clips. Tunable via `NORMALIZE_TARGET_PEAK`/`NORMALIZE_MAX_GAIN`
+     constants — no firmware reflash to retune.
+   - **`/listen`**: `wakeword.py` applies a fixed `LISTEN_GAIN` (default
+     6×) to each 80 ms frame before `model.predict()`. Boosts wake-word
+     recall dramatically. Fixed (not adaptive) because frame-level
+     normalization would amplify silence noise into false positives.
+   - **Debug listening**: every `/converse` upload is also dumped to
+     `samples/_last_received.wav` (post-normalize) so you can hear
+     exactly what whisper saw.
+
+   We deliberately do *not* compensate in firmware — server-side gain
+   is way easier to tune (no reflash) and the lost-precision argument
+   (firmware shifts away the bottom 8 bits of 24-bit data) is
+   academic, since those bits are dominated by INMP441's noise floor
+   for voice levels.
+
+8. **`/converse` socket timeout is 30 s, not the original 5 s.** The
+   `FastFailHandler` in `server/app.py` was added at M4 with
+   `timeout=5` to recover stuck `/listen` connections. But it applies
+   globally, and 5 s is too aggressive for `/converse` chunked uploads
+   under enterprise Wi-Fi jitter — long recordings hit
+   `TimeoutError: timed out` mid-`request.get_data()` and surface as
+   500s. 30 s is well above the firmware's per-frame cadence (~80 ms)
+   and the wakeword module's own 2 s lock-acquire timeout still
+   handles short-term `/listen` contention.
+
 ## Layout
 
 ```
@@ -158,6 +192,10 @@ requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
 firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
 └── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h
                              + http_client.c/h + app_state.h
+                             + cat_face.h    (auto-gen from tests/oled_dump_c.py)
+tests/oled_animate.py        live tkinter cat-face state-machine preview
+tests/oled_preview.py        static PNG + C-array dump for one frame
+tests/oled_dump_c.py         regenerate firmware/main/cat_face.h from poses
 ```
 
 ## Firmware (ESP-WROOM-32)
@@ -166,15 +204,18 @@ ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
 classic, NOT s3). **M1 + M2 + M3 + M4 + M5 + M6 shipped** (M5 + M6
 both landed in the same workstation session 2026-05-06: continuous
 chat, then OLED polish — boot card, wake splash, live VU bar,
-model+tokens speaking screen). State of the device:
+model+tokens speaking screen). **Cat-face OLED shipped 2026-05-10** —
+a second SSD1306 panel on a separate I²C bus renders an animated cat
+mascot synchronized to the app state machine. State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
   responsive to sound.
 - **Hands-free wake** (M4): say "hey jarvis", server-side openWakeWord
-  fires, device transitions to LISTENING with a 500 ms pre-roll so the
-  question after the wake word isn't truncated. BOOT button is preserved
-  as a manual-wake fallback.
+  fires, device transitions to LISTENING with a **1 s pre-roll** (bumped
+  from 512 ms after real-use feedback — 500 ms wasn't enough to catch
+  short lead-in words like "what is the X" when wake fires mid-"jarvis").
+  BOOT button is preserved as a manual-wake fallback.
 - VAD-bounded recording (M3) streams over **HTTP chunked-transfer**
   as it's captured — no heap cap on length. VAD stops on 2.5 s of
   silence (`vad.h`) after voice has been heard, or returns NO_SPEECH
@@ -201,11 +242,50 @@ model+tokens speaking screen). State of the device:
   flush) to avoid full-frame flicker.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
+- **Cat-face OLED** (2026-05-10): a second SSD1306 128×64 panel on
+  **I²C bus 1** (SDA=GPIO 16, SCL=GPIO 17, addr 0x3C — no soldering
+  needed since the buses are isolated, both panels can share the
+  default address) drives an animated cat mascot. `oled.c` was
+  refactored to support multiple panels via an internal `oled_state_t`
+  struct: existing `oled_*` API targets the main status panel
+  (unchanged); new `oled_face_init/clear/fill/draw_bitmap/flush`
+  target the face panel. A FreeRTOS task `face_task` reads `s_state`
+  and plays the matching animation from `cat_face.h` (auto-generated
+  from `tests/oled_animate.py` poses via `tests/oled_dump_c.py`).
+  Animations: IDLE = gentle blink; LISTENING = `?` traces stroke-by-
+  stroke above the right eye; THINKING = three floating dots cycling
+  `.` → `..` → `...`; SPEAKING = happy `^_^` eyes with `ω` / `o` mouth
+  pulse. `oled_face_init()` is graceful — if the panel is unwired
+  or unpowered, it logs a warning and the rest of the firmware boots
+  normally (face_task simply isn't spawned).
 
 All planned firmware milestones are shipped. The device is feature-
 complete for v1; further work is hardware (e.g. ESP32-S3 with PSRAM
 to enable on-device wake word, or MAX98357A for standalone audio
 out) or quality-of-life polish.
+
+### Cat-face design + iteration
+
+Iterating on 1-bit pixel art via flash-cycle is brutal, so the design
+loop lives entirely in Python. Three tools in `tests/`:
+
+- `oled_animate.py` — live tkinter window at 8× zoom showing the cat
+  face animated across all 6 states. Press 1–6 to switch state, Esc
+  to quit. Edit pose primitives or the animation generators near the
+  top of the file, save, close, re-run; ~50 ms feedback loop.
+- `oled_preview.py` — single-frame static PNG renderer + ASCII print
+  + dumps a 1024-byte SSD1306 horizontal-page C array.
+- `oled_dump_c.py` — regenerates `firmware/main/cat_face.h` (every
+  unique pose bitmap + per-state animation tables indexed by
+  `app_state_t`). Run after editing `oled_animate.py`:
+  `python tests/oled_dump_c.py > firmware/main/cat_face.h`, then
+  rebuild + flash.
+
+A `Layout` dataclass in `oled_animate.py` parameterizes positions
+relative to canvas dimensions (eye/mouth fractions, indicator scale).
+Two presets: `OLED_128x64` (current panel) and `ROUND_240` (placeholder
+for the future round display, dimensions guessed — re-tune when real
+hardware arrives).
 
 ### M4 / wake-word gotchas (worth preserving)
 

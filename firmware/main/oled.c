@@ -1,9 +1,11 @@
 // SSD1306 128x64 I²C OLED driver — esp_lcd_panel_ssd1306 + a tiny 6x8 font.
 //
-// Pin map (from notes/esp32-firmware-plan.md):
-//   I²C SDA = GPIO 21
-//   I²C SCL = GPIO 22
-//   I²C addr = 0x3C (the SSD1306 default; jumper-selectable on most boards)
+// Two panels supported, each on its own I²C bus:
+//   MAIN — SDA=GPIO 21, SCL=GPIO 22, addr 0x3C, I²C bus auto-allocated
+//   FACE — SDA=GPIO 16, SCL=GPIO 17, addr 0x3C, I²C bus auto-allocated
+// Same chip on both, so they share the SSD1306 panel-init flow. The bus
+// init is the only part that's per-panel (different pins / different IDF
+// i2c_master handles).
 
 #include "oled.h"
 #include "app_state.h"
@@ -18,17 +20,25 @@
 
 static const char *TAG = "oled";
 
-#define OLED_I2C_SDA_GPIO    21
-#define OLED_I2C_SCL_GPIO    22
+#define MAIN_SDA_GPIO        21
+#define MAIN_SCL_GPIO        22
+#define FACE_SDA_GPIO        16   // RX2 on most ESP-WROOM-32 dev kits
+#define FACE_SCL_GPIO        17   // TX2 on most ESP-WROOM-32 dev kits
 #define OLED_I2C_ADDR        0x3C
 #define OLED_I2C_FREQ_HZ     400000
-#define OLED_FB_BYTES        ((OLED_W * OLED_H) / 8)  // 1 bpp = 1024 bytes
 
-static i2c_master_bus_handle_t s_bus = NULL;
-static esp_lcd_panel_io_handle_t s_io = NULL;
-static esp_lcd_panel_handle_t s_panel = NULL;
-static uint8_t s_fb[OLED_FB_BYTES];
-static bool s_initialized = false;
+// Per-panel state. The two OLEDs are mechanically identical, but each gets
+// its own I²C bus handle, panel handle, and framebuffer.
+typedef struct {
+    i2c_master_bus_handle_t bus;
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_handle_t panel;
+    uint8_t fb[OLED_FB_BYTES];
+    bool initialized;
+} oled_state_t;
+
+static oled_state_t s_main = {0};
+static oled_state_t s_face = {0};
 
 // 6x8 ASCII font, columns are LSB-on-top. 95 chars (0x20..0x7E), 6 bytes each.
 // Public-domain glyphs derived from the classic IBM CGA 8x8 font, trimmed to
@@ -133,71 +143,104 @@ static const uint8_t font6x8[95][6] = {
     {0x10,0x08,0x08,0x10,0x08,0x00}, // 0x7E '~'
 };
 
-esp_err_t oled_init(void)
+// ---------------------------------------------------------------------------
+// Private bus + panel init helper, shared by oled_init() and oled_face_init().
+// ---------------------------------------------------------------------------
+
+static esp_err_t init_panel(oled_state_t *st, int sda_gpio, int scl_gpio,
+                            uint8_t addr, const char *label)
 {
-    if (s_initialized) return ESP_OK;
+    if (st->initialized) return ESP_OK;
 
     i2c_master_bus_config_t bus_cfg = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
-        .sda_io_num = OLED_I2C_SDA_GPIO,
-        .scl_io_num = OLED_I2C_SCL_GPIO,
+        .sda_io_num = sda_gpio,
+        .scl_io_num = scl_gpio,
         .i2c_port = -1,                 // auto-pick a free port
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, &s_bus);
+    esp_err_t err = i2c_new_master_bus(&bus_cfg, &st->bus);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "[%s] i2c_new_master_bus failed: %s", label,
+                 esp_err_to_name(err));
         return err;
     }
 
     esp_lcd_panel_io_i2c_config_t io_cfg = {
-        .dev_addr = OLED_I2C_ADDR,
+        .dev_addr = addr,
         .scl_speed_hz = OLED_I2C_FREQ_HZ,
-        .control_phase_bytes = 1,   // SSD1306-spec: 1 byte control prefix
-        .dc_bit_offset = 6,         // bit 6 of the control byte distinguishes cmd vs data
+        .control_phase_bytes = 1,
+        .dc_bit_offset = 6,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };
-    err = esp_lcd_new_panel_io_i2c(s_bus, &io_cfg, &s_io);
+    err = esp_lcd_new_panel_io_i2c(st->bus, &io_cfg, &st->io);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_lcd_new_panel_io_i2c failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "[%s] esp_lcd_new_panel_io_i2c failed: %s", label,
+                 esp_err_to_name(err));
         return err;
     }
 
     esp_lcd_panel_ssd1306_config_t ssd_cfg = { .height = OLED_H };
     esp_lcd_panel_dev_config_t panel_cfg = {
         .bits_per_pixel = 1,
-        .reset_gpio_num = -1,           // SSD1306 module has its own RC reset; we don't drive it
+        .reset_gpio_num = -1,
         .vendor_config = &ssd_cfg,
     };
-    err = esp_lcd_new_panel_ssd1306(s_io, &panel_cfg, &s_panel);
+    err = esp_lcd_new_panel_ssd1306(st->io, &panel_cfg, &st->panel);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_lcd_new_panel_ssd1306 failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "[%s] esp_lcd_new_panel_ssd1306 failed: %s", label,
+                 esp_err_to_name(err));
         return err;
     }
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+    // The reset/init/disp_on commands actually talk to the chip over I²C.
+    // If the panel is unwired or unpowered, these NACK and we want to
+    // surface that as an error rather than aborting the whole device.
+    err = esp_lcd_panel_reset(st->panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[%s] panel_reset failed: %s — skipping",
+                 label, esp_err_to_name(err));
+        return err;
+    }
+    err = esp_lcd_panel_init(st->panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[%s] panel_init failed: %s — skipping",
+                 label, esp_err_to_name(err));
+        return err;
+    }
+    err = esp_lcd_panel_disp_on_off(st->panel, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[%s] panel_disp_on failed: %s — skipping",
+                 label, esp_err_to_name(err));
+        return err;
+    }
 
-    memset(s_fb, 0, sizeof s_fb);
-    s_initialized = true;
-    ESP_LOGI(TAG, "SSD1306 init OK at SDA=%d SCL=%d addr=0x%02x", OLED_I2C_SDA_GPIO, OLED_I2C_SCL_GPIO, OLED_I2C_ADDR);
+    memset(st->fb, 0, sizeof st->fb);
+    st->initialized = true;
+    ESP_LOGI(TAG, "[%s] SSD1306 init OK at SDA=%d SCL=%d addr=0x%02x",
+             label, sda_gpio, scl_gpio, addr);
     return ESP_OK;
+}
+
+// ---------------------------------------------------------------------------
+// MAIN panel — public API (unchanged from M1-M6).
+// ---------------------------------------------------------------------------
+
+esp_err_t oled_init(void)
+{
+    return init_panel(&s_main, MAIN_SDA_GPIO, MAIN_SCL_GPIO, OLED_I2C_ADDR, "main");
 }
 
 void oled_clear(void)
 {
-    memset(s_fb, 0, sizeof s_fb);
+    memset(s_main.fb, 0, sizeof s_main.fb);
 }
 
 void oled_draw_text(int line, const char *text)
 {
     if (line < 0 || line >= OLED_LINES) return;
-    // SSD1306 horizontal addressing mode lays out the framebuffer as 8 "pages"
-    // of 128 bytes each, where each byte's 8 bits are stacked vertically.
-    // Page `line` occupies s_fb[line*128 .. line*128 + 127].
-    uint8_t *row = &s_fb[line * OLED_W];
+    uint8_t *row = &s_main.fb[line * OLED_W];
     int col = 0;
     for (const char *p = text; *p && col + 6 <= OLED_W; ++p) {
         unsigned char c = (unsigned char)*p;
@@ -206,7 +249,6 @@ void oled_draw_text(int line, const char *text)
         for (int i = 0; i < 6; ++i) row[col + i] = glyph[i];
         col += 6;
     }
-    // Right-pad the rest of the line with zeros so partial overwrites are clean.
     while (col < OLED_W) row[col++] = 0x00;
 }
 
@@ -216,15 +258,10 @@ void oled_draw_bar(int line, int fill_px, int marker_px)
     if (fill_px < 0) fill_px = 0;
     if (fill_px > OLED_W) fill_px = OLED_W;
 
-    // Page byte layout: bit 0 = top pixel, bit 7 = bottom pixel of the row.
-    //   FILL_PATTERN = 4 middle pixels (rows 2-5) — looks bar-like.
-    //   MARKER_PATTERN = full 8 pixels — pokes above and below the fill so
-    //                    it stays visible whether the bar has reached it
-    //                    or not.
     const uint8_t FILL_PATTERN   = 0x3C;  // 0b00111100
     const uint8_t MARKER_PATTERN = 0xFF;
 
-    uint8_t *row = &s_fb[line * OLED_W];
+    uint8_t *row = &s_main.fb[line * OLED_W];
     for (int x = 0; x < OLED_W; ++x) {
         row[x] = (x < fill_px) ? FILL_PATTERN : 0x00;
     }
@@ -235,21 +272,46 @@ void oled_draw_bar(int line, int fill_px, int marker_px)
 
 void oled_flush(void)
 {
-    if (!s_initialized) return;
-    // esp_lcd_panel_draw_bitmap takes (x_start, y_start, x_end, y_end) where
-    // end is exclusive. For SSD1306 the panel driver reframes the FB into the
-    // chip's own page layout — we just hand it our 1024-byte buffer.
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, OLED_W, OLED_H, s_fb);
+    if (!s_main.initialized) return;
+    esp_lcd_panel_draw_bitmap(s_main.panel, 0, 0, OLED_W, OLED_H, s_main.fb);
 }
 
 void oled_flush_row(int line)
 {
-    if (!s_initialized) return;
+    if (!s_main.initialized) return;
     if (line < 0 || line >= OLED_LINES) return;
-    // Ship only the 128 bytes covering one 8-pixel-tall page. ~3.5 ms vs
-    // 25 ms for the full-frame flush — keeps live VU-bar updates flicker-
-    // free during VAD recording.
     const int y0 = line * 8;
-    esp_lcd_panel_draw_bitmap(s_panel, 0, y0, OLED_W, y0 + 8,
-                              &s_fb[line * OLED_W]);
+    esp_lcd_panel_draw_bitmap(s_main.panel, 0, y0, OLED_W, y0 + 8,
+                              &s_main.fb[line * OLED_W]);
+}
+
+// ---------------------------------------------------------------------------
+// FACE panel — public API (new for the cat-face OLED).
+// ---------------------------------------------------------------------------
+
+esp_err_t oled_face_init(void)
+{
+    return init_panel(&s_face, FACE_SDA_GPIO, FACE_SCL_GPIO, OLED_I2C_ADDR, "face");
+}
+
+void oled_face_clear(void)
+{
+    memset(s_face.fb, 0, sizeof s_face.fb);
+}
+
+void oled_face_fill(uint8_t pattern)
+{
+    memset(s_face.fb, pattern, sizeof s_face.fb);
+}
+
+void oled_face_draw_bitmap(const uint8_t *bytes)
+{
+    if (!bytes) return;
+    memcpy(s_face.fb, bytes, OLED_FB_BYTES);
+}
+
+void oled_face_flush(void)
+{
+    if (!s_face.initialized) return;
+    esp_lcd_panel_draw_bitmap(s_face.panel, 0, 0, OLED_W, OLED_H, s_face.fb);
 }
