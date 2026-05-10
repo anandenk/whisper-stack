@@ -160,6 +160,55 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
    and the wakeword module's own 2 s lock-acquire timeout still
    handles short-term `/listen` contention.
 
+9. **On weak WiFi links the firmware can't sustain the 32 KB/s mic
+   stream even after the BYTEBUF / coalesce / TCP_NODELAY fixes shipped
+   2026-05-10 (commit 2ea7880).** The producer (`audio_in_task` at
+   12.5 fps) outpaces the consumer (HTTP write to `/converse` or
+   `/listen`), the ring buffer fills, and `audio_in_task`'s recycle
+   path drops one frame per overflow event. Whisper hears the result
+   as words clipped, distorted, or missing entirely.
+
+   Recognize the situation:
+   - **`STATS[vad] ... recycled=N` with N > 0** in the firmware monitor.
+     This is the new ground-truth count of frames the producer threw
+     away to make room. `recycled=0` = clean turn. Logged at the end
+     of every `vad_record` in `vad.c` via `i2s_mic_dump_stats("vad")`.
+   - **Boot log `wifi:security: ..., rssi: -XX`.** -55 to -65 is fine,
+     -70 to -80 is borderline, -80+ will recycle under load. Check
+     after every reconnect — RSSI varies by AP and by physical
+     location even on the same SSID.
+   - **`ring overflow during LISTENING` warnings** firing repeatedly
+     during a single recording. Rate-limited to 1 Hz, so absence is
+     not proof — use the STATS line as the authoritative signal.
+   - **Transcripts with words missing**, or audio in
+     `samples/_last_received.wav` that's audibly chunky / shortened
+     vs what you actually said.
+
+   Two mitigations, apply in order:
+
+   - **`esp_wifi_set_ps(WIFI_PS_NONE);`** in `firmware/main/wifi.c`
+     after the connect succeeds. Default is `WIFI_PS_MIN_MODEM` (you'll
+     see `wifi:pm start, type: 1` in the boot log). MIN_MODEM sleeps
+     the radio between AP beacons (~100 ms intervals) and adds 5–15 ms
+     of wake-up latency per TX burst. On a marginal link that
+     compounds with retransmissions and starves the per-frame cadence.
+     NONE keeps the radio always on. Costs a few extra mA — on the
+     mains-powered device that's a strict win.
+   - **Bump `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`.** Default 5760 bytes
+     (~4 packets in flight per RTT). At RTT=200 ms that caps TCP
+     throughput at 28 KB/s — below the 32 KB/s mic rate. Bump to
+     32768 or 65536 via `idf.py menuconfig` → Component config →
+     LWIP → TCP → "Default send buffer size". Save, rebuild, reflash.
+
+   Confirmed working perfectly on a phone hotspot at RSSI -48 (8
+   consecutive turns recycled=0, clean transcripts). Confirmed
+   problematic on enterprise Wi-Fi from a dorm room at RSSI -84 even
+   after all 2026-05-10 fixes (~7–11 recycle events per turn). The
+   mitigations above are intended for marginal-WiFi *tolerance*.
+   Past that it's a coverage problem, not a code problem — move
+   closer to an AP, use a phone hotspot, or build v2 on an
+   ESP32-C5/C6 module (dual-band radio, 5 GHz support).
+
 ## Layout
 
 ```
