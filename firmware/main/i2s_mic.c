@@ -44,7 +44,11 @@ static RingbufHandle_t   s_rb = NULL;
 static bool s_initialized = false;
 
 // Convert one 32-bit I²S slot containing a 24-bit MSB-aligned signed sample
-// into int16 by dropping the bottom 16 bits.
+// into int16 by dropping the bottom 16 bits. This is the safest conversion
+// (it's just the top 16 bits of the 24-bit data, can't clip) but it leaves
+// conversational speech quite quiet at typical distance. We compensate
+// server-side via peak-normalization in app.py — auto-scales every received
+// recording to a target peak level, never clips, tunable without reflashing.
 static inline int16_t slot32_to_int16(int32_t s) { return (int16_t)(s >> 16); }
 
 static void audio_in_task(void *arg)

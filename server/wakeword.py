@@ -41,6 +41,16 @@ IDLE_TIMEOUT_S = 10 * 60
 # the deadline check fire reasonably promptly during idle stretches.
 READ_CHUNK_BYTES = 4096
 
+# INMP441 with the ESP-32 firmware's natural >>16 conversion produces
+# conversational-speech peaks of only ~1500-2000 in int16 — about -27 dBFS,
+# well below the level openWakeWord was trained on. A fixed software gain
+# applied to each frame before model.predict() boosts the audio into the
+# model's sweet spot (~-10 dBFS = peaks ~10000) and dramatically improves
+# wake-word recall. 6× gives ~12 dB boost; clipped to int16 range so loud
+# speech can't overflow. Tunable here without firmware reflash; if recall
+# is still poor, bump to 8 or 10. If false-positives become common, drop.
+LISTEN_GAIN = 6.0
+
 _LOCK = threading.Lock()
 _MODEL = None
 _MODEL_NAME: str | None = None
@@ -127,6 +137,11 @@ def stream_predict(read_chunk: Callable[[int], bytes]) -> dict:
                 frame = bytes(buf[:FRAME_BYTES])
                 del buf[:FRAME_BYTES]
                 samples = np.frombuffer(frame, dtype=np.int16)
+                if LISTEN_GAIN != 1.0:
+                    samples = np.clip(
+                        samples.astype(np.float32) * LISTEN_GAIN,
+                        -32768, 32767,
+                    ).astype(np.int16)
                 scores = model.predict(samples)
                 score = float(scores.get(_MODEL_NAME, 0.0))
                 if score >= threshold:

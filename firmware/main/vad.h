@@ -17,18 +17,16 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-// 200 instead of jarvis.py's 600. INMP441 has no AGC, and at typical
-// reading distance (~12+ in.) conversational-speech peaks span a wide
-// range — bench data from M5 continuous-mode session: 680 / 669 / 564
-// / 430 / 393 / 282 across a 6-turn conversation as the user got
-// quieter. Earlier 300 default missed the 282 turn entirely (whole
-// 30 s window of real speech read as silence → dropped out of
-// continuous mode). 200 stays ~2× the idle-ambient peak (~100 from
-// M1's snap test) so room noise still won't false-trigger, but a
-// tired-voice follow-up at the back end of a long chat still clears.
-// Failure asymmetry: a false-positive (noise crosses threshold) costs
-// one wasted /converse round-trip; a false-negative drops the user
-// out of continuous mode. Tilt toward catching speech.
+// 200 against the >>16 mic conversion. INMP441 has no AGC, and at
+// typical reading distance (~12+ in.) conversational-speech peaks
+// span a wide range — 280-680 in M5 bench data. 200 stays ~2× the
+// idle-ambient peak (~100) so room noise still won't false-trigger,
+// but a tired-voice follow-up at the back end of a long chat still
+// clears. Failure asymmetry: a false-positive (noise crosses threshold)
+// costs one wasted /converse round-trip; a false-negative drops the
+// user out of continuous mode. Tilt toward catching speech.
+// (Server-side peak-normalization handles audible quietness; VAD only
+// cares about presence-of-voice, which works fine at the raw mic level.)
 #define VAD_PEAK_THRESHOLD       200
 // 2500 ms instead of jarvis.py's 1500 ms because users naturally pause
 // >1.5 s mid-sentence when reading from a screen or thinking. The cost

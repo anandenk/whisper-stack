@@ -12,6 +12,7 @@ import hmac
 import json
 import re
 import sys
+import shutil
 import tempfile
 import time
 import traceback
@@ -110,6 +111,55 @@ def _parse_content_type(ct: str | None) -> tuple[str, dict[str, str]]:
             k, v = p.split("=", 1)
             params[k.strip().lower()] = v.strip().strip('"')
     return media, params
+
+
+# Server-side peak normalization for incoming /converse audio.
+# INMP441 with the firmware's natural >>16 conversion produces conversational
+# speech at peaks of ~1500-2000 out of int16's 32767 range — clean but quiet.
+# Whisper handles quiet audio worse than scaled audio (more hallucinations,
+# more substitutions). We auto-scale every received recording to a target
+# peak so whisper sees consistent levels regardless of how close the user
+# was to the mic, voice volume, or distance.
+#
+# Adaptive (peak-based) rather than fixed-gain so loud speech doesn't clip:
+#   gain = min(MAX_GAIN, TARGET_PEAK / current_peak)
+# Skip when peak is below MIN_PEAK (assume silence/noise — don't blow up
+# the noise floor).
+NORMALIZE_TARGET_PEAK = 24000   # ~73% of int16 full scale, 6 dB headroom
+NORMALIZE_MAX_GAIN    = 12.0    # cap so pure noise doesn't get amplified to ear-splitting
+NORMALIZE_MIN_PEAK    = 200     # below this we treat the recording as silence
+
+def _peak_normalize_wav(path: str | Path) -> None:
+    """Peak-normalize an int16 WAV file in-place. No-op for non-int16 WAVs
+    or recordings below the silence floor."""
+    import wave
+    import numpy as np
+    try:
+        with wave.open(str(path), "rb") as wf:
+            params = wf.getparams()
+            frames = wf.readframes(wf.getnframes())
+        if params.sampwidth != 2:
+            return
+        samples = np.frombuffer(frames, dtype=np.int16)
+        if samples.size == 0:
+            return
+        peak = int(np.abs(samples).max())
+        if peak < NORMALIZE_MIN_PEAK:
+            return
+        gain = min(NORMALIZE_MAX_GAIN, NORMALIZE_TARGET_PEAK / peak)
+        if gain <= 1.0:
+            return
+        boosted = np.clip(
+            samples.astype(np.int32) * gain,
+            -32768, 32767,
+        ).astype(np.int16)
+        with wave.open(str(path), "wb") as wf:
+            wf.setparams(params)
+            wf.writeframes(boosted.tobytes())
+        app.logger.info("normalized audio: peak %d -> ~%d (gain %.2fx)",
+                        peak, int(peak * gain), gain)
+    except (OSError, wave.Error) as e:
+        app.logger.warning("peak normalize failed: %s — leaving audio as-is", e)
 
 
 def _capture_audio_upload(suffix_hint: str = ".wav") -> tuple[str | None, dict | None, int | None, callable | None]:
@@ -390,6 +440,19 @@ def converse():
     if err is not None:
         return jsonify(err), status
 
+    # Auto-gain: scale the recording so whisper sees a healthy signal level
+    # regardless of mic distance / voice volume. Adaptive — never clips.
+    _peak_normalize_wav(tmp_path)
+
+    # Debug: keep a copy of the most recent received audio (post-normalize,
+    # so this is exactly what whisper will see) for offline listening.
+    try:
+        debug_audio = config.REPO_ROOT / "samples" / "_last_received.wav"
+        debug_audio.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(tmp_path, debug_audio)
+    except OSError as e:
+        app.logger.warning("could not save debug audio: %s", e)
+
     force_route = get_field("force_route")
     if force_route is not None and force_route not in ("simple", "complex"):
         return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
@@ -597,6 +660,19 @@ def converse_stream():
     tmp_path, err, status, get_field = _capture_audio_upload(suffix_hint=".wav")
     if err is not None:
         return jsonify(err), status
+
+    # Auto-gain: scale the recording so whisper sees a healthy signal level
+    # regardless of mic distance / voice volume. Adaptive — never clips.
+    _peak_normalize_wav(tmp_path)
+
+    # Debug: keep a copy of the most recent received audio (post-normalize,
+    # so this is exactly what whisper will see) for offline listening.
+    try:
+        debug_audio = config.REPO_ROOT / "samples" / "_last_received.wav"
+        debug_audio.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(tmp_path, debug_audio)
+    except OSError as e:
+        app.logger.warning("could not save debug audio: %s", e)
 
     force_route = get_field("force_route")
     if force_route is not None and force_route not in ("simple", "complex"):
@@ -970,15 +1046,22 @@ def main():
     # request hung in request.stream.read forever, locking out new
     # connections from the firmware's reconnect loop.)
     #
-    # Custom request handler with a 5 s socket timeout. Werkzeug's default
-    # is 60 s, which is far too long — when the firmware RSTs an idle
-    # /listen connection, the server-side recv blocks until that 60 s
-    # elapses, holding wakeword._LOCK for a minute and starving every
-    # subsequent /listen request. With 5 s, dead connections die fast
-    # and the lock recycles within seconds.
+    # Custom request handler with a 30 s socket timeout. Werkzeug's default
+    # is 60 s, which is too long for /listen (when the firmware RSTs an
+    # idle connection, the server-side recv blocks for the full 60 s,
+    # holding wakeword._LOCK and starving subsequent requests). 5 s was
+    # the original setting but turned out too aggressive for /converse —
+    # long VAD recordings (10-30 s of chunked audio) plus normal WiFi
+    # WiFi jitter caused TimeoutError during request.get_data()
+    # on the chunked stream, surfacing as 500s mid-turn. 30 s is well
+    # above the firmware's per-frame cadence (~80 ms between chunks),
+    # accommodates several seconds of WiFi backoff, and is still fast
+    # enough that dead /listen clients recycle the wakeword lock without
+    # piling up — the wakeword module's own 2 s lock-acquire timeout
+    # handles short-term contention.
     from werkzeug.serving import WSGIRequestHandler
     class FastFailHandler(WSGIRequestHandler):
-        timeout = 5
+        timeout = 30
     app.run(host=config.HOST, port=config.PORT, debug=False,
             use_reloader=False, threaded=True,
             request_handler=FastFailHandler)

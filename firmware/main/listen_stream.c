@@ -28,7 +28,13 @@
 static const char *TAG = "listen";
 
 #define BUTTON_GPIO            GPIO_NUM_0
-#define PREROLL_SAMPLES        8192      // ~512 ms @ 16 kHz, 16 KB DRAM
+// Preroll: how much pre-wake audio we keep around so the start of the
+// user's question (which often starts while they're still saying "...jarvis"
+// or just before the wake-word model fires) isn't lost. 512 ms wasn't
+// enough — short lead-ins like "what is the X" got cut off when wake fired
+// mid-"jarvis". 16384 samples (~1 s, 32 KB DRAM) comfortably covers a full
+// "hey jarvis <question>" preamble and recovers the lead-in.
+#define PREROLL_SAMPLES        16384     // ~1024 ms @ 16 kHz, 32 KB DRAM
 #define LISTEN_FRAME_SAMPLES   1280      // 80 ms @ 16 kHz — matches openWakeWord's frame size
 #define LISTEN_RESP_BUF_SIZE   1024      // server reply is ~50-100 bytes
 #define BACKOFF_MS             1000      // pause before retrying after a /listen error
