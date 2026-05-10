@@ -299,6 +299,26 @@ static esp_err_t do_one_turn(const char *ip,
                  (unsigned)preroll_seg1_n, (unsigned)preroll_seg2_n);
     }
 
+    // Ring-drain policy. vad_record no longer drains at entry — it's now
+    // the caller's responsibility, because the right behavior depends on
+    // why we're here.
+    //
+    //   First turn (post-wake): the i2s_mic ring contains audio captured
+    //   between wake-fire and now (~300-500 ms in normal conditions). That's
+    //   the start of the user's question, which often runs straight through
+    //   "hey jarvis" with no pause. Don't drain — let vad_record's first
+    //   capture_frame call consume that queued audio naturally and continue
+    //   into live capture. The previous "bridge" approach (a separate
+    //   pre-vad drain loop) had no upper bound and on slow WiFi turned into
+    //   an unbounded streamer that chased the producer for minutes.
+    //
+    //   Follow-up turn: the ring contains TTS-playback echo captured during
+    //   the SPEAKING countdown (workstation speaker leaking back into the
+    //   mic), NOT user speech. Drain it before vad_record.
+    if (is_followup) {
+        i2s_mic_drain();
+    }
+
     err = vad_record(cb_frame, cb_cancel, &ctx, initial_timeout_ms, vr_out);
 
     if (err != ESP_OK) {

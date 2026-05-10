@@ -266,10 +266,34 @@ esp_err_t http_converse_stream_open(http_converse_stream_handle_t *out)
 
 // Frame and write one HTTP chunk: "<hex_size>\r\n<data>\r\n".
 // Returns ESP_OK iff every byte made it onto the wire.
+//
+// Coalesced into a single esp_http_client_write so the small header (5 B)
+// and trailer (2 B) don't get stuck behind Nagle/delayed-ACK between
+// frames on weak-WiFi links. One frame = one TCP send instead of three.
+// The static buffer is per-call-site (only one task uses this path at a
+// time — listen_stream_task drives both /converse and /listen) so static
+// is safe and avoids stack pressure.
 static esp_err_t write_chunk(esp_http_client_handle_t cli, const void *data, size_t n)
 {
     char hdr[16];
     int hdr_len = snprintf(hdr, sizeof hdr, "%x\r\n", (unsigned)n);
+    if (hdr_len < 0 || hdr_len >= (int)sizeof hdr) return ESP_FAIL;
+
+    // Sized for a 1280-sample int16 mono frame (2560 B) plus framing.
+    // Falls back to multi-write if a future caller hands us more.
+    static uint8_t buf[2600];
+    size_t total = (size_t)hdr_len + n + 2;
+    if (total <= sizeof buf) {
+        memcpy(buf, hdr, hdr_len);
+        if (n > 0) memcpy(buf + hdr_len, data, n);
+        memcpy(buf + hdr_len + n, "\r\n", 2);
+        if (esp_http_client_write(cli, (const char *)buf, (int)total) != (int)total) {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+    }
+
+    // Oversized chunk — fall back to the original 3-write pattern.
     if (esp_http_client_write(cli, hdr, hdr_len) != hdr_len)             return ESP_FAIL;
     if (n > 0 &&
         esp_http_client_write(cli, (const char *)data, n) != (int)n)     return ESP_FAIL;

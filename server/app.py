@@ -216,6 +216,22 @@ def _capture_audio_upload(suffix_hint: str = ".wav") -> tuple[str | None, dict |
             return None, {"error": "empty audio body"}, 400, None
         if len(raw) % 2 != 0:
             return None, {"error": "audio/l16 body length must be even (int16 samples)"}, 400, None
+
+        # Diagnostic: dump the raw bytes the client sent, before any wrapping
+        # or normalization. Lets us localize an audio-corruption bug to either
+        # firmware/wire (raw is corrupt) or server-side post-receive (raw is
+        # clean but the WAV / normalized output isn't).
+        try:
+            raw_dump = config.REPO_ROOT / "samples" / "_last_raw.bin"
+            raw_dump.parent.mkdir(parents=True, exist_ok=True)
+            raw_dump.write_bytes(raw)
+            app.logger.info(
+                "raw body received: %d bytes (%.2f s @ %d Hz mono int16)",
+                len(raw), len(raw) / 2.0 / float(rate), rate,
+            )
+        except OSError as exc:
+            app.logger.warning("could not save raw body dump: %s", exc)
+
         wav_bytes = audio.pcm_to_wav(raw, rate, channels=channels)
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp_path = tmp.name

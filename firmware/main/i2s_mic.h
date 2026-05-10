@@ -47,3 +47,12 @@ void i2s_mic_drain(void);
 // fixed total length up front.
 esp_err_t i2s_mic_capture_frame(int16_t *out, size_t max_samples,
                                 size_t *out_samples, uint32_t timeout_ms);
+
+// Diagnostic counters around the ring buffer. Reset at the start of a
+// recording, dumped at the end. Used to localize an audio-corruption bug:
+// distinguish producer-side recycle drops (ring full) from consumer-side
+// BYTEBUF over-consumption (xRingbufferReceive grabs multiple frames as
+// one contiguous block, capture_frame copies just one frame, the rest
+// are released by vRingbufferReturnItem and lost).
+void i2s_mic_reset_stats(void);
+void i2s_mic_dump_stats(const char *label);

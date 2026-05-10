@@ -150,6 +150,16 @@ static int connect_listen_socket(void)
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof cnt);
 
+    // TCP_NODELAY: disable Nagle's algorithm. Our chunks are 2.6 KB
+    // (>MSS) so coalescing buys us nothing — only delays. With Nagle
+    // on, a 100-300 ms RTT on weak WiFi can stall the small chunk
+    // header/trailer waiting for the previous segment's ACK, which
+    // (combined with delayed-ACK on the server side) compounds latency
+    // and starves the per-frame send-cadence. NODELAY plus the
+    // user-space coalescing in send_chunk gives us one packet per
+    // frame, sent immediately.
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof yes);
+
     // Recv timeout only — send blocks until the server drains, which
     // is what we want for sustained streaming. (We initially also set
     // SO_SNDTIMEO=5 s as defense in depth, but it caused periodic
@@ -219,6 +229,23 @@ static int send_chunk(int sock, const void *data, size_t n)
 {
     char hdr[16];
     int hlen = snprintf(hdr, sizeof hdr, "%x\r\n", (unsigned)n);
+    if (hlen < 0 || hlen >= (int)sizeof hdr) return -1;
+
+    // Coalesce header + data + trailer into one send_all so the small
+    // header/trailer don't get stuck behind Nagle/delayed-ACK between
+    // frames on weak-WiFi links. Same wire shape, one TCP send instead
+    // of three. Static buffer is safe — only listen_stream_task calls
+    // this. Sized for one 80 ms frame (1280 samples × 2 = 2560 B) plus
+    // framing; falls back to multi-write for any future oversized caller.
+    static uint8_t buf[2600];
+    size_t total = (size_t)hlen + n + 2;
+    if (total <= sizeof buf) {
+        memcpy(buf, hdr, hlen);
+        if (n > 0) memcpy(buf + hlen, data, n);
+        memcpy(buf + hlen + n, "\r\n", 2);
+        return send_all(sock, buf, total);
+    }
+
     if (send_all(sock, hdr, hlen) != 0) return -1;
     if (n > 0 && send_all(sock, data, n) != 0) return -1;
     if (send_all(sock, "\r\n", 2) != 0) return -1;

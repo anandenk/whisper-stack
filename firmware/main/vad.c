@@ -42,7 +42,12 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
 
     *out = (vad_result_t){ .reason = VAD_STOP_MIC_ERROR };
 
-    i2s_mic_drain();
+    // Note: ring drain at entry is the CALLER's responsibility. For first
+    // turns (post-wake) we WANT the ring contents — they're the audio
+    // captured in the wake-to-vad-start gap, which would otherwise cut off
+    // the user mid-question. For follow-up turns the caller drains TTS-echo
+    // before invoking us. See do_one_turn in main.c.
+    i2s_mic_reset_stats();
 
     const int initial_ms = initial_timeout_ms > 0 ? initial_timeout_ms : VAD_INITIAL_TIMEOUT_MS;
     const int64_t start_us            = esp_timer_get_time();
@@ -125,6 +130,7 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
     ESP_LOGI(TAG, "vad stop reason=%d samples=%u peak=%lu dur=%lums",
              (int)out->reason, (unsigned)out->total_samples,
              (unsigned long)out->peak_seen, (unsigned long)out->duration_ms);
+    i2s_mic_dump_stats("vad");
 
     bool ok = (out->reason == VAD_STOP_OK_SILENCE || out->reason == VAD_STOP_OK_MAX_DURATION);
     return ok ? ESP_OK : ESP_FAIL;
