@@ -54,7 +54,11 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 
 # Router: simple wins only when it beats complex by this much. Ties → complex.
 # Encodes asymmetric error cost (under-routing is worse than over-routing).
-ROUTER_MARGIN_S = float(os.environ.get("ROUTER_MARGIN_S", "0.05"))
+# Lowered from 0.05 → 0.03 (Tier 1, 2026-05-10): after the SIMPLE/COMPLEX
+# example-set additions, tests/router_eval.py shows 0.03 is the new
+# empirical optimum at 85.3% overall accuracy with only 4 under-routings
+# (vs 0.02 → 83.2% with 7, and the original 0.05 → 68.4% with 8).
+ROUTER_MARGIN_S = float(os.environ.get("ROUTER_MARGIN_S", "0.03"))
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "5000"))

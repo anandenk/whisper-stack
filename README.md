@@ -220,8 +220,8 @@ All config is via env vars, loaded from `.env` at process boot. See
 - `WHISPER_LANGUAGE=en` — pin STT language (empty = auto-detect, prone
   to misfires)
 - `SESSION_IDLE_TIMEOUT_MIN=10` — gap that triggers a new session file
-- `ROUTER_MARGIN_S=0.05` — embedding-router margin; higher → more
-  queries to Sonnet
+- `ROUTER_MARGIN_S=0.03` — embedding-router margin; higher → more
+  queries to Sonnet (default tuned via `tests/router_eval.py`)
 - `CONVERSE_MAX_TOKENS=96` — cap voice-mode reply length
 - `TOOL_MAX_ROUNDS=5` — safety cap on tool-call iterations per request
 - `WAKEWORD_THRESHOLD=0.5` — `tests/jarvis.py` wake detection sensitivity

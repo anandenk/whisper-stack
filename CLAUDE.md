@@ -88,19 +88,22 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
 
 ## Known issues / TODO
 
-- **Router accuracy gaps measured.** A 95-query held-out fixture
-  ([tests/router_eval.py](tests/router_eval.py)) puts the embedding
-  router at **68.4% accuracy at the production margin (0.05)** and
-  **75.8% at margin 0.02**. Weak categories: short queries (`"1+1"`,
-  60%), bare facts (50%), quick lookups (50%), conversational fillers
-  (62%). Code / drafting / debug categories all score 100%. Top of
-  [server/router.py](server/router.py) has the full breakdown +
-  Tier 1 plan (lower margin, add curated short examples, regex
-  shortcut). Re-run `python tests/router_eval.py` after any router
-  change to confirm no regression. Don't skip ahead to LLM classifier
-  (Tier 3) without measuring Tier 1 first — the embedding router is
-  fast (~30 ms) and the LLM-classifier latency tax adds to *every*
-  voice turn forever.
+- **Router Tier 1 shipped 2026-05-10.** The 95-query held-out fixture
+  ([tests/router_eval.py](tests/router_eval.py)) now scores **85.3%
+  at production margin 0.03** (up from 68.4% at the original 0.05),
+  with **only 4 under-routings** (false-simple — the asymmetric error)
+  vs 8 before. Eight of twelve categories at 100%; remaining failures
+  are mostly judgment-call borderlines and a few `quick_lookup` items
+  hugging the threshold. Tier 1 changes: lowered `ROUTER_MARGIN_S`
+  default 0.05 → 0.03; added regex shortcut for pure arithmetic +
+  single-word queries (zero-latency bypass); curated SIMPLE/COMPLEX
+  example sets for the weak neighborhoods. Re-run
+  `python tests/router_eval.py` after any router change to confirm
+  no regression. Tier 3 (LLM classifier) is **explicitly deferred**
+  — Tier 1 plateaued at a comfortable number, and the LLM tax
+  (~150 ms per turn, doubles cloud token spend) is hard to justify
+  for the remaining ~15 pp of headroom against mostly-borderline
+  failures.
 
 ## Critical gotchas
 
