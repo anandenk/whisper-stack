@@ -105,6 +105,20 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
   for the remaining ~15 pp of headroom against mostly-borderline
   failures.
 
+- **Audio corruption root-cause TBD — firmware-side, not network.**
+  Proven 2026-05-10 by a bare-bones throughput test (see gotcha #9
+  + [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md)):
+  the HTTP path sustains 32 KB/s cleanly, but production firmware
+  still recycles audio frames under sustained load with full
+  features enabled. Specific bug not yet identified. Suspect
+  `/listen`↔`/converse` handoff, mic-capture vs HTTP-write task
+  scheduling, OLED I²C contention during VU-bar redraws, or heap
+  pressure (107 KB free at boot vs 209 KB in the test build).
+  Currently *mitigated* (not fixed) by `# CONFIG_WAKE_GESTURE_ENABLED
+  is not set` and `# CONFIG_IR_ENABLED is not set` in `sdkconfig` —
+  this gives 8/8 clean turns at the dorm spot, but the underlying
+  bug is still there waiting to bite once peripherals come back on.
+
 ## Critical gotchas
 
 1. **CTranslate2 Windows wheels do NOT bundle cuBLAS/cuDNN.** Before `import faster_whisper`, add the pip-installed NVIDIA DLL dirs to the search path:
@@ -160,54 +174,95 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
    and the wakeword module's own 2 s lock-acquire timeout still
    handles short-term `/listen` contention.
 
-9. **On weak WiFi links the firmware can't sustain the 32 KB/s mic
-   stream even after the BYTEBUF / coalesce / TCP_NODELAY fixes shipped
-   2026-05-10 (commit 2ea7880).** The producer (`audio_in_task` at
-   12.5 fps) outpaces the consumer (HTTP write to `/converse` or
-   `/listen`), the ring buffer fills, and `audio_in_task`'s recycle
-   path drops one frame per overflow event. Whisper hears the result
-   as words clipped, distorted, or missing entirely.
+9. **Audio corruption (`recycled=N`, `ring overflow during LISTENING`)
+   is FIRMWARE-SIDE, not network-side. Originally misdiagnosed as a
+   weak-WiFi problem on 2026-05-09; PROVEN INCORRECT on 2026-05-10**
+   by a bare-bones throughput test. **Future sessions: do not assume
+   "ring overflow → weak WiFi"**. The bug is in our consumer-side code
+   path, not the link.
 
-   Recognize the situation:
+   The proof — a throughput test that skipped mic / VAD / wake-word /
+   OLED entirely, opened one chunked POST to `/converse` via the same
+   `http_converse_stream_*` API production uses, and wrote silent
+   1280-sample int16 frames at 80 ms intervals (= 32 KB/s) for 60 s —
+   sustained **750 frames sent, 0 errors, 34 KB/s avg** at RSSI -77
+   on Enterprise Wi-Fi 2.4 GHz. HTTP `finish` returned `ESP_OK`,
+   `http_status=200`. Two transient stalls (`last_write` 730 ms, 1030 ms)
+   fully recovered without dropping data. So the WiFi link, the TCP
+   path, and our HTTP code can all sustain 32 KB/s cleanly. Full
+   device-side log + re-test recipe in
+   [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md).
+
+   Recognize the symptom:
    - **`STATS[vad] ... recycled=N` with N > 0** in the firmware monitor.
-     This is the new ground-truth count of frames the producer threw
-     away to make room. `recycled=0` = clean turn. Logged at the end
+     Ground-truth count of frames the producer threw away. Logged at end
      of every `vad_record` in `vad.c` via `i2s_mic_dump_stats("vad")`.
-   - **Boot log `wifi:security: ..., rssi: -XX`.** -55 to -65 is fine,
-     -70 to -80 is borderline, -80+ will recycle under load. Check
-     after every reconnect — RSSI varies by AP and by physical
-     location even on the same SSID.
    - **`ring overflow during LISTENING` warnings** firing repeatedly
-     during a single recording. Rate-limited to 1 Hz, so absence is
-     not proof — use the STATS line as the authoritative signal.
+     (rate-limited to 1 Hz; absence is not proof — use STATS as the
+     authoritative signal).
    - **Transcripts with words missing**, or audio in
-     `samples/_last_received.wav` that's audibly chunky / shortened
-     vs what you actually said.
+     `samples/_last_received.wav` audibly chunky vs what was said.
 
-   Two mitigations, apply in order:
+   Most likely root-cause locations (TBD, in order of suspicion):
+   1. `/listen` and `/converse` competing for socket / WiFi airtime
+      during the post-wake handoff window — one socket is closing
+      while another is opening, both touch the same TCP machinery.
+   2. The mic capture loop (`xRingbufferReceive`) blocking the
+      HTTP-write consumer task — scheduling interactions can starve
+      the consumer enough that the ring overflows.
+   3. OLED I²C bus contention from LISTENING-state VU-bar redraws
+      (every 3 frames) eating CPU during the same window.
+   4. Heap pressure: production firmware boots with **~107 KB free
+      heap** vs **~209 KB** for throughput-test mode (which skipped
+      mic ring, preroll, gesture, IR, second OLED). Less headroom
+      for transient TCP/HTTP allocations under load.
+
+   Empirical mitigations (symptomatic relief, NOT root-cause fixes —
+   keep them, but they don't substitute for finding the actual bug):
 
    - **`esp_wifi_set_ps(WIFI_PS_NONE);`** in `firmware/main/wifi.c`
-     after the connect succeeds. Default is `WIFI_PS_MIN_MODEM` (you'll
-     see `wifi:pm start, type: 1` in the boot log). MIN_MODEM sleeps
-     the radio between AP beacons (~100 ms intervals) and adds 5–15 ms
-     of wake-up latency per TX burst. On a marginal link that
-     compounds with retransmissions and starves the per-frame cadence.
-     NONE keeps the radio always on. Costs a few extra mA — on the
-     mains-powered device that's a strict win.
-   - **Bump `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`.** Default 5760 bytes
-     (~4 packets in flight per RTT). At RTT=200 ms that caps TCP
-     throughput at 28 KB/s — below the 32 KB/s mic rate. Bump to
-     32768 or 65536 via `idf.py menuconfig` → Component config →
-     LWIP → TCP → "Default send buffer size". Save, rebuild, reflash.
+     after `esp_wifi_start()`. Removes the 5–15 ms beacon-wake
+     latency of the default `WIFI_PS_MIN_MODEM`. Marginal effect
+     measured in isolation (old code without PS_NONE still got ~10
+     clean turns), but cheap insurance.
+   - **`CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768`** (and matching `WND`).
+     Default 5760 is too small at our packet rates. Two important
+     constraints:
+     - Kconfig range is `2440..65535` with `LWIP_WND_SCALE` off. **Do
+       not use 65536** — Kconfig silently reverts to the default.
+     - Larger send buffers consume per-socket heap. With production's
+       ~96 KB free heap at boot, 65 KB × 2 sockets would have
+       OOM-crashed mid-conversation. **Stick with 32768.**
+   - **Disable `CONFIG_WAKE_GESTURE_ENABLED` and `CONFIG_IR_ENABLED`**
+     in `sdkconfig` (use the `# CONFIG_X is not set` form). The
+     gesture poll task fires every 50 ms; IR RMT-RX adds interrupt
+     overhead. **This was the empirically biggest improvement** in
+     the 2026-05-10 bisection — chronic recycle warnings → 8/8
+     clean turns just by flipping these flags. Keep off until the
+     root cause is found or v2 hardware lands.
 
-   Confirmed working perfectly on a phone hotspot at RSSI -48 (8
-   consecutive turns recycled=0, clean transcripts). Confirmed
-   problematic on enterprise Wi-Fi from a dorm room at RSSI -84 even
-   after all 2026-05-10 fixes (~7–11 recycle events per turn). The
-   mitigations above are intended for marginal-WiFi *tolerance*.
-   Past that it's a coverage problem, not a code problem — move
-   closer to an AP, use a phone hotspot, or build v2 on an
-   ESP32-C5/C6 module (dual-band radio, 5 GHz support).
+   Things that DON'T fix the chronic problem (don't waste time on these):
+   - Better RSSI alone — tested at -60 vs -79; both fail with full
+     feature set enabled.
+   - Bigger mic ring buffer — current 64 KB is amply sized.
+   - Reverting to an earlier commit (e.g., before gesture/IR were
+     added) — bisection at 9ff64b2 (May 6) also degraded eventually,
+     just later. Same code path, same failure mode.
+
+   Long-term fix: on-device wake-word (`esp-skainet` on the ESP32-S3
+   v2 hardware that's already on order — see
+   [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md))
+   eliminates the continuous `/listen` stream entirely, removing the
+   chronic exposure window. ESP32-C5 (5 GHz dual-band) would also
+   help by reducing 2.4 GHz contention, but it doesn't fix the
+   architectural issue the way on-device wake does.
+
+   To re-run the throughput test in a future session, see the
+   step-by-step reconstruction recipe in
+   [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md).
+   The reusable Python helpers (`tools/throughput_sink.py`,
+   `tools/serial_capture.py`) are still in tree — only the firmware
+   test mode in `main.c` needs to be re-added (~25 lines).
 
 ## Layout
 
