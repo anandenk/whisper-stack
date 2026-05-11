@@ -118,19 +118,20 @@ been caught at the source.
   for the remaining ~15 pp of headroom against mostly-borderline
   failures.
 
-- **Audio corruption root-cause TBD — firmware-side, not network.**
-  Proven 2026-05-10 by a bare-bones throughput test (see gotcha #9
-  + [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md)):
-  the HTTP path sustains 32 KB/s cleanly, but production firmware
-  still recycles audio frames under sustained load with full
-  features enabled. Specific bug not yet identified. Suspect
-  `/listen`↔`/converse` handoff, mic-capture vs HTTP-write task
-  scheduling, OLED I²C contention during VU-bar redraws, or heap
-  pressure (107 KB free at boot vs 209 KB in the test build).
-  Currently *mitigated* (not fixed) by `# CONFIG_WAKE_GESTURE_ENABLED
-  is not set` and `# CONFIG_IR_ENABLED is not set` in `sdkconfig` —
-  this gives 8/8 clean turns at the dorm spot, but the underlying
-  bug is still there waiting to bite once peripherals come back on.
+- **Audio corruption root-cause FIXED 2026-05-10.** Localized via the
+  acoustic loopback control experiment (see gotcha #9 + commit `5695da9`
+  + [notes/loopback-test-results.md](notes/loopback-test-results.md))
+  to per-frame `oled_flush_row()` I²C contention inside `cb_frame`.
+  Removing the LISTENING VU bar dropped recycle from 16.5 % → 0.0 %
+  and `ring overflow` warnings from ~89 → 2 across matched 5-iter
+  runs. Residual ~3 % loss matches the throughput test's transient
+  WiFi-stall pattern, not firmware. **Open follow-up:** verify
+  whether gesture (`CONFIG_WAKE_GESTURE_ENABLED`) and IR
+  (`CONFIG_IR_ENABLED`) can be safely re-enabled now that the VU
+  bar is gone — they were disabled during bisection and not
+  individually re-tested with the VU fix in place. Re-enable one
+  at a time, run `tools/loopback_test.py` + `loopback_analyze.py`
+  after each, only commit if recycle stays at baseline.
 
 - **Automated regression smoke test (queued, not built).** A pyserial
   script that flashes a build, runs N voice turns (or replays via the
@@ -198,23 +199,40 @@ been caught at the source.
    handles short-term `/listen` contention.
 
 9. **Audio corruption (`recycled=N`, `ring overflow during LISTENING`)
-   is FIRMWARE-SIDE, not network-side. Originally misdiagnosed as a
-   weak-WiFi problem on 2026-05-09; PROVEN INCORRECT on 2026-05-10**
-   by a bare-bones throughput test. **Future sessions: do not assume
-   "ring overflow → weak WiFi"**. The bug is in our consumer-side code
-   path, not the link.
+   was originally misdiagnosed as a weak-WiFi problem on 2026-05-09;
+   PROVEN INCORRECT on 2026-05-10 by a synthetic throughput test;
+   ROOT CAUSE LOCALIZED later that day by an acoustic-loopback control
+   experiment. The dominant cause was the per-frame `oled_flush_row()`
+   call in `cb_frame` — synchronous I²C bus 0 contention with the
+   HTTP-write task. Fixed in commit `5695da9` (drop the LISTENING VU
+   bar). Reduced producer-side mic-frame recycle from 16.5 % → 0.0 %
+   and `ring overflow` warnings from ~89 → 2 across matched 5-iteration
+   loopback runs.** **Future sessions: do not assume "ring overflow
+   → weak WiFi"**. Treat residual losses as WiFi-transient territory
+   and instrument the consumer-side first.
 
-   The proof — a throughput test that skipped mic / VAD / wake-word /
-   OLED entirely, opened one chunked POST to `/converse` via the same
-   `http_converse_stream_*` API production uses, and wrote silent
-   1280-sample int16 frames at 80 ms intervals (= 32 KB/s) for 60 s —
-   sustained **750 frames sent, 0 errors, 34 KB/s avg** at RSSI -77
-   on Enterprise Wi-Fi 2.4 GHz. HTTP `finish` returned `ESP_OK`,
-   `http_status=200`. Two transient stalls (`last_write` 730 ms, 1030 ms)
-   fully recovered without dropping data. So the WiFi link, the TCP
-   path, and our HTTP code can all sustain 32 KB/s cleanly. Full
-   device-side log + re-test recipe in
-   [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md).
+   Two diagnostic experiments back this verdict, both reproducible:
+
+   1. **Synthetic throughput test** (commit `b0da8ef`,
+      [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md))
+      — bypassed mic / VAD / wake / OLED entirely, opened one chunked
+      POST to `/converse`, wrote silent 1280-sample int16 frames at
+      80 ms intervals (= 32 KB/s) for 60 s. **Result: 750 frames sent,
+      0 errors, 34 KB/s avg at RSSI -77 on Enterprise Wi-Fi 2.4 GHz**;
+      `finish` returned `ESP_OK status=200`. Two transient `last_write`
+      stalls (730 ms, 1030 ms) fully recovered. So the WiFi link, TCP
+      path, and our HTTP code are all fine in isolation.
+   2. **Acoustic loopback control** (commits `309de01`, `f4527ef`,
+      `5695da9`, `057a26d`,
+      [notes/loopback-test-results.md](notes/loopback-test-results.md))
+      — workstation speakers play `hey jarvis` + `samples/jfk.wav` in
+      a loop; server saves each `/converse` upload to
+      `samples/_loopback_turn_<ts>.wav`; serial monitor captures
+      `STATS[vad] ... recycled=N`. Baseline: **20 turns, 16.5 % loss,
+      8/20 turns ≥20 % loss**. Control with VU bar gated out
+      (`CONTROL_EXP_OLED_VU_OFF=1`): **0/1153 frames recycled, best-turn
+      WER 0.41 → 0.00**. Same hardware, same network, same stimulus,
+      delta = the OLED VU redraw.
 
    Recognize the symptom:
    - **`STATS[vad] ... recycled=N` with N > 0** in the firmware monitor.
@@ -226,43 +244,62 @@ been caught at the source.
    - **Transcripts with words missing**, or audio in
      `samples/_last_received.wav` audibly chunky vs what was said.
 
-   Most likely root-cause locations (TBD, in order of suspicion):
-   1. `/listen` and `/converse` competing for socket / WiFi airtime
-      during the post-wake handoff window — one socket is closing
-      while another is opening, both touch the same TCP machinery.
-   2. The mic capture loop (`xRingbufferReceive`) blocking the
-      HTTP-write consumer task — scheduling interactions can starve
-      the consumer enough that the ring overflows.
-   3. OLED I²C bus contention from LISTENING-state VU-bar redraws
-      (every 3 frames) eating CPU during the same window.
-   4. Heap pressure: production firmware boots with **~107 KB free
-      heap** vs **~209 KB** for throughput-test mode (which skipped
-      mic ring, preroll, gesture, IR, second OLED). Less headroom
-      for transient TCP/HTTP allocations under load.
+   Root cause (FOUND, fixed in `5695da9`):
+   3. **OLED I²C bus contention from LISTENING-state VU-bar redraws.**
+      `oled_flush_row(WS_BAR_LINE)` ran every 3 frames (~240 ms cadence)
+      inside `cb_frame`, on the same task as `http_converse_stream_write`.
+      I²C bus 0 is synchronous: ~3.5 ms × ~27 redraws/s = ~95 ms/s of
+      consumer CPU stolen, on a single-core MCU also running WiFi, TCP,
+      and the bus-1 cat-face task. Enough to slip the consumer past the
+      producer's 80 ms add cadence, forcing the mic ring to recycle.
 
-   Empirical mitigations (symptomatic relief, NOT root-cause fixes —
-   keep them, but they don't substitute for finding the actual bug):
+   Other candidates from the original suspect list — examined and
+   downgraded (data in [notes/loopback-test-results.md](notes/loopback-test-results.md)):
+   1. `/listen` ↔ `/converse` handoff socket contention — plausible
+      mechanism but not the dominant signal; residual ~3 % loss
+      post-VU-fix matches the synthetic throughput test's transient
+      stall pattern, not handoff-shaped.
+   2. mic capture loop (`xRingbufferReceive`) blocking HTTP-write
+      consumer — same task ordering as #3, but the per-iteration
+      cost is much smaller (no I²C wait) so it's a non-issue once
+      I²C work leaves `cb_frame`.
+   4. **Cat-face `face_task`** (separate I²C bus 1, ~3.7 flushes/s) —
+      tested with `CONTROL_EXP_FACE_OFF=1`, results inconclusive at
+      N=4 vs N=6 (declared "innocent" by the loopback session, but the
+      sample is small — re-test with more iterations if it ever comes
+      under suspicion again).
+   5. Heap pressure: production heap was ~107 KB at boot pre-fix vs
+      ~209 KB in throughput-test mode. Did not cause OOM; was a
+      contributing comfort factor, not the dominant cause.
 
+   Active fixes / defensive measures (all should remain in place):
+
+   - **VU-bar removed** (commit `5695da9`) — the actual root-cause fix.
+     Don't add anything I²C-touching back into `cb_frame` or any other
+     hot path called per mic frame; if you need a "I'm listening"
+     visual, drive it from a separate task or only on state transitions.
+     The cat-face `?` animation already provides this feedback.
    - **`esp_wifi_set_ps(WIFI_PS_NONE);`** in `firmware/main/wifi.c`
-     after `esp_wifi_start()`. Removes the 5–15 ms beacon-wake
-     latency of the default `WIFI_PS_MIN_MODEM`. Marginal effect
-     measured in isolation (old code without PS_NONE still got ~10
-     clean turns), but cheap insurance.
-   - **`CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768`** (and matching `WND`).
-     Default 5760 is too small at our packet rates. Two important
-     constraints:
+     after `esp_wifi_start()` (commit `133a95d`). Removes the 5–15 ms
+     beacon-wake latency of the default `WIFI_PS_MIN_MODEM`. Marginal
+     effect measured in isolation but cheap insurance.
+   - **`CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768`** (and matching `WND`,
+     commit `133a95d`). Default 5760 is too small at our packet rates.
+     Two constraints to respect:
      - Kconfig range is `2440..65535` with `LWIP_WND_SCALE` off. **Do
        not use 65536** — Kconfig silently reverts to the default.
      - Larger send buffers consume per-socket heap. With production's
        ~96 KB free heap at boot, 65 KB × 2 sockets would have
        OOM-crashed mid-conversation. **Stick with 32768.**
-   - **Disable `CONFIG_WAKE_GESTURE_ENABLED` and `CONFIG_IR_ENABLED`**
-     in `sdkconfig` (use the `# CONFIG_X is not set` form). The
-     gesture poll task fires every 50 ms; IR RMT-RX adds interrupt
-     overhead. **This was the empirically biggest improvement** in
-     the 2026-05-10 bisection — chronic recycle warnings → 8/8
-     clean turns just by flipping these flags. Keep off until the
-     root cause is found or v2 hardware lands.
+   - **`# CONFIG_WAKE_GESTURE_ENABLED is not set` and
+     `# CONFIG_IR_ENABLED is not set`** in `sdkconfig`. Disabled during
+     the 2026-05-10 bisection (gesture poll 50 ms cadence, IR RMT-RX
+     interrupt overhead). With the VU bar fix landed, **may no longer
+     be necessary** — but not yet re-tested. If you want them back,
+     re-enable ONE at a time per the milestone discipline, run a
+     loopback regression after each (`tools/loopback_test.py 5` +
+     `tools/loopback_analyze.py`), and only commit if recycle stays
+     ≤ baseline.
 
    Things that DON'T fix the chronic problem (don't waste time on these):
    - Better RSSI alone — tested at -60 vs -79; both fail with full
