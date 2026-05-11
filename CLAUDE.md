@@ -86,6 +86,19 @@ no faster-whisper.
 
 Hard stop at the end of every stage to check in with the user. Do not progress autonomously between stages — push back on bad assumptions before moving on.
 
+**Firmware milestones in particular: ship one per commit, never bundle.**
+After each milestone lands, run the smoke test — N consecutive voice
+turns from the deployment spot, check `recycled=N` STATS at end of every
+turn, free heap at boot, key task timings — and record the result in the
+commit message body or a notes file. If milestone N degrades the smoke
+test vs the prior commit's baseline, investigate before stacking
+milestone N+1 on top. The May 2026 audio-corruption mis-diagnosis
+(gotcha #9) happened because M7 + M8 + cat face shipped bundled into one
+commit, jointly exceeding the sustained-load budget in ways that took
+~24 hours of debug to untangle. With separate commits, the introducing
+milestone would have failed its smoke test and the regression would have
+been caught at the source.
+
 ## Known issues / TODO
 
 - **Router Tier 1 shipped 2026-05-10.** The 95-query held-out fixture
@@ -118,6 +131,16 @@ Hard stop at the end of every stage to check in with the user. Do not progress a
   is not set` and `# CONFIG_IR_ENABLED is not set` in `sdkconfig` —
   this gives 8/8 clean turns at the dorm spot, but the underlying
   bug is still there waiting to bite once peripherals come back on.
+
+- **Automated regression smoke test (queued, not built).** A pyserial
+  script that flashes a build, runs N voice turns (or replays via the
+  throughput-test mode shipped 2026-05-10 — see
+  [notes/network-diagnosis-summary.md](notes/network-diagnosis-summary.md)
+  for the recipe), parses `recycled=N` from the serial monitor, and
+  fails if the count exceeds a baseline recorded in a checked-in JSON.
+  Would prevent regressions like the M7+M8+cat-face bundling from
+  shipping unnoticed. Real work — not for the next session, but worth
+  doing once v2 lands and we're back to active feature work.
 
 ## Critical gotchas
 
