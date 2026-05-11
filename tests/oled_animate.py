@@ -139,6 +139,85 @@ def _filled_circle(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int) -> None:
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=1)
 
 
+# ---------------------------------------------------------------------------
+# Gaze — optional. Pupils are an *additive* layer on the existing round-eye
+# poses (IDLE / LISTENING-open / THINKING). When `gaze` is None (the default
+# everywhere — including oled_dump_c.py) the eye renders exactly as before:
+# a solid filled disc, no pupil. When `gaze` is a float in [-90, +90], a
+# small inverted "pupil hole" is punched inside the disc, shifted along x
+# proportional to the angle. -90 = looking far left, 0 = centered,
+# +90 = looking far right.
+#
+# We deliberately do NOT regenerate firmware/main/cat_face.h with these
+# variants tonight — the firmware C side stays byte-for-byte the same.
+# The S3 port will add a `set_gaze()` C API + the necessary pre-rendered
+# bitmap variants (or a runtime draw path); tonight is iteration-only.
+#
+# Pupil offset is computed as a fraction of `max_pupil_offset_px`, which is
+# the eye radius minus the pupil radius — so the pupil always stays
+# entirely inside the disc. PUPIL_R_FRAC keeps the pupil readable on the
+# 128x64 panel (~3 px at the current eye size).
+# ---------------------------------------------------------------------------
+
+PUPIL_R_FRAC = 0.28        # pupil radius as a fraction of eye radius
+GAZE_FULL_DEG = 90.0       # angle that maps to max horizontal offset
+GAZE_VERTICAL_DROOP_FRAC = 0.05  # tiny y drop at extreme angles, biomimetic
+
+
+def _clamp_gaze(angle: float | None) -> float | None:
+    if angle is None:
+        return None
+    if angle > GAZE_FULL_DEG:
+        return GAZE_FULL_DEG
+    if angle < -GAZE_FULL_DEG:
+        return -GAZE_FULL_DEG
+    return float(angle)
+
+
+# Module-level fallback. Pose builders prefer the per-call `gaze` kwarg
+# when it's given; otherwise they fall back to _DEFAULT_GAZE. This is the
+# literal `set_gaze(angle)` API the v3 plan asks for — and the symbol
+# tomorrow's C-side port will mirror as `oled_set_gaze(angle)`. The
+# kwarg-takes-precedence model means the dump pipeline (which passes
+# no kwargs) is unaffected as long as the module default stays None,
+# which it does by default.
+_DEFAULT_GAZE: float | None = None
+
+
+def set_gaze(angle: float | None) -> None:
+    """Set the module-default gaze applied by any pose builder that
+    doesn't receive an explicit `gaze=` kwarg. Pass None to disable
+    the pupil layer entirely (default — restores pre-extension look)."""
+    global _DEFAULT_GAZE
+    _DEFAULT_GAZE = _clamp_gaze(angle)
+
+
+def get_gaze() -> float | None:
+    """Inspect the current module-default gaze."""
+    return _DEFAULT_GAZE
+
+
+def _resolve_gaze(arg: float | None) -> float | None:
+    """Pose-builder helper: kwarg wins; otherwise fall back to module default."""
+    return _clamp_gaze(arg) if arg is not None else _DEFAULT_GAZE
+
+
+def _draw_eye_with_pupil(
+    d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, gaze: float | None,
+) -> None:
+    """Filled-disc eye. If `gaze` is not None, punches an inverted pupil
+    hole offset along x by `gaze / GAZE_FULL_DEG * (r - pupil_r)`."""
+    _filled_circle(d, cx, cy, r)
+    if gaze is None:
+        return
+    pr = max(2, int(round(r * PUPIL_R_FRAC)))
+    max_dx = r - pr - 1                      # keep pupil fully inside the iris
+    dx = int(round(gaze / GAZE_FULL_DEG * max_dx))
+    dy = int(round(abs(gaze) / GAZE_FULL_DEG * r * GAZE_VERTICAL_DROOP_FRAC))
+    px, py = cx + dx, cy + dy
+    d.ellipse((px - pr, py - pr, px + pr, py + pr), fill=0)
+
+
 def _mouth_dot(d: ImageDraw.ImageDraw, *, dy: int = 0) -> None:
     L = ACTIVE_LAYOUT
     mx, my = L.mouth_x_px, L.mouth_y_px + dy
@@ -163,11 +242,12 @@ def _draw_bitmap_scaled(
 # IDLE — relaxed, gentle blink loop
 # ===========================================================================
 
-def make_idle_open() -> Image.Image:
+def make_idle_open(gaze: float | None = None) -> Image.Image:
     L = ACTIVE_LAYOUT
+    g = _resolve_gaze(gaze)
     img, d = _blank()
-    _filled_circle(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px)
-    _filled_circle(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px)
+    _draw_eye_with_pupil(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px, g)
+    _draw_eye_with_pupil(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px, g)
     _mouth_dot(d)
     return img
 
@@ -256,12 +336,13 @@ def _draw_question_stage(d: ImageDraw.ImageDraw, stage: int) -> None:
     _draw_bitmap_scaled(d, qx, qy, _Q_STAGES[stage], L.indicator_scale)
 
 
-def make_listening(stage: int = Q_STAGE_FULL) -> Image.Image:
+def make_listening(stage: int = Q_STAGE_FULL, gaze: float | None = None) -> Image.Image:
     """stage: 0..5, where 0 is blank and 5 is the complete '?'."""
     L = ACTIVE_LAYOUT
+    g = _resolve_gaze(gaze)
     img, d = _blank()
-    _filled_circle(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px)
-    _filled_circle(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px)
+    _draw_eye_with_pupil(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px, g)
+    _draw_eye_with_pupil(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px, g)
     _mouth_dot(d)
     _draw_question_stage(d, stage)
     return img
@@ -303,11 +384,12 @@ def _draw_thinking_dots(d: ImageDraw.ImageDraw, num_visible: int) -> None:
         d.rectangle((x - half, cy - half, x + half, cy + half), fill=1)
 
 
-def make_thinking(num_dots: int) -> Image.Image:
+def make_thinking(num_dots: int, gaze: float | None = None) -> Image.Image:
     L = ACTIVE_LAYOUT
+    g = _resolve_gaze(gaze)
     img, d = _blank()
-    _filled_circle(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px)
-    _filled_circle(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px)
+    _draw_eye_with_pupil(d, L.eye_x_left_px,  L.eye_y_px, L.eye_r_px, g)
+    _draw_eye_with_pupil(d, L.eye_x_right_px, L.eye_y_px, L.eye_r_px, g)
     _mouth_dot(d)
     _draw_thinking_dots(d, num_dots)
     return img
