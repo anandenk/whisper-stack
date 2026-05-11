@@ -4,6 +4,18 @@ __pycache__/
 *.pyc
 models/
 samples/_*.wav
+samples/_*.bin
+# Loopback-test diagnostic archives (large WAVs + raw .bin per turn)
+samples/baseline/
+samples/vu-off/
+samples/post-fix/
+samples/post-fix-2/
+# Loopback-test ephemera (regenerable from the next run)
+notes/loopback-iterations.jsonl
+notes/loopback-reference-transcript.txt
+notes/baseline/
+notes/vu-off/
+notes/server-*.err
 tests/_*.png
 sessions/
 .claude/
