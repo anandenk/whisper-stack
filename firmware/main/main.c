@@ -58,17 +58,12 @@ static const char *TAG = "whisper-stack";
 // VAD_INITIAL_TIMEOUT_MS — short, in case wake was a false positive.
 #define WS_CONVERSATION_TIMEOUT_MS  30000
 
-// M6: VU-bar tuning.
-//   * Bar lives on OLED line 6 during LISTENING/follow-up turns; line 7
-//     stays "ip:..." footer; lines 0-5 stay the status text.
-//   * BAR_PEAK_DIVISOR maps mic peak (uint16) to pixels (0..128).
-//     Linear: 200 → 12 px (threshold marker), 600 → 37 px, 2048 → 128 px.
-//     Tune at bench if real conversational peaks bunch up at one end.
-//   * BAR_REDRAW_EVERY_N throttles updates so OLED I²C doesn't dominate
-//     the VAD frame budget (~80 ms/frame). Every 3 frames = ~240 ms.
-#define WS_BAR_LINE              6
-#define WS_BAR_PEAK_DIVISOR      16
-#define WS_BAR_REDRAW_EVERY_N    3
+// The M6 live VU bar on OLED line 6 was removed on 2026-05-10 after the
+// loopback control experiment showed its per-frame oled_flush_row() was
+// the dominant source of producer-side mic-frame recycle (16.5% → 0.0%
+// loss, ~89 → 2 `ring overflow` warnings). The cat-face panel's `?`
+// stroke animation gives sufficient "I'm listening" feedback. See
+// notes/loopback-test-results.md for the experiment.
 // Boot card displayed for ~2 s before transitioning to idle, so the user
 // can confirm what server the device is talking to without serial monitor.
 #define WS_BOOT_SCREEN_HOLD_MS   2000
@@ -103,18 +98,6 @@ static void oled_status(const char *line2, const char *line3, const char *ip)
     oled_frame_begin(NULL);
     if (line2) oled_draw_text(2, line2);
     if (line3) oled_draw_text(3, line3);
-    oled_frame_end(ip);
-}
-// LISTENING / follow-up screen — same layout as oled_status but seeds line 6
-// with an empty VU bar (0 px filled, threshold marker visible). Subsequent
-// cb_frame calls update the bar via oled_flush_row(WS_BAR_LINE).
-static void oled_listening_screen(const char *line2, const char *line3, const char *ip)
-{
-    oled_frame_begin(NULL);
-    if (line2) oled_draw_text(2, line2);
-    if (line3) oled_draw_text(3, line3);
-    int marker_px = VAD_PEAK_THRESHOLD / WS_BAR_PEAK_DIVISOR;
-    oled_draw_bar(WS_BAR_LINE, 0, marker_px);
     oled_frame_end(ip);
 }
 // Brief flash on every wake event. No explicit delay — the http stream open
@@ -190,7 +173,6 @@ static void oled_show_reply(const converse_resp_t *r, int speaking_remaining_s, 
 }
 #else
 static inline void oled_status(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
-static inline void oled_listening_screen(const char *l2, const char *l3, const char *ip) { (void)l2; (void)l3; (void)ip; }
 static inline void oled_wake_splash(wake_source_t src, double s, const char *ip) { (void)src; (void)s; (void)ip; }
 static inline void oled_boot_screen(const char *ip) { (void)ip; }
 #endif
@@ -205,26 +187,12 @@ typedef struct {
 
 static esp_err_t cb_frame(const int16_t *pcm, size_t n, void *user)
 {
+    // Hot path — runs at ~80 ms cadence from vad_record. Keep it just HTTP
+    // write; any OLED / I²C work here will starve the consumer enough that
+    // the mic ring producer recycles frames (proven 2026-05-10, see
+    // notes/loopback-test-results.md).
     round_trip_ctx_t *ctx = user;
-    esp_err_t err = http_converse_stream_write(ctx->stream, pcm, n);
-
-#if ENABLE_OLED
-    // Live VU-bar update — every Nth frame so OLED I²C doesn't dominate
-    // the VAD frame budget. ~25 ms full flush would, but oled_flush_row
-    // is ~3.5 ms so this is comfortable even at every-frame cadence; we
-    // throttle anyway to reduce visible bar quantization noise.
-    static unsigned frame_counter = 0;
-    if ((frame_counter++ % WS_BAR_REDRAW_EVERY_N) == 0) {
-        uint32_t peak = i2s_mic_last_peak();
-        int fill_px = (int)(peak / WS_BAR_PEAK_DIVISOR);
-        if (fill_px > OLED_W) fill_px = OLED_W;
-        int marker_px = VAD_PEAK_THRESHOLD / WS_BAR_PEAK_DIVISOR;
-        oled_draw_bar(WS_BAR_LINE, fill_px, marker_px);
-        oled_flush_row(WS_BAR_LINE);
-    }
-#endif
-
-    return err;
+    return http_converse_stream_write(ctx->stream, pcm, n);
 }
 
 static bool cb_cancel(void *user)
@@ -268,8 +236,8 @@ static esp_err_t do_one_turn(const char *ip,
     control_clear_cancel();
 
     s_state = APP_STATE_LISTENING;
-    oled_listening_screen(is_followup ? "follow-up..." : "listening...",
-                          is_followup ? "speak or wait"  : "speak now", ip);
+    oled_status(is_followup ? "follow-up..." : "listening...",
+                is_followup ? "speak or wait"  : "speak now", ip);
 
     round_trip_ctx_t ctx = { 0 };
     esp_err_t err = http_converse_stream_open(&ctx.stream);

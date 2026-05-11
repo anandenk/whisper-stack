@@ -252,37 +252,10 @@ void oled_draw_text(int line, const char *text)
     while (col < OLED_W) row[col++] = 0x00;
 }
 
-void oled_draw_bar(int line, int fill_px, int marker_px)
-{
-    if (line < 0 || line >= OLED_LINES) return;
-    if (fill_px < 0) fill_px = 0;
-    if (fill_px > OLED_W) fill_px = OLED_W;
-
-    const uint8_t FILL_PATTERN   = 0x3C;  // 0b00111100
-    const uint8_t MARKER_PATTERN = 0xFF;
-
-    uint8_t *row = &s_main.fb[line * OLED_W];
-    for (int x = 0; x < OLED_W; ++x) {
-        row[x] = (x < fill_px) ? FILL_PATTERN : 0x00;
-    }
-    if (marker_px >= 0 && marker_px < OLED_W) {
-        row[marker_px] = MARKER_PATTERN;
-    }
-}
-
 void oled_flush(void)
 {
     if (!s_main.initialized) return;
     esp_lcd_panel_draw_bitmap(s_main.panel, 0, 0, OLED_W, OLED_H, s_main.fb);
-}
-
-void oled_flush_row(int line)
-{
-    if (!s_main.initialized) return;
-    if (line < 0 || line >= OLED_LINES) return;
-    const int y0 = line * 8;
-    esp_lcd_panel_draw_bitmap(s_main.panel, 0, y0, OLED_W, y0 + 8,
-                              &s_main.fb[line * OLED_W]);
 }
 
 // ---------------------------------------------------------------------------
