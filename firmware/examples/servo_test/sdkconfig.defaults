@@ -1,0 +1,7 @@
+# Defaults for the servo_test example. Keeps the example self-contained
+# without needing menuconfig for a quick servo bring-up.
+CONFIG_IDF_TARGET="esp32"
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
