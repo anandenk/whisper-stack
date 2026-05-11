@@ -79,9 +79,13 @@ instead, the port:
   exercise a "stressed" mood and the float-driven drop logic is
   weight without a use case. Re-add later if "stressed" enters the
   state machine.
-- Adds one extension not in the upstream:
-  `robo_eyes_set_position_continuous(angle_deg, vertical_frac)`.
-  See "Continuous gaze coupling" below.
+- Adds one read-only accessor not in the upstream:
+  `robo_eyes_get_eye_x_angle()`. Returns the currently-displayed eye
+  horizontal direction as a float in degrees. Used by the follower
+  task that drives the SG90 servo behind the eyes; see
+  [`notes/motion-character.md`](motion-character.md) for the
+  architecture. No state-mutating extensions remain — the library is
+  otherwise byte-faithful to upstream.
 
 During the port, a one-shot Python reimplementation of the
 drawing primitives + final-frame draw logic was run inline to
@@ -110,8 +114,8 @@ existing application state machine to RoboEyes moods:
 | `app_state_t`        | Mood       | Idle mode | Notes |
 |----------------------|------------|-----------|-------|
 | `APP_STATE_BOOT`     | DEFAULT    | off       | Eyes wake from closed → open over ~120 ms. |
-| `APP_STATE_IDLE`     | DEFAULT    | **on**    | Ambient: autoblinker @ ~3 s + variation 3 s, random gaze wander @ 2 s + variation 3 s. |
-| `APP_STATE_LISTENING`| DEFAULT    | off       | Gaze is no longer self-driven; reserved for the gaze coupling. |
+| `APP_STATE_IDLE`     | DEFAULT    | **on**    | Ambient: autoblinker @ ~3 s + variation 3 s, random gaze wander @ 1 s + variation 3 s. SG90 head follows the eyes when `CONFIG_GAZE_COUPLING_DEMO` is set. |
+| `APP_STATE_LISTENING`| DEFAULT    | off       | Idle wander frozen so any future external override (wake-event reaction) can drive the gaze without competition. |
 | `APP_STATE_THINKING` | TIRED      | off       | Drooping lids read as "processing". |
 | `APP_STATE_SPEAKING` | HAPPY      | off       | Lifted lower lids — engaged smile. |
 
@@ -142,63 +146,29 @@ Why these choices specifically:
   switching renderers doesn't visually invert the meaning of
   "speaking."
 
-## Continuous gaze coupling
+## Gaze coupling — head follows eyes
 
-Upstream's `setPosition(...)` takes one of 9 discrete values
-(`DEFAULT` plus the 8 compass directions) and snaps the eye to a
-corner / edge of the screen-constraint envelope. The next-frame
-tween (`cur = (cur + next) / 2`) smoothly walks the eye there
-over ~5-8 frames (~100-200 ms at 50 fps).
+The OLED + SG90 coupling architecture isn't a face-renderer concern;
+it's a follower task that reads the library's eye state. See
+[`notes/motion-character.md`](motion-character.md) for the full
+design, tunable knobs, and the rationale for why the head follows
+the eyes (rather than the other way around — which was an earlier
+attempt that didn't work).
 
-For continuous gaze tracking (eyes following the SG90 servo's pan
-angle), 9 discrete cells quantizes badly. The port adds:
+Read path from the library side: `robo_eyes_get_eye_x_angle()`
+returns the eye's currently-displayed horizontal angle in degrees
+(derived from `eyeLx` relative to the screen-X envelope center).
+That's the only API a follower needs from this side. No setter, no
+overrides — the library generates motion autonomously via its
+autoblinker + idle-mode defaults.
 
-```c
-void robo_eyes_set_position_continuous(float angle_deg,
-                                       float vertical_frac);
-```
-
-Maps `angle_deg ∈ [-90, +90]` linearly across the same envelope
-the discrete API snaps to corners of, plus an optional
-`vertical_frac ∈ [-1, +1]` for the future tilt axis. Because the
-upstream's tween code averages towards `eyeLxNext` regardless of
-how that target was set, *the smoothness comes for free* — feeding
-a continuously-changing target produces continuously-easing eyes,
-not discrete steps.
-
-### Eye-leads-head timing contract
-
-Tonight (2026-05-11) the servo lives in a separate IDF example
-project (`firmware/examples/servo_test/`) and the OLED + servo
-are **not physically coupled** on the v1 board. The mechanical
-coupling lands tomorrow on the v3 prototype (ESP32-S3 + neck servo).
-
-When that wiring lands, the contract the firmware will follow:
-
-```
-on wake event (or other "look at angle θ" trigger):
-    robo_eyes_set_position_continuous(θ, 0.0);   // eyes shift now
-    vTaskDelay(pdMS_TO_TICKS(150));               // saccade lead
-    servo_look_toward(θ);                         // servo snap+settle
-```
-
-The 150 ms gap is the *saccade lead*: real human eyes precede head
-rotation toward a target by ~100-200 ms during gaze shifts. Mimicking
-that gap reads as "alive" rather than "robotic" and helpfully masks
-the SG90's mechanical lag — by the time the servo is moving, the
-eyes are already locked on the target, and the brain interprets the
-whole gesture as one continuous orientation.
-
-The `vTaskDelay` is a placeholder. A non-blocking variant via
-`esp_timer_create` + oneshot callback is cheap and lets the wake-event
-handler return immediately; switch to that if blocking the calling
-task on the 150 ms is awkward. Either works behaviorally.
-
-The eye-leads-head value `EYE_LEAD_MS = 150` is also exposed in
-`tools/face_preview.py` when the custom-face tooling is checked out
-on `wip/custom-face-attempt`; the value tuned there in software
-should match the firmware's `vTaskDelay` value once you've A/B'd
-on real hardware.
+The earlier exploration of an external-driver architecture
+(`set_position_continuous`, `set_position_x_continuous`,
+`set_idle_axes`) was reverted on 2026-05-11 in favor of this simpler
+read-only contract. Git history preserves the prior approach if
+you want to compare; the short version is that driving the face
+from a synthetic intention model under-performed the library's
+own organic idle-wander tuning by a substantial margin.
 
 ## Files this change touched
 
@@ -226,11 +196,10 @@ on real hardware.
   is mentioned in `tests/oled_animate.py` as a future layout
   preset; the RoboEyes port respects whatever screen dimensions
   `robo_eyes_begin()` is called with, so this becomes a single-call
-  change on hardware day.
-- **`idf.py build` verification** — neither this change nor the
-  earlier `CONFIG_VOICE_ENABLED` gate has been built yet in this
-  session (no IDF toolchain available here). Both should build
-  out of the box, but the first flash is the first ground truth.
+  change on hardware day. (The earlier note here about pending
+  `idf.py build` verification is now obsolete — the firmware has
+  been built, flashed, and visually confirmed on real v1 hardware
+  during the same session.)
 
 ## Reverting / experimenting
 

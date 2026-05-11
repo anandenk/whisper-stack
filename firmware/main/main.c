@@ -43,6 +43,9 @@
 #if CONFIG_FACE_RENDERER_ROBO_EYES
 #include "robo_eyes.h"
 #endif
+#if CONFIG_GAZE_COUPLING_DEMO
+#include "servo.h"
+#endif
 #include "wifi.h"
 #include "i2s_mic.h"
 #include "http_client.h"
@@ -556,6 +559,82 @@ static void face_task(void *arg)
 #endif  // CONFIG_FACE_RENDERER_ROBO_EYES
 #endif  // ENABLE_OLED
 
+#if CONFIG_GAZE_COUPLING_DEMO
+// Eye-leads / head-follows architecture. See notes/motion-character.md.
+//
+// Face is the source of motion. The RoboEyes library runs entirely on
+// its own — autoblinker on, idle mode on both axes, default intervals.
+// The library's autonomous behavior provides the "alive" feel that two
+// previous demos failed to synthesize from scratch.
+//
+// This task just polls the eye's current commanded angle on a slow
+// tick and sends the head after it. Threshold prevents the servo from
+// twitching on micro-movements; the head waits until the eyes commit
+// to a direction before catching up.
+//
+// Two tasks total in this build: face_task (renders + autonomous
+// motion) and servo_follow_task (this one).
+
+// --- Tuning constants ------------------------------------------------
+
+// Eye angular range → servo angular range. Eyes have wider range
+// (±90° per the library's screen-X envelope mapping); servo follows
+// over a narrower range so the head moves "lazily" relative to the
+// eyes. EYE_ANGLE_MAX 90, SERVO_ANGLE_MAX 60 → mapping ratio 0.667.
+// Increase SERVO_ANGLE_MAX toward 90 for a more committed follow;
+// decrease toward 30 for an even lazier head.
+#define EYE_ANGLE_MAX_DEG    90.0f
+#define SERVO_ANGLE_MAX_DEG  60.0f
+
+// Threshold below which we don't issue a new servo command. Prevents
+// the head from twitching on the library's micro-tween wobbles and
+// blink-related transients. 5° is roughly one full saccade-step.
+#define FOLLOW_THRESHOLD_DEG 5.0f
+
+// Servo move duration when the head decides to follow. Slow enough
+// to feel like the head is reacting to the eyes, not driving them.
+#define FOLLOW_MOVE_MS       800
+
+// Follower tick. Doesn't need to be fast — 50 ms is plenty since the
+// servo's own interp_task runs at 50 Hz internally.
+#define FOLLOW_TICK_MS       50
+
+static void servo_follow_task(void *arg)
+{
+    (void)arg;
+    // Let face_task complete its BOOT → IDLE transition before we
+    // start sampling eye position. During the transition the library
+    // is still in "eyes closed" pose, which would map to a strange
+    // initial follow target.
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    float last_commanded_deg = 0.0f;
+    bool  first              = true;
+
+    while (1) {
+        const float eye_angle = robo_eyes_get_eye_x_angle();
+        // Map eye angular range → servo angular range. Linear scale,
+        // not clamped here because the getter never exceeds its own
+        // ±EYE_ANGLE_MAX_DEG range.
+        const float servo_target = eye_angle
+            * (SERVO_ANGLE_MAX_DEG / EYE_ANGLE_MAX_DEG);
+
+        const float diff = servo_target - last_commanded_deg;
+        const float adiff = (diff < 0) ? -diff : diff;
+        if (first || adiff > FOLLOW_THRESHOLD_DEG) {
+            servo_move_to(servo_target, FOLLOW_MOVE_MS);
+            ESP_LOGI(TAG, "head follow: eye %+5.1f° → servo %+5.1f° "
+                          "(Δ %.1f°)",
+                     (double)eye_angle, (double)servo_target, (double)adiff);
+            last_commanded_deg = servo_target;
+            first              = false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(FOLLOW_TICK_MS));
+    }
+}
+#endif  // CONFIG_GAZE_COUPLING_DEMO
+
 void app_main(void)
 {
     esp_chip_info_t chip;
@@ -673,6 +752,19 @@ void app_main(void)
     }
 #elif ENABLE_MIC && ENABLE_WIFI
     ESP_LOGI(TAG, "voice disabled — skipping listen_stream init");
+#endif
+
+#if CONFIG_GAZE_COUPLING_DEMO
+    if (servo_init(NULL) == ESP_OK) {
+        ESP_LOGI(TAG, "head-follows-eyes coupling enabled — SG90 on GPIO 18");
+        // LISTENING posture keeps the servo's internal drift task quiet so
+        // it doesn't fight with our explicit follow commands.
+        servo_set_posture(SERVO_POSTURE_LISTENING);
+        xTaskCreate(servo_follow_task, "servo_follow", 3072, NULL,
+                    tskIDLE_PRIORITY + 1, NULL);
+    } else {
+        ESP_LOGE(TAG, "servo_init failed — coupling disabled");
+    }
 #endif
 
     int n = 0;

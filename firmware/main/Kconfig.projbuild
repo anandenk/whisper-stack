@@ -123,6 +123,37 @@ menu "Whisper Stack Device"
 
     endchoice
 
+    config GAZE_COUPLING_DEMO
+        bool "Gaze coupling (head follows eyes via SG90)"
+        default n
+        help
+            v3 prototype validation. When set, the firmware spawns a
+            small follower task that:
+              * Initializes the SG90 servo on GPIO 18.
+              * Polls robo_eyes_get_eye_x_angle() every 50 ms.
+              * Maps the eye's current horizontal angle to a narrower
+                servo range and issues servo_move_to(target, 800 ms)
+                whenever the new target differs from the last commanded
+                by more than 5°.
+
+            The face renderer is NOT driven externally — the RoboEyes
+            library runs in its stock autonomous mode (autoblinker on,
+            idle wander on both axes) and the head simply follows where
+            the eyes have already decided to look. Matches the natural
+            sequence in real character motion: eyes orient first within
+            milliseconds, then the head follows over a longer arc.
+
+            Wiring (per notes/servo-motion-language.md):
+              SG90 brown  → GND
+              SG90 red    → VIN (5V from USB — NOT 3V3)
+              SG90 yellow → GPIO 18
+
+            Off by default — only relevant during v3 bring-up. When
+            unset, no servo init, no follower task. Recommended
+            companion setting: CONFIG_VOICE_ENABLED=n so the state
+            machine doesn't try to drive the face into LISTENING /
+            SPEAKING moods.
+
     config VOICE_ENABLED
         bool "Enable voice pipeline (mic + wake word + /converse)"
         default y

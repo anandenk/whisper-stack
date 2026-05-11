@@ -456,6 +456,7 @@ bool robo_eyes_update(uint32_t now_ms)
     }
 
     // Idle — pick a random target position within the envelope at random intervals.
+    // Matches upstream verbatim.
     if (s.idle) {
         if (s.now_ms >= s.idleAnimationTimer) {
             s.eyeLxNext = rand_range(screen_constraint_x());
@@ -742,29 +743,18 @@ void robo_eyes_anim_confused(void) { s.confused = true; }
 void robo_eyes_anim_laugh   (void) { s.laugh    = true; }
 
 // ---------------------------------------------------------------------------
-// Continuous-gaze extension.
+// Read-only getter for follower architectures (eye-leads / head-follows).
 // ---------------------------------------------------------------------------
 
-void robo_eyes_set_position_continuous(float angle_deg, float vertical_frac)
+float robo_eyes_get_eye_x_angle(void)
 {
-    if (angle_deg >  90.0f) angle_deg =  90.0f;
-    if (angle_deg < -90.0f) angle_deg = -90.0f;
-    if (vertical_frac >  1.0f) vertical_frac =  1.0f;
-    if (vertical_frac < -1.0f) vertical_frac = -1.0f;
-
     const int cx = screen_constraint_x();
-    const int cy = screen_constraint_y();
-    // angle -90 → x = 0 (west / full left)
-    // angle  +90 → x = cx (east / full right)
-    // angle   0 → x = cx/2 (center)
-    float fx = (angle_deg + 90.0f) / 180.0f;       // [0,1]
-    float fy = (vertical_frac + 1.0f) / 2.0f;       // [0,1]
-    int nx = (int)(fx * (float)cx + 0.5f);
-    int ny = (int)(fy * (float)cy + 0.5f);
-    if (nx < 0)  nx = 0;
-    if (nx > cx) nx = cx;
-    if (ny < 0)  ny = 0;
-    if (ny > cy) ny = cy;
-    s.eyeLxNext = nx;
-    s.eyeLyNext = ny;
+    if (cx <= 0) return 0.0f;
+    const int center = cx / 2;
+    const int offset = s.eyeLx - center;   // [-center, +center]
+    // Map to [-90, +90] degrees. The mapping is the inverse of what
+    // the upstream's discrete setPosition would compute if it accepted
+    // a continuous angle, so the units round-trip cleanly with the
+    // library's own internal scale.
+    return (float)offset / (float)center * 90.0f;
 }

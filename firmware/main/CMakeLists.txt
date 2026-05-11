@@ -30,6 +30,9 @@ idf_component_register(
         # still links but its symbols aren't referenced from main.c, so
         # --gc-sections drops them.
         robo_eyes
+        # SG90 servo driver — only referenced when CONFIG_GAZE_COUPLING_DEMO
+        # is set; otherwise --gc-sections strips it.
+        servo
         # OLED stack
         esp_lcd
         esp_driver_i2c

@@ -14,11 +14,12 @@
 // verbatim from the upstream so the rendered output matches
 // "stock RoboEyes" pixel-for-pixel modulo screen size.
 //
-// The only deliberate semantic change: `robo_eyes_set_position`
-// is the upstream's 9-cell discrete API; `robo_eyes_set_position_continuous`
-// is a new extension that accepts a continuous angle and feeds the
-// existing tween machinery without rounding to a corner. The S3
-// servo coupling will call the continuous variant.
+// The only addition beyond upstream is one read-only getter
+// (robo_eyes_get_eye_x_angle) so a follower task can read the eye's
+// current commanded horizontal position. No setters or animation
+// logic are added — the library remains fully autonomous in motion
+// generation. See notes/motion-character.md for the eye-leads /
+// head-follows architecture this getter enables.
 //
 // License: GPL-3.0-or-later (inherited from upstream — see /LICENSE).
 
@@ -126,19 +127,26 @@ void robo_eyes_blink_lr(bool left, bool right);
 void robo_eyes_anim_confused(void);
 void robo_eyes_anim_laugh(void);
 
-// --- Continuous-gaze extension (NOT upstream) ----------------------------
+// --- Read-only getter for follower architectures (NOT upstream) ----------
 //
-// Accepts a continuous angle in [-90, +90] degrees plus optional
-// vertical fraction in [-1, +1]. Maps the angle linearly across the
-// screen-X envelope (the same envelope the upstream's `setPosition`
-// snaps to corners of). Returns smoothly because the upstream's
-// per-frame `(cur+next)/2` tween already does sub-pixel ease-toward-
-// target — we just feed it a continuous target instead of a corner.
+// Returns the current commanded eye horizontal direction as an angle
+// in degrees [-90, +90], where 0 is "looking straight ahead" and ±90
+// is the eye at the edge of its screen-X envelope. The value is
+// derived from `eyeLx` (the tweened, displayed eye position), so it
+// reflects what's on screen right now — including idle-mode wander,
+// blink-related transients, and any other library-internal motion.
 //
-// Use this from the S3 gaze coupling: when the servo is commanded to
-// angle θ, call this with θ ~150 ms BEFORE issuing the servo move so
-// the eyes lead the head (see notes/face-renderer.md).
-void robo_eyes_set_position_continuous(float angle_deg, float vertical_frac);
+// Use this to drive a head-follows-eyes coupling: read this getter
+// on a slow tick (every 20-50 ms), map to a servo angle, command a
+// gentle servo_move_to when the delta exceeds a threshold. See
+// notes/motion-character.md for the architecture.
+//
+// No corresponding setter — the application doesn't write the eye
+// position; the library generates motion autonomously. Removing the
+// previous set_position_continuous / set_position_x_continuous
+// extensions in favor of a read-only architecture restored near-
+// upstream-faithful behavior.
+float robo_eyes_get_eye_x_angle(void);
 
 #ifdef __cplusplus
 }
