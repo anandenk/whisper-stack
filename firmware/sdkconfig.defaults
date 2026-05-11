@@ -29,6 +29,17 @@ CONFIG_WS_SERVER_PORT=5000
 CONFIG_WS_API_KEY=""
 CONFIG_WS_SESSION_ID="esp32"
 
+# --- LWIP / TCP buffers ---------------------------------------------------
+# Default TCP send buffer (5760 B, ~4 packets in flight per RTT) caps
+# throughput at ~28 KB/s at RTT=200 ms — below the 32 KB/s mic stream
+# rate. On contended 2.4 GHz links retransmits stall the producer and
+# audio frames get recycled. 64 KB absorbs ~10× more in flight before
+# backpressuring. See CLAUDE.md gotcha #9.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_TCP_SND_BUF_DEFAULT=32768
+CONFIG_TCP_WND_DEFAULT=32768
+
 # --- M7 (HC-SR04 wave-to-wake) and M8 (IR remote) -------------------------
 # Both default OFF — opt in via menuconfig. Codes default 0; firmware logs
 # received frames so the user can fill in the real values for their remote.

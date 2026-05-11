@@ -138,6 +138,16 @@ esp_err_t wifi_init_sta_blocking(char *out_ip, size_t out_ip_len)
 
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Disable WiFi power-save. Default WIFI_PS_MIN_MODEM sleeps the radio
+    // between AP beacons and adds 5–15 ms wake-up latency per TX burst.
+    // On marginal/contended links that compounds with retransmissions and
+    // starves the 12.5 fps mic frame cadence, causing ring overflow and
+    // recycled frames (see CLAUDE.md gotcha #9). NONE keeps the radio
+    // always on. Costs a few extra mA — strict win on a mains/battery
+    // device that needs reliable streaming.
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_LOGI(TAG, "wifi power-save: NONE (always-on radio)");
+
     EventBits_t bits = xEventGroupWaitBits(s_evt,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                                            pdFALSE, pdFALSE, WIFI_TIMEOUT_TICKS);
