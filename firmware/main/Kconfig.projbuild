@@ -82,6 +82,23 @@ menu "Whisper Stack Device"
             Set to empty to opt out (every turn stateless).
             Must match [A-Za-z0-9_-]{1,64}.
 
+    config VOICE_ENABLED
+        bool "Enable voice pipeline (mic + wake word + /converse)"
+        default y
+        help
+            Master switch for the entire voice path. When set, the
+            firmware brings up the I²S microphone, the wake-word
+            /listen stream, and the /converse round-trip helpers as
+            usual. When unset, all of those are gated out at compile
+            time: no mic init, no listen_stream task, no HTTP audio
+            streaming. WiFi, OLED (both panels), cat-face animation,
+            gesture, IR, and the BOOT button stay live.
+
+            Use n for v3 prototype bring-up where you want to iterate
+            on display + servo motion without the wake-word stream
+            hammering the CPU and network. See notes/build-modes.md
+            for the full menuconfig flow.
+
     menu "M7 — HC-SR04 ultrasonic gesture wake"
 
         config WAKE_GESTURE_ENABLED

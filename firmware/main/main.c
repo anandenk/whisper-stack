@@ -178,6 +178,15 @@ static inline void oled_boot_screen(const char *ip) { (void)ip; }
 #endif
 
 // --- Round-trip context (frame + cancel callbacks share this) -------------
+//
+// All of cb_frame / cb_cancel / do_one_turn / do_round_trip_streaming_with_preroll
+// are gated on CONFIG_VOICE_ENABLED. When voice is disabled, listen_stream
+// is never initialized so these are dead code anyway, but gating them out
+// prevents unused-function warnings and keeps the build slim while the v3
+// prototype iterates on display + servo motion in isolation. See
+// notes/build-modes.md.
+
+#if CONFIG_VOICE_ENABLED
 
 typedef struct {
     http_converse_stream_handle_t stream;
@@ -429,6 +438,8 @@ void do_round_trip_streaming_with_preroll(const char *ip,
     oled_status("idle", "say 'hey jarvis'", ip);
 }
 
+#endif  // CONFIG_VOICE_ENABLED
+
 #if ENABLE_OLED
 // Cat-face animation task. Reads s_state, plays the matching per-state
 // animation from cat_face.h on the FACE OLED, transitioning instantly to
@@ -511,10 +522,12 @@ void app_main(void)
     }
 #endif
 
-#if ENABLE_MIC
+#if ENABLE_MIC && CONFIG_VOICE_ENABLED
     if (i2s_mic_init() != ESP_OK) {
         ESP_LOGE(TAG, "mic init failed");
     }
+#elif ENABLE_MIC
+    ESP_LOGI(TAG, "voice disabled — skipping mic init");
 #endif
 
 #if ENABLE_OLED
@@ -569,15 +582,17 @@ void app_main(void)
     }
 #endif
 
-#if ENABLE_MIC && ENABLE_WIFI
+#if ENABLE_MIC && ENABLE_WIFI && CONFIG_VOICE_ENABLED
     if (listen_stream_init(ip) != ESP_OK) {
         ESP_LOGE(TAG, "listen_stream_init failed");
     }
+#elif ENABLE_MIC && ENABLE_WIFI
+    ESP_LOGI(TAG, "voice disabled — skipping listen_stream init");
 #endif
 
     int n = 0;
     while (1) {
-#if ENABLE_MIC
+#if ENABLE_MIC && CONFIG_VOICE_ENABLED
         ESP_LOGD(TAG, "tick %d state=%d rms=%lu peak=%lu",
                  n++, (int)s_state,
                  (unsigned long)i2s_mic_last_rms(),
