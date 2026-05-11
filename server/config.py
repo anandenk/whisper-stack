@@ -143,6 +143,13 @@ WAKEWORD_CONVERSATION_TIMEOUT_S = float(
     os.environ.get("WAKEWORD_CONVERSATION_TIMEOUT_S", "30")
 )
 
+# Loopback-test toggle: when "1", every /converse upload is ALSO saved as
+# samples/_loopback_turn_<unix-ts>.wav (post-normalize) and
+# samples/_loopback_turn_<unix-ts>.bin (raw pre-normalize, audio/l16 path
+# only) so an offline analyzer can replay every turn. Default off — only
+# enable while running tools/loopback_test.py.
+LOOPBACK_KEEP_PER_TURN = os.environ.get("LOOPBACK_KEEP_PER_TURN", "0") == "1"
+
 # System prompt prepended to LLM calls from /converse. Targets two failure modes:
 # (1) markdown formatting (asterisks, bullets) read literally by the TTS engine,
 # (2) verbose replies turning into 20+ seconds of audio.

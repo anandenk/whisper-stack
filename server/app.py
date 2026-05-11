@@ -225,6 +225,13 @@ def _capture_audio_upload(suffix_hint: str = ".wav") -> tuple[str | None, dict |
             raw_dump = config.REPO_ROOT / "samples" / "_last_raw.bin"
             raw_dump.parent.mkdir(parents=True, exist_ok=True)
             raw_dump.write_bytes(raw)
+            # Loopback-test diagnostic: also keep a per-turn copy keyed by
+            # unix timestamp so an offline analyzer can pair each upload with
+            # the matching serial-log STATS line. Cheap; ignored if disabled.
+            if config.LOOPBACK_KEEP_PER_TURN:
+                ts = int(time.time())
+                per_turn = config.REPO_ROOT / "samples" / f"_loopback_turn_{ts}.bin"
+                per_turn.write_bytes(raw)
             app.logger.info(
                 "raw body received: %d bytes (%.2f s @ %d Hz mono int16)",
                 len(raw), len(raw) / 2.0 / float(rate), rate,
@@ -466,6 +473,14 @@ def converse():
         debug_audio = config.REPO_ROOT / "samples" / "_last_received.wav"
         debug_audio.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(tmp_path, debug_audio)
+        # Loopback-test diagnostic: also keep a per-turn copy keyed by unix
+        # timestamp so each turn can be analyzed offline without being
+        # overwritten by the next one. Same content as _last_received.wav
+        # (post-normalize). Ignored if disabled.
+        if config.LOOPBACK_KEEP_PER_TURN:
+            ts = int(time.time())
+            per_turn = config.REPO_ROOT / "samples" / f"_loopback_turn_{ts}.wav"
+            shutil.copyfile(tmp_path, per_turn)
     except OSError as e:
         app.logger.warning("could not save debug audio: %s", e)
 
