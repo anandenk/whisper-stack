@@ -221,8 +221,10 @@ static void fb_fill_triangle(int x0, int y0, int x1, int y1, int x2, int y2, uin
     if (y0 == y2) {
         // Degenerate: all on one scanline.
         int xa = x0, xb = x0;
-        if (x1 < xa) xa = x1;  if (x1 > xb) xb = x1;
-        if (x2 < xa) xa = x2;  if (x2 > xb) xb = x2;
+        if (x1 < xa) xa = x1;
+        if (x1 > xb) xb = x1;
+        if (x2 < xa) xa = x2;
+        if (x2 > xb) xb = x2;
         fb_fill_rect(xa, y0, xb - xa + 1, 1, color);
         return;
     }

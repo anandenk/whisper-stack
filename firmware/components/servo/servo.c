@@ -157,9 +157,15 @@ static void maybe_pick_up_new_command(void)
 static void interp_task(void *arg)
 {
     (void)arg;
-    const TickType_t tick_period =
+    // Tick at the configured update rate. Originally tried vTaskDelayUntil
+    // here but it has a documented failure mode where the task can miss
+    // its deadline and never block, starving IDLE on this core and
+    // tripping the task watchdog. vTaskDelay always yields for the
+    // requested duration regardless of timing math — same pacing,
+    // strictly more robust.
+    TickType_t tick_period =
         pdMS_TO_TICKS(1000 / (s_cfg.update_hz ? s_cfg.update_hz : 50));
-    TickType_t last_wake = xTaskGetTickCount();
+    if (tick_period == 0) tick_period = 1;
 
     while (1) {
         maybe_pick_up_new_command();
@@ -185,7 +191,7 @@ static void interp_task(void *arg)
             apply_angle(ang);
         }
 
-        vTaskDelayUntil(&last_wake, tick_period);
+        vTaskDelay(tick_period);
     }
 }
 
