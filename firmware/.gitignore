@@ -15,3 +15,7 @@ managed_components/
 .idea/
 *.swp
 .DS_Store
+
+# Reference copies of upstream sources fetched during a port — kept
+# on disk during a session for side-by-side comparison, not committed.
+*.ref

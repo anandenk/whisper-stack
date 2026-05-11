@@ -37,7 +37,12 @@
 
 #include "app_state.h"
 #include "oled.h"
+#if CONFIG_FACE_RENDERER_CAT_FACE
 #include "cat_face.h"
+#endif
+#if CONFIG_FACE_RENDERER_ROBO_EYES
+#include "robo_eyes.h"
+#endif
 #include "wifi.h"
 #include "i2s_mic.h"
 #include "http_client.h"
@@ -441,6 +446,7 @@ void do_round_trip_streaming_with_preroll(const char *ip,
 #endif  // CONFIG_VOICE_ENABLED
 
 #if ENABLE_OLED
+#if CONFIG_FACE_RENDERER_CAT_FACE
 // Cat-face animation task. Reads s_state, plays the matching per-state
 // animation from cat_face.h on the FACE OLED, transitioning instantly to
 // the new animation when state changes (resets to frame 0 of the new state's
@@ -476,7 +482,79 @@ static void face_task(void *arg)
         frame_idx = (frame_idx + 1) % (int)n_frames;
     }
 }
-#endif
+#endif  // CONFIG_FACE_RENDERER_CAT_FACE
+
+#if CONFIG_FACE_RENDERER_ROBO_EYES
+// RoboEyes face task — drives the FluxGarage RoboEyes port on the FACE
+// OLED. State → mood mapping (see notes/face-renderer.md):
+//
+//   BOOT       → DEFAULT  (settling)
+//   IDLE       → DEFAULT  + autoblinker + idle-mode random wander
+//   LISTENING  → DEFAULT  + autoblinker, idle-mode OFF so gaze can be
+//                          driven externally by the S3 servo coupling
+//   THINKING   → TIRED    (drooping lids read as "processing")
+//   SPEAKING   → HAPPY    (lifted lower lids — engaged smile)
+//
+// ANGRY is reserved for a future error/timeout state and not mapped
+// here. The robo_eyes API is single-threaded — call setters and update
+// only from this task. Tick at 50 Hz; the library's internal frame-rate
+// gate matches.
+static void face_task(void *arg)
+{
+    robo_eyes_begin(OLED_W, OLED_H, /*framerate=*/50);
+    // Upstream begins with eyes closed; Arduino examples manually open
+    // them after begin(). We do the same here so the device boots with
+    // a nice "wake up" tween from closed -> open over the first ~120 ms.
+    robo_eyes_open();
+    robo_eyes_set_autoblinker(true, /*interval_s=*/3, /*variation_s=*/3);
+    robo_eyes_set_idle_mode  (true, /*interval_s=*/2, /*variation_s=*/3);
+
+    app_state_t prev = (app_state_t)-1;
+    const int64_t boot_us = esp_timer_get_time();
+
+    while (1) {
+        app_state_t cur = s_state;
+        if (cur != prev) {
+            switch (cur) {
+            case APP_STATE_BOOT:
+            case APP_STATE_IDLE:
+                robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
+                robo_eyes_set_idle_mode(true, 2, 3);
+                break;
+            case APP_STATE_LISTENING:
+                robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
+                // Freeze idle wander so the gaze can be driven externally
+                // by setPosition / setPositionContinuous from the wake/
+                // servo coupling (tomorrow's S3 work).
+                robo_eyes_set_idle_mode(false, 0, 0);
+                break;
+            case APP_STATE_THINKING:
+                robo_eyes_set_mood(ROBO_EYES_MOOD_TIRED);
+                robo_eyes_set_idle_mode(false, 0, 0);
+                break;
+            case APP_STATE_SPEAKING:
+                robo_eyes_set_mood(ROBO_EYES_MOOD_HAPPY);
+                robo_eyes_set_idle_mode(false, 0, 0);
+                break;
+            default:
+                robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
+                break;
+            }
+            prev = cur;
+        }
+
+        const uint32_t now_ms = (uint32_t)((esp_timer_get_time() - boot_us) / 1000);
+        if (robo_eyes_update(now_ms)) {
+            oled_face_draw_bitmap(robo_eyes_get_framebuffer());
+            oled_face_flush();
+        }
+        // Task tick at ~50 Hz; the library's internal frame-rate gate
+        // additionally rate-limits redraws if we ever poll faster.
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+#endif  // CONFIG_FACE_RENDERER_ROBO_EYES
+#endif  // ENABLE_OLED
 
 void app_main(void)
 {
@@ -496,16 +574,23 @@ void app_main(void)
         oled_draw_text(2, "boot...");
         oled_flush();
     }
-    // Bring up the second OLED (cat-face panel, I²C bus 1, GPIO 16/17).
-    // The face_task started below reads s_state and plays the per-state
-    // animation defined in cat_face.h (auto-generated from oled_animate.py).
+    // Bring up the second OLED (face panel, I²C bus 1, GPIO 16/17).
+    // The face_task started below renders the per-state animation; which
+    // renderer it uses depends on CONFIG_FACE_RENDERER (cat_face.h or the
+    // FluxGarage RoboEyes port). See notes/face-renderer.md.
     static bool s_face_ok = false;
     if (oled_face_init() == ESP_OK) {
         s_face_ok = true;
+#if CONFIG_FACE_RENDERER_CAT_FACE
         // Draw idle pose immediately so the panel doesn't stay dark while
         // the face_task starts up and the boot/IP card runs on the main OLED.
         oled_face_draw_bitmap(cat_idle_open);
         oled_face_flush();
+#else
+        // RoboEyes: face_task runs robo_eyes_begin() on entry and the
+        // first frame appears within ~20 ms of task start — fast enough
+        // that no preroll bitmap is needed.
+#endif
     } else {
         ESP_LOGW(TAG, "face OLED init failed — wiring or address issue");
     }

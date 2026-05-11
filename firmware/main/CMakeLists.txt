@@ -24,6 +24,12 @@ idf_component_register(
         "control_state.c"
     INCLUDE_DIRS "."
     REQUIRES
+        # FACE renderer — RoboEyes port (gated by CONFIG_FACE_RENDERER).
+        # Lives at ../components/robo_eyes/. Required header is robo_eyes.h.
+        # When CONFIG_FACE_RENDERER_CAT_FACE is selected this component
+        # still links but its symbols aren't referenced from main.c, so
+        # --gc-sections drops them.
+        robo_eyes
         # OLED stack
         esp_lcd
         esp_driver_i2c
