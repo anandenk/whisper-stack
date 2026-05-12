@@ -70,23 +70,30 @@ def _stop_reason(resp) -> str:
 
 
 def _maybe_inline_brevity_directive(message: str, enable_search: bool) -> str:
-    """Inline a brevity instruction when google_search grounding is on.
+    """Inline a length-and-format instruction when google_search is on.
 
     Gemini's `google_search` mode reliably ignores `system_instruction`'s
-    "answer in one sentence" rule because the grounding path treats the
-    system prompt as advice and the search results as the authority on
-    content. Inline instructions (in the user message) survive that
-    override. Without this nudge a "what's the weather" voice query
-    returns a four-sentence forecast with day/night breakdowns; with
-    it the same query returns a single sentence.
+    length guidance because the grounding path treats the system prompt
+    as advice and the search results as the authority on content. Inline
+    instructions (in the user message) survive that override.
+
+    The instruction is intentionally *soft*: a factual lookup like
+    "what's the weather" gets one sentence; an open-ended grounded
+    question like "what's the latest in the Iran ceasefire situation"
+    is allowed to take a few sentences. What stays absolute is the
+    format ban on lists, multi-period breakdowns, and parenthetical
+    unit conversions — those are the specific failure modes the
+    grounded path produces if not blocked inline.
     """
     if not enable_search:
         return message
     return (
         f"{message}\n\n"
-        "Answer this in exactly one short spoken sentence. Pick one unit "
-        "of measurement (no parenthetical conversions). No lists, no "
-        "multi-period breakdowns."
+        "Answer this concisely as a spoken voice reply. A factual lookup "
+        "(weather, score, single number, simple fact) should be one short "
+        "sentence; an explanatory or open-ended question may take a few. "
+        "Pick one unit of measurement (no parenthetical conversions). "
+        "No lists, no bullets, no multi-period breakdowns."
     )
 
 
