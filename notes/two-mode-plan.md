@@ -1,5 +1,15 @@
 # Two-mode refactor — `MODE=local` vs `MODE=cloud`
 
+> **⚠ SUPERSEDED — May 2026.** The two-mode split was retired during
+> the Gemini migration. The codebase now has a single install profile
+> (Gemini 2.5 Flash for the LLM, faster-whisper locally for STT, Piper
+> locally for TTS). The `MODE` env var, `requirements-cloud.txt`, and
+> the unimplemented Deepgram/OpenAI cloud-mode placeholders are all
+> gone. This doc is kept as a historical record of the architecture
+> choices that led there. See `CLAUDE.md` § "Stack" for the current
+> shape and § "Ollama resurrection" if you ever need any of the
+> pre-migration backends back.
+
 > **Sequel:** [notes/sessions-plan.md](sessions-plan.md) — server-side multi-turn memory, idle-bounded markdown sessions. Not yet started.
 
 > Note: the user requested this be written to `notes/two-mode-plan.md`. Plan-mode constraints route the file here first; on approval it gets copied to `notes/two-mode-plan.md` as the first implementation step.

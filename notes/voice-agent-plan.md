@@ -1,5 +1,16 @@
 # Voice + agent capabilities — plan
 
+> **Historical doc — all six milestones shipped, then partially
+> re-shaped by the May 2026 Gemini migration.** What's still true:
+> sessions, streaming TTS, VAD, continuous + interrupt, "hey jarvis"
+> wake word, auto-titling, the `get_current_time` tool. What
+> changed: Tavily-based `web_search` was replaced by Gemini's
+> built-in `google_search` grounding (no third-party account needed),
+> the auto-title model swapped from Claude Haiku to Gemini, and the
+> "tool-likely auto-escalation to Sonnet" mechanism is gone because
+> there's no second LLM to escalate to. For the current shape, see
+> `CLAUDE.md` § "Stack".
+
 ## Context
 
 The current product:

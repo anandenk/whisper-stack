@@ -1,6 +1,14 @@
 # whisper stack: Local-First Pipeline
 
-> **Sequel:** [notes/two-mode-plan.md](notes/two-mode-plan.md) — refactoring this server to support a cloud-mode deployment alongside local.
+> **Historical doc — May 2026.** This is the original 7-stage build
+> plan. All seven stages shipped. The Llama-Claude routing layer
+> described here was later removed in the Gemini migration
+> (single-LLM Gemini 2.5 Flash); the two-mode follow-up
+> ([notes/two-mode-plan.md](notes/two-mode-plan.md)) is also
+> superseded. For the current shape of the codebase, see `CLAUDE.md`
+> § "Stack".
+
+> **Sequel:** [notes/two-mode-plan.md](notes/two-mode-plan.md) — refactoring this server to support a cloud-mode deployment alongside local. *(Superseded.)*
 
 ## Context
 

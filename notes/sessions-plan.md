@@ -1,6 +1,15 @@
 # Multi-turn session memory — plan
 
-> **Sequel:** [notes/voice-agent-plan.md](voice-agent-plan.md) — tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word, auto-titling. Not yet started.
+> **Historical doc — all five phases (A–E) shipped, mostly unchanged
+> after the May 2026 Gemini migration.** Sessions still persist as
+> idle-bounded markdown files, the 10-minute idle timeout still
+> applies, the 30-turn window still flows into `chat()` as
+> `history`. One file-format change: the `route=` field is no longer
+> written to the assistant meta line. The parser keeps an optional
+> capture group for it so historical session files still load. For
+> the current shape, see `CLAUDE.md` § "Stack".
+
+> **Sequel:** [notes/voice-agent-plan.md](voice-agent-plan.md) — tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word, auto-titling.
 
 ## Context
 

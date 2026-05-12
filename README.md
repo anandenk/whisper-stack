@@ -1,24 +1,27 @@
 # whisper stack
 
-A self-hosted voice assistant backend. Whisper for STT, a router on top
-of two LLMs, Piper for streaming TTS — full mic-to-speaker loop on one
-machine. Speak into a phone, a terminal, or a custom ESP-WROOM-32
-voice device; the server transcribes, routes the query to the right
-LLM, runs tools when needed, streams synthesized speech back.
+A self-hosted voice assistant backend. Whisper for STT, Gemini 2.5
+Flash for the LLM, Piper for streaming TTS — full mic-to-speaker loop
+on one machine. Speak into a phone, a terminal, or a custom
+ESP-WROOM-32 voice device; the server transcribes, asks Gemini, runs
+tools when needed, streams synthesized speech back.
 
-**Status:** v1 shipped (May 2026) — end-to-end voice loop, seven shipped feature plans, working ESP-WROOM-32 hardware client.
+**Status:** v1 shipped (May 2026) — end-to-end voice loop, working
+ESP-WROOM-32 hardware client. Migrated from a two-LLM routed
+architecture to single-model Gemini 2.5 Flash in May 2026; the
+two-mode (local vs cloud) split was retired in the same migration.
 **Built by:** Anand Enkhjin .
-**Looking to fund:** v2 — battery-powered, enclosed, on-device wake word, USB-C charging.
+**Looking to fund:** v2 — battery-powered, enclosed, on-device wake
+word, USB-C charging.
 
-In plain terms: you speak into a microphone, a speech-recognition model
-transcribes the audio, the text is routed to either a small local AI
-model (for simple or factual questions) or Anthropic's Claude (for
-anything more complex — Claude can also call tools like web search when
-relevant), and the reply is synthesized back to speech and played out.
-The whole loop runs on one workstation; an optional custom hardware
-device — currently an ESP-WROOM-32 with a microphone, OLED display, and
-WiFi — talks to the workstation from across the room and lets you use
-the assistant hands-free.
+In plain terms: you speak into a microphone, a speech-recognition
+model transcribes the audio, the text is sent to Google's Gemini 2.5
+Flash (which can call tools and ground answers in live Google Search
+results when relevant), and the reply is synthesized back to speech
+and played out. The whole loop runs on one workstation; an optional
+custom hardware device — currently an ESP-WROOM-32 with a microphone,
+OLED display, and WiFi — talks to the workstation from across the
+room and lets you use the assistant hands-free.
 
 ## What's next (v2)
 
@@ -76,97 +79,109 @@ design docs.
 **Currently seeking funding** for v2 + v3 parts + tooling.
 
 ```
-audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → audio out
-                            ↓                  ↓
-                    (Llama 3.1 / Haiku)  (Claude Sonnet
-                                          + tools, when needed)
+audio in → STT → Gemini 2.5 Flash (with tools) → streaming TTS → audio out
+                  ↑
+       get_current_time  +  google_search (built-in)
 ```
 
 Four voice clients reach the same server, all working today: a self-
-contained web page (any browser, including phones), a push-to-talk CLI,
-a workstation-side "hey jarvis" wake-word loop, and a custom
-ESP-WROOM-32 + INMP441 + SSD1306 voice device — bring-up through M6
-shipped, hands-free wake + continuous follow-ups + live VU bar all
-verified on real hardware.
+contained web page (any browser, including phones), a push-to-talk
+CLI, a workstation-side "hey jarvis" wake-word loop, and a custom
+ESP-WROOM-32 + INMP441 + SSD1306 voice device — M1 through M8 +
+cat-face panel all shipped on real hardware.
 
 ## What works today
 
-- **Two-stage routing.** Cheap local LLM (Llama 3.1 8B via Ollama) for
-  conversational + factual queries; Claude Sonnet for anything complex
-  (writing, code, multi-step reasoning). Embedding-similarity classifier
-  decides per-query in ~30 ms. Tool-likely queries auto-escalate to Sonnet.
+- **Single-LLM stack.** Gemini 2.5 Flash via Google AI Studio handles
+  every query. The previous router-on-top-of-two-LLMs design was
+  retired in May 2026 — see "Migration history" below.
 - **Streaming TTS** end-to-end. The web client hears the assistant's
   reply forming sentence-by-sentence ~1 second after the LLM starts
   generating, instead of waiting ~3 s for the whole reply. Sentence
-  boundaries fed to Piper as they arrive; PCM chunks ship over Server-
-  Sent Events.
-- **Tools.** `get_current_time` (server-side, free) and Tavily-backed
-  `web_search` (free tier 1k queries/mo). Set `TAVILY_API_KEY` in
-  `.env` and "what's the weather in Chicago" works. Tool calls are
-  recorded per-turn in the session file for observability.
+  boundaries fed to Piper as they arrive; PCM chunks ship over
+  Server-Sent Events.
+- **Tools.** `get_current_time` (server-side, free, instant) and
+  Gemini's built-in `google_search` grounding for "current info"
+  queries — no third-party search account needed. The server picks
+  one tool config per turn (Gemini 2.5 forbids combining custom
+  function declarations with google_search in one request).
 - **Multi-turn conversation memory.** Markdown-backed sessions, idle-
-  bounded (10-min default), one file per conversation under `sessions/`.
-  Files auto-titled by Claude Haiku after the first turn.
-- **Voice-activity detection** in the web client and `tests/talk.py` —
-  auto-stop on silence-after-speech. No more "did I tap stop yet?"
-  Tunable peak threshold + silence dwell; web client shows a live VAD
-  meter for self-tuning.
+  bounded (10-min default), one file per conversation under
+  `sessions/`. Files auto-titled by Gemini after the first turn.
+- **Voice-activity detection** in the web client and `tests/talk.py`
+  — auto-stop on silence-after-speech. Tunable peak threshold +
+  silence dwell; web client shows a live VAD meter for self-tuning.
 - **Continuous + interrupt mode** in the web client. Tap once at the
   start, talk freely, the assistant takes its turn, mic auto-reopens
   for the next user turn. Talking over the assistant cuts it off and
   swings the mic back to you mid-reply (~50 ms).
-- **Wake-word client** (`tests/jarvis.py`). Workstation-side "hey jarvis"
-  via [openWakeWord](https://github.com/dscripka/openWakeWord). No tap,
-  no Enter — say the wake word, ask, get a reply, follow-ups for 30 s of
-  silence, then back to listening.
-- **Two-mode architecture.** A single `MODE` env var picks the backend
-  set: `local` (workstation, GPU, Ollama) or `cloud` (CPU-only, ready for
-  a $5–10/mo VPS). Local mode is fully shipped; cloud mode is partial —
-  Deepgram STT and OpenAI TTS backends raise `NotImplementedError` until
-  signed up.
-- **Four voice clients.** Self-contained web page at `GET /` (records on
-  phone, plays through Web Audio); push-to-talk CLI (`tests/talk.py`);
-  hands-free wake-word loop (`tests/jarvis.py`); and a custom
-  **ESP-WROOM-32 + INMP441 mic + SSD1306 OLED** firmware
+- **Wake-word client** (`tests/jarvis.py`). Workstation-side "hey
+  jarvis" via [openWakeWord](https://github.com/dscripka/openWakeWord).
+  No tap, no Enter — say the wake word, ask, get a reply, follow-ups
+  for 30 s of silence, then back to listening.
+- **Four voice clients.** Self-contained web page at `GET /` (records
+  on phone, plays through Web Audio); push-to-talk CLI
+  (`tests/talk.py`); hands-free wake-word loop (`tests/jarvis.py`);
+  and a custom **ESP-WROOM-32 + INMP441 mic + SSD1306 OLED** firmware
   ([`firmware/`](firmware/)) — hands-free "hey jarvis", continuous
-  follow-ups, live VU bar showing your voice clearing the VAD floor,
-  speaking-screen overlay with model name + token usage. WPA2-Enterprise
-  WiFi verified on a real dorm network. The workstation's Realtek
-  output speaks the reply — no on-device DAC in v1. Two opt-in extras:
-  **HC-SR04 wave-to-wake** (alternative wake source — wave a hand 10 cm
-  in front of the sensor, no speaking required) and an **IR remote**
-  for mute / snooze / cancel (close the listening socket, auto-resume
-  after a configurable timer, or kill the current turn mid-LISTENING).
-  Both default OFF in `idf.py menuconfig`; the four wake-source paths
-  (VOICE / GESTURE / BUTTON / IR) all surface on the OLED splash so
-  you can tell which input fired.
+  follow-ups, speaking-screen overlay with model name + token usage.
+  WPA2-Enterprise WiFi verified on a real dorm network. The
+  workstation's Realtek output speaks the reply — no on-device DAC
+  in v1. Two opt-in extras: **HC-SR04 wave-to-wake** and an **IR
+  remote** for mute / snooze / cancel.
 - **Per-process token / cost accounting.** `GET /health` returns a
-  `usage` block with input/output tokens + USD-cost-since-boot per model.
-  `/converse` also returns a per-call `estimated_cost_usd` so clients
-  (e.g. the ESP-32 device) can show what each individual turn cost.
-  Resets on restart; meant for "is this turning into a money fire"
-  visibility, not billing accuracy.
+  `usage` block with input/output tokens + USD-cost-since-boot per
+  model. `/converse` also returns a per-call `estimated_cost_usd`
+  so clients (e.g. the ESP-32 OLED) can show what each individual
+  turn cost. Resets on restart; meant for "is this turning into a
+  money fire" visibility, not billing accuracy. Gemini 2.5 Flash
+  pricing baked in ($0.30 in / $2.50 out per 1M tokens) — verify
+  current rates at [ai.google.dev/pricing](https://ai.google.dev/pricing).
 - **Auth.** Optional `API_KEY` shared-secret on `/converse`,
-  `/converse/stream`, `/chat`, `/transcribe`, `/speak`. `GET /` and
-  `/health` stay public.
-- **Cloudflare Tunnel runbook** for off-LAN access without port-forwarding.
+  `/converse/stream`, `/chat`, `/transcribe`, `/speak`, `/listen`.
+  `GET /` and `/health` stay public.
+- **Cloudflare Tunnel runbook** for off-LAN access without
+  port-forwarding.
+
+## Migration history
+
+The project shipped originally with a two-LLM routing architecture
+(Ollama Llama 3.1 8B for "simple" queries, Claude Sonnet for
+"complex"), plus a parallel two-mode (`MODE=local | cloud`) split
+that would have used Claude Haiku + Deepgram + OpenAI TTS on a VPS.
+In **May 2026** the project was simplified down to single-LLM Gemini
+2.5 Flash:
+
+- Routing layer, embedding classifier, and tool-likely escalation
+  removed.
+- Ollama, Anthropic, and sentence-transformers dependencies removed.
+- Tavily-based `web_search` replaced by Gemini's built-in
+  `google_search` grounding (no third-party signup needed).
+- `MODE` env var, `requirements-cloud.txt`, and the cloud-only
+  Deepgram/OpenAI placeholders all retired.
+
+A `pre-ollama-removal` git tag bookmarks the last commit with the
+full multi-LLM stack — see `CLAUDE.md` § "Ollama resurrection" for
+the 5-minute recipe to bring any of the old backends back.
 
 ## Quick start
 
-> **macOS / Linux note:** the commands below are PowerShell-flavored. Substitute `source .venv/bin/activate` for the venv activate line and standard `mkdir -p` / `curl -L -o` for the model-download lines; everything else is portable Python.
+> **macOS / Linux note:** the commands below are PowerShell-flavored.
+> Substitute `source .venv/bin/activate` for the venv activate line
+> and standard `mkdir -p` / `curl -L -o` for the model-download
+> lines; everything else is portable Python.
 
 You'll need:
 
-- **Python 3.13.x** in a venv. The system Python on Windows defaults to
-  3.14 which lacks the ML wheels we need. Don't use it.
-- **Ollama** running on `http://127.0.0.1:11434` with
-  `llama3.1:8b-instruct-q5_K_M` pulled (or whatever you set `OLLAMA_MODEL`
-  to) and `nomic-embed-text` (the router embedder).
-- **An NVIDIA GPU** for local mode (faster-whisper inference). Cloud mode
-  is CPU-only.
-- **An Anthropic API key** in `.env` as `ANTHROPIC_API_KEY=sk-ant-...`.
+- **Python 3.13.x** in a venv. The system Python on Windows
+  defaults to 3.14 which lacks the ML wheels we need. Don't use it.
+- **An NVIDIA GPU** for faster-whisper STT.
+- **A Google AI Studio API key.** Free tier covers casual use;
+  Gemini 2.5 Flash paid pricing is fractions of a cent per voice
+  turn. Get one at [aistudio.google.com](https://aistudio.google.com)
+  → "Get API key", drop it in `.env` as `GOOGLE_API_KEY=...`.
 
-### Install (local mode)
+### Install
 
 ```powershell
 git clone https://github.com/anandenk/whisper-stack.git
@@ -175,20 +190,19 @@ cd whisper-stack
 # Create the 3.13 venv
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install flask python-dotenv requests numpy anthropic sounddevice piper-tts faster-whisper
+pip install -r requirements.txt
 
 # Copy and fill in your keys
 cp .env.example .env
 notepad .env
 
-# Download a Piper voice model (en_GB-alan-medium is the project default)
+# Download a Piper voice model (en_US-amy-medium is the project default)
 mkdir -Force models\piper | Out-Null
-$base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium"
-curl.exe -sSL -o models\piper\en_GB-alan-medium.onnx      "$base/en_GB-alan-medium.onnx"
-curl.exe -sSL -o models\piper\en_GB-alan-medium.onnx.json "$base/en_GB-alan-medium.onnx.json"
+$base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium"
+curl.exe -sSL -o models\piper\en_US-amy-medium.onnx      "$base/en_US-amy-medium.onnx"
+curl.exe -sSL -o models\piper\en_US-amy-medium.onnx.json "$base/en_US-amy-medium.onnx.json"
 
-# Optional: install openwakeword + download bundled models for tests/jarvis.py
-.\.venv\Scripts\python.exe -m pip install openwakeword
+# Optional: download the bundled openwakeword models for tests/jarvis.py
 .\.venv\Scripts\python.exe -c "import openwakeword; openwakeword.utils.download_models()"
 ```
 
@@ -198,20 +212,23 @@ curl.exe -sSL -o models\piper\en_GB-alan-medium.onnx.json "$base/en_GB-alan-medi
 .\.venv\Scripts\python.exe -m server.app
 ```
 
-Wait for `Listening on http://127.0.0.1:5000`. First boot is slow (~15 s) —
-faster-whisper does a PTX JIT compile on Blackwell GPUs and Ollama loads
-the LLM into VRAM. Subsequent boots are warm.
+Wait for `Listening on http://127.0.0.1:5000`. First boot is slow
+(~10 s) — faster-whisper does a PTX JIT compile on Blackwell GPUs.
+Subsequent boots are warm.
 
 ### Talk to it
 
 **Browser** (laptop or phone over the same network):
 - Open `http://127.0.0.1:5000`
 - (If you set `API_KEY`) paste it into the API-key field
-- (Optional) type a session ID into the Session field for multi-turn memory
-- (Optional) toggle **Continuous** to turn the button into a Start/End
-  conversation toggle — the assistant takes its turn, mic auto-reopens,
-  loop until you tap End. Talking over the assistant interrupts it.
-- Tap **Tap to talk** (or **Start conversation** if Continuous is on)
+- (Optional) type a session ID into the Session field for multi-turn
+  memory
+- (Optional) toggle **Continuous** to turn the button into a
+  Start/End conversation toggle — the assistant takes its turn, mic
+  auto-reopens, loop until you tap End. Talking over the assistant
+  interrupts it.
+- Tap **Tap to talk** (or **Start conversation** if Continuous is
+  on)
 
 **Push-to-talk CLI** (auto-stops on silence by default):
 ```powershell
@@ -239,31 +256,33 @@ cloudflared tunnel --url http://127.0.0.1:5000
 ## Configuration
 
 All config is via env vars, loaded from `.env` at process boot. See
-[.env.example](.env.example) for the full list with `[both]` / `[local]` /
-`[cloud]` tags. Highlights:
+[.env.example](.env.example) for the full list grouped by subsystem.
+Highlights:
 
-- `MODE=local | cloud` — backend set selection (default `local`)
-- `API_KEY=...` — shared-secret auth (default unset = LAN-only)
-- `TAVILY_API_KEY=...` — enables `web_search` tool (free tier 1k/mo)
-- `PIPER_VOICE=en_GB-alan-medium` — TTS voice (any from the
+- `GOOGLE_API_KEY=...` — required (Gemini)
+- `GEMINI_MODEL=gemini-2.5-flash` — default model (override if Google
+  ships a faster Flash alias)
+- `API_KEY=...` — shared-secret auth on protected routes (default
+  unset = LAN-only)
+- `PIPER_VOICE=en_US-amy-medium` — TTS voice (any from the
   [Piper voice catalog](https://github.com/rhasspy/piper/blob/master/VOICES.md))
-- `PIPER_LENGTH_SCALE=0.85` — speech rate; lower = faster (sane 0.7–1.1)
+- `PIPER_LENGTH_SCALE=0.85` — speech rate; lower = faster (sane
+  0.7–1.1)
 - `TTS_OUTPUT_DEVICE=Speakers (Realtek(R) Audio), MME` — pin TTS
   playback to a specific output device by name substring or integer
   index, so a Bluetooth headset plugging in doesn't reroute the
   assistant's voice. Empty = system default.
-- `WHISPER_LANGUAGE=en` — pin STT language (empty = auto-detect, prone
-  to misfires)
-- `SESSION_IDLE_TIMEOUT_MIN=10` — gap that triggers a new session file
-- `ROUTER_MARGIN_S=0.03` — embedding-router margin; higher → more
-  queries to Sonnet (default tuned via `tests/router_eval.py`)
+- `WHISPER_LANGUAGE=en` — pin STT language (empty = auto-detect,
+  prone to misfires)
+- `SESSION_IDLE_TIMEOUT_MIN=10` — gap that triggers a new session
+  file
 - `CONVERSE_MAX_TOKENS=96` — cap voice-mode reply length
-- `TOOL_MAX_ROUNDS=5` — safety cap on tool-call iterations per request
-- `WAKEWORD_THRESHOLD=0.5` — `tests/jarvis.py` wake detection sensitivity
-- `WAKEWORD_CONVERSATION_TIMEOUT_S=30` — silence dwell after a reply
-  before `jarvis.py` drops back to wake-word listening
-- `VOICE_AI_VAD=1`, `VAD_PEAK_THRESHOLD=600`, `VAD_SILENCE_MS=1500` —
-  `tests/talk.py` VAD knobs
+- `TOOL_MAX_ROUNDS=5` — safety cap on tool-call iterations per
+  request
+- `WAKEWORD_THRESHOLD=0.5` — `tests/jarvis.py` wake detection
+  sensitivity
+- `WAKEWORD_CONVERSATION_TIMEOUT_S=30` — silence dwell after a
+  reply before `jarvis.py` drops back to wake-word listening
 
 ## Project layout
 
@@ -272,60 +291,50 @@ All config is via env vars, loaded from `.env` at process boot. See
 samples/                     audio fixtures (jfk.wav + test-generated _*.wav)
 models/piper/                Piper voice .onnx + .json (gitignored)
 sessions/                    conversation history, one .md per session (gitignored)
-tests/stageN_*.py            per-feature smoke tests (run after server start)
-tests/stage10_stream_*.py    streaming-TTS regression suite
-tests/cloud_*.py             cloud-backend smoke tests
+tests/stage{1,4,6,7,8,9,10,11}_*.py
+                             per-feature smoke tests (run after server start)
+tests/stage_gemini.py        Gemini SDK smoke (chat, tools, search, streaming)
 tests/talk.py                push-to-talk CLI (with VAD)
 tests/jarvis.py              wake-word ("hey jarvis") CLI
 server/
 ├── app.py                   Flask routes
-├── config.py                env loading + MODE validation
-├── modes.py                 backend factory: get_stt / get_llm / get_tts / get_embedder
-├── protocols.py             STT / LLM / TTS / Embedder Protocols
-├── router.py                embedding-similarity classifier + tool-likely heuristic
+├── config.py                env loading
+├── modes.py                 backend factory: get_stt / get_llm / get_tts
+├── protocols.py             STT / LLM / TTS Protocols
 ├── sessions.py              markdown session store
-├── titler.py                Haiku-backed session auto-titling
+├── titler.py                Gemini-backed session auto-titling
 ├── streaming.py             SentenceChunker — feeds streaming TTS pipeline
 ├── usage.py                 per-process token / cost accumulator
-├── tools/                   tool registry (get_current_time, web_search)
+├── tools/                   tool registry (get_current_time)
 ├── markdown.py              to_speakable_text (markdown/LaTeX stripper)
-├── audio.py                 pcm_to_wav, synth_to_wav (mode-independent)
+├── audio.py                 pcm_to_wav, synth_to_wav
 ├── audio_out.py             local sounddevice playback (TTS_OUTPUT_DEVICE pin)
+├── wakeword.py              server-side openWakeWord wrapper
 ├── web/index.html           browser/phone client (streaming + VAD + continuous + interrupt)
-└── backends/                STT/LLM/TTS/Embedder implementations
-plan.md                      original 7-stage build plan
-notes/two-mode-plan.md       local vs cloud refactor (mostly shipped)
+└── backends/
+    ├── stt_whisper.py       WhisperLocalSTT
+    ├── llm_gemini.py        GeminiLLM (chat + chat_stream + tool dispatch)
+    └── tts_piper.py         PiperTTS
+plan.md                      original 7-stage build plan (historical)
 notes/sessions-plan.md       multi-turn conversation memory (shipped)
 notes/voice-agent-plan.md    streaming TTS, VAD, continuous, interrupt, wake (all shipped)
-notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M6 all shipped)
+notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1–M8 all shipped)
+notes/two-mode-plan.md       SUPERSEDED — retired in the Gemini migration
+notes/router-design.md       SUPERSEDED — retired in the Gemini migration
+notes/face-renderer.md       v3 prototype — RoboEyes face renderer + GPL-3.0 rationale
+notes/motion-character.md    v3 prototype — eye-leads / head-follows gaze coupling
+notes/build-modes.md         v3 prototype — CONFIG_VOICE_ENABLED Kconfig gate
+notes/servo-motion-language.md  v3 prototype — SG90 driver + motion vocabulary
 CLAUDE.md                    project instructions for Claude Code agents
 firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
-├── main/                    application code:
-│   ├── main.c                state machine, button polling, OLED orchestration,
-│   │                         face_task (cat-face or RoboEyes), optional servo follower
-│   ├── app_state.h           app_state_t + ENABLE_OLED/MIC/WIFI subsystem toggles
-│   ├── oled.c/.h             SSD1306 driver (status panel + face panel multi-panel API)
-│   ├── cat_face.h            auto-gen pose tables — legacy face renderer
-│   ├── wifi.c/.h             WPA2-PSK or WPA2-Enterprise STA, Kconfig-selected
-│   ├── i2s_mic.c/.h          INMP441 → 16 kHz int16 ring buffer + STATS dump
-│   ├── vad.c/.h              peak-threshold VAD with cancel hook (M3)
-│   ├── http_client.c/.h      esp_http_client wrapper for /converse (M3 streaming)
-│   ├── listen_stream.c/.h    raw-socket /listen client + 500 ms pre-roll (M4)
-│   ├── wake_source.h         wake_source_t enum (VOICE / GESTURE / BUTTON / IR)
-│   ├── gesture.c/.h          M7 — HC-SR04 wave-to-wake (runtime-gated)
-│   ├── ir_remote.c/.h        M8 — NEC IR receiver via RMT-RX (runtime-gated)
-│   ├── control_state.c/.h    M8 — shared mute/snooze/cancel state with mutex
-│   └── Kconfig.projbuild     WiFi creds, server addr, API key, session id,
-│                             FACE_RENDERER choice, VOICE_ENABLED, GAZE_COUPLING_DEMO,
-│                             M7/M8 submenus
-├── components/              v3 bench-prototype components:
-│   ├── robo_eyes/            FluxGarage RoboEyes V1.1.1 port (GPL-3.0)
-│   └── servo/                ESP-IDF LEDC-based SG90 driver
-├── examples/
-│   └── servo_test/           standalone IDF project for isolated servo bench
-├── sdkconfig.defaults       committed defaults; idf.py menuconfig to fill creds
-├── partitions: built-in two-OTA layout (CONFIG_PARTITION_TABLE_TWO_OTA)
-└── .gitignore               build/, sdkconfig (creds), managed_components/, *.ref
+  ├── main/                  application code (state machine, OLED, WiFi, mic, VAD,
+  │                          HTTP, listen-stream, gesture, IR, control-state, Kconfig)
+  ├── components/            v3 bench-prototype components:
+  │   ├── robo_eyes/          FluxGarage RoboEyes V1.1.1 port (GPL-3.0)
+  │   └── servo/              ESP-IDF LEDC-based SG90 driver
+  ├── examples/
+  │   └── servo_test/         standalone IDF project for isolated servo bench
+  └── sdkconfig.defaults     committed defaults; idf.py menuconfig to fill creds
 ```
 
 ## Routes
@@ -333,9 +342,9 @@ firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
 | Route | Purpose |
 |---|---|
 | `GET /` | Streaming web client (Web Audio, VAD, continuous + interrupt) |
-| `GET /health` | `{status, mode, gpu_available, models_loaded, usage}` — `usage` is the per-process token counter + cost estimate |
+| `GET /health` | `{status, gpu_available, models_loaded, usage}` — `usage` is the per-process token counter + cost estimate |
 | `POST /transcribe` | Multipart `audio` → `{transcript, duration_s, latency_s, model, language}` |
-| `POST /chat` | JSON `{message, session_id?, force_route?}` → routed LLM reply |
+| `POST /chat` | JSON `{message, session_id?}` → Gemini reply |
 | `POST /speak` | JSON `{text}` → synth + blocking play through default output |
 | `POST /converse` | One-shot voice round-trip; server plays reply locally when `play_locally=true`. Accepts multipart, raw `audio/l16`, or raw `audio/wav` body. Add `?omit_audio_base64=1` to drop the WAV from the JSON response (saves ~100–200 KB per turn for clients that don't need it — used by the ESP-32 firmware) |
 | `POST /converse/stream` | SSE-streamed voice round-trip; client plays the audio. Accepts the same three Content-Types as `/converse`. The web client uses this |
@@ -343,131 +352,105 @@ firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
 
 When `API_KEY` is set, every route except `GET /` and `GET /health`
 requires an `X-API-Key` header. The web page persists the key in
-`localStorage`; `talk.py` and `jarvis.py` read it from the loaded `.env`.
+`localStorage`; `talk.py` and `jarvis.py` read it from the loaded
+`.env`.
 
 ### Upload formats
 
-`/converse` and `/converse/stream` accept three upload shapes, chosen by
-`Content-Type`:
+`/converse` and `/converse/stream` accept three upload shapes,
+chosen by `Content-Type`:
 
 - **`multipart/form-data`** — file in the `audio` part; params
-  (`force_route`, `session_id`, `play_locally`) in form fields. Used by
-  the browser client and `talk.py`.
-- **`audio/l16; rate=N; channels=N`** — raw int16 LE PCM in the body;
-  params in the query string. Skips WAV-wrapping on the client. Used by
-  the future ESP-WROOM-32 firmware (INMP441 captures int16 LE
-  natively).
-- **`audio/wav`** — pre-wrapped WAV in the body; params in the query
-  string. Useful for tiny clients with a WAV fixture in flash.
+  (`session_id`, `play_locally`) in form fields. Used by the browser
+  client and `talk.py`.
+- **`audio/l16; rate=N; channels=N`** — raw int16 LE PCM in the
+  body; params in the query string. Skips WAV-wrapping on the
+  client. Used by the ESP-WROOM-32 firmware (INMP441 captures int16
+  LE natively).
+- **`audio/wav`** — pre-wrapped WAV in the body; params in the
+  query string. Useful for tiny clients with a WAV fixture in flash.
 
-## What's shipped vs. planned
+## Firmware (ESP-WROOM-32)
 
-### Shipped
-- Original 7-stage local build (faster-whisper + Ollama + Piper +
-  Sonnet) — see [plan.md](plan.md)
-- Two-mode refactor — phases 1, 2, 3, 4, 6, 8 — see
-  [notes/two-mode-plan.md](notes/two-mode-plan.md)
-- Multi-turn sessions — all 5 phases (A–E) — see
-  [notes/sessions-plan.md](notes/sessions-plan.md)
-- **Voice-agent plan — all 6 milestones**: auto-titling, tool use,
-  streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
-  see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
+ESP-IDF v5.3.5 project at [`firmware/`](firmware/). **M1 through M8
++ cat-face panel all shipped on real hardware.**
 
-- **ESP-WROOM-32 firmware — M1 through M8 + cat-face panel all shipped
-  on real hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
   - **M1** — full module skeleton: SSD1306 OLED via
     `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
-    **WPA2-PSK or WPA2-Enterprise** (Kconfig choice; verified on WPA2-Enterprise
-    College's 802.1X dorm network with PEAP-MSCHAPv2), INMP441 mic
-    capture with RMS/peak response.
+    **WPA2-PSK or WPA2-Enterprise** (Kconfig choice; verified on
+    an 802.1X campus network with PEAP-MSCHAPv2), INMP441
+    mic capture with RMS/peak response.
   - **M2** — BOOT button → 3 s recording → `/converse` round-trip,
     workstation Realtek output speaks the reply. Preserved as a
     fallback under `#define M2_BUFFERED_FALLBACK`.
-  - **M3** — VAD-bounded recording (peak ≥ 200, silence dwell 2.5 s)
-    streamed over HTTP chunked-transfer — no heap cap on length.
-    Long-press BOOT (≥ 1 s) cancels mid-recording.
-  - **M4** — hands-free **"hey jarvis"** via server-side openWakeWord
-    over a long-lived chunked POST to `/listen`, with a 500 ms pre-roll
-    so the start of the question after the wake word isn't truncated.
-    BOOT button retained as a manual-wake fallback. Server hardened
-    with pre-warmed model, threaded mode, fast-fail request handler,
-    and lock-acquire timeouts so a wedged client connection can't lock
-    out other handlers.
+  - **M3** — VAD-bounded recording (peak ≥ 200, silence dwell
+    2.5 s) streamed over HTTP chunked-transfer — no heap cap on
+    length. Long-press BOOT (≥ 1 s) cancels mid-recording.
+  - **M4** — hands-free **"hey jarvis"** via server-side
+    openWakeWord over a long-lived chunked POST to `/listen`, with
+    a 1 s pre-roll so the start of the question after the wake
+    word isn't truncated. BOOT button retained as a manual-wake
+    fallback. Server hardened with pre-warmed model, threaded
+    mode, fast-fail request handler, and lock-acquire timeouts so
+    a wedged client connection can't lock out other handlers.
   - **M5** — **continuous mode after wake**. Once a turn finishes
     speaking, the device stays open for a follow-up — no re-wake
-    needed — for 30 s of silence (`WS_CONVERSATION_TIMEOUT_MS` in
-    `main.c`), then drops back to /listen. Mirrors `tests/jarvis.py`
-    Phase 6B.
-  - **M6** — OLED polish: 2-second boot card (IP / server /
-    wake model / session id), brief "WAKE / score N.NN" splash on
-    each wake event, and a SPEAKING screen that shows the model name +
-    per-call USD cost + token usage instead of truncated transcript
-    fragments. Cost comes from the server (`estimated_cost_usd` on
-    `/converse`) so pricing lives in one place; local Llama replies
-    print `cost  $0.0000`. *Note:* the M6 live VU bar was removed on
-    2026-05-10 as part of the audio-corruption fix (see below); the
-    cat-face panel's `?` stroke animation gives the same "I'm
-    listening" feedback without the per-frame I²C contention.
-  - **M7** — **HC-SR04 wave-to-wake** (opt-in alternative wake source).
-    Wave a hand 10 cm in front of the sensor — no speaking required.
-    Runtime-gated on `CONFIG_WAKE_GESTURE_ENABLED`. The wake-source
-    label appears on the OLED splash (VOICE / GESTURE / BUTTON / IR).
+    needed — for 30 s of silence
+    (`WS_CONVERSATION_TIMEOUT_MS` in `main.c`), then drops back
+    to /listen.
+  - **M6** — OLED polish: 2-second boot card, brief "WAKE / score
+    N.NN" splash on each wake event, and a SPEAKING screen that
+    shows the model name + per-call USD cost + token usage. Cost
+    comes from the server (`estimated_cost_usd` on `/converse`)
+    so pricing lives in one place. *Note:* the M6 live VU bar was
+    removed on 2026-05-10 as part of the audio-corruption fix;
+    the cat-face panel's `?` stroke animation gives the same
+    "I'm listening" feedback without per-frame I²C contention.
+  - **M7** — **HC-SR04 wave-to-wake** (opt-in alternative wake
+    source). Wave a hand 10 cm in front of the sensor — no
+    speaking required. Runtime-gated on
+    `CONFIG_WAKE_GESTURE_ENABLED`.
   - **M8** — **NEC IR remote** for mute / snooze / cancel (opt-in).
-    Mute closes the listening socket so the device stops responding
-    to ambient speech; snooze pauses both wake sources with a
-    countdown; cancel kills a turn mid-LISTENING or mid-SPEAKING.
-    Runtime-gated on `CONFIG_IR_ENABLED`; first-time setup learns the
-    NEC codes from the serial log.
+    Runtime-gated on `CONFIG_IR_ENABLED`; first-time setup learns
+    the NEC codes from the serial log.
   - **Cat-face OLED panel** (2026-05-10) — a second SSD1306 128×64
-    panel on a separate I²C bus (bus 1, GPIO 16/17) renders an
-    animated cat mascot synchronized to the app state machine. IDLE
-    blinks, LISTENING traces `?`, THINKING cycles dots, SPEAKING
-    smiles with mouth pulse. Graceful if the second panel isn't
-    wired — logs a warning and continues.
+    panel on a separate I²C bus renders an animated cat mascot
+    synchronized to the app state machine.
   - **Audio-corruption diagnosis + fix** (2026-05-10) — a chronic
-    "frames recycled mid-LISTENING" issue (originally misdiagnosed as
-    weak WiFi) was root-caused via an acoustic loopback control
-    experiment to per-frame `oled_flush_row()` I²C contention from
-    the LISTENING VU bar. Removing the bar dropped frame-recycle
-    from 16.5% → 0.0% across matched test runs. Device now sustains
-    arbitrarily long continuous-chat sessions cleanly.
-  - **Multi-turn memory** — firmware passes `?session_id=esp32` on
-    `/converse`, so wakes (and follow-ups within continuous mode)
-    remember context (10 min idle TTL by default).
-
-### Planned but not shipped
-- **Router improvements** — short queries (e.g. `"1+1"`) misroute to
-  complex. Tiered investigation + plan documented at the top of
-  [server/router.py](server/router.py); not started yet.
-- **Two-mode plan phases 5, 7, 9** — Deepgram STT, OpenAI TTS, Fly.io
-  deploy. Queued behind cloud-provider signups. Only relevant if you
-  ever want to host the brain on a VPS instead of your workstation.
-- **ElevenLabs Flash v2 TTS** — optional premium voice swap (footnote
-  in voice-agent-plan).
-
-See [`CLAUDE.md`](CLAUDE.md) and the per-plan docs in [`notes/`](notes/)
-for the full roadmap and decisions log.
+    "frames recycled mid-LISTENING" issue (originally misdiagnosed
+    as weak WiFi) was root-caused to per-frame `oled_flush_row()`
+    I²C contention from the LISTENING VU bar. Removing the bar
+    dropped frame-recycle from 16.5 % → 0.0 % across matched
+    runs. Device now sustains arbitrarily long continuous-chat
+    sessions cleanly.
+  - **Multi-turn memory** — firmware passes `?session_id=esp32`
+    on `/converse`, so wakes (and follow-ups within continuous
+    mode) remember context (10 min idle TTL by default).
 
 ## Why this exists
 
-Built as the server side of an eventual ESP-32 voice device — a small,
-always-on, internet-connected button that talks to you. The codebase is
-structured so the hardware client doesn't need to do anything clever:
-post audio, get audio back. Two-mode architecture lets the same server
-run on a workstation with a GPU OR (eventually) on a cheap VPS,
-depending on whether you're willing to pay for cloud STT/TTS in
-exchange for not running a 24/7 GPU machine.
+Built as the server side of an eventual ESP-32 voice device — a
+small, always-on, internet-connected button that talks to you. The
+codebase is structured so the hardware client doesn't need to do
+anything clever: post audio, get audio back.
 
-It's also a pretty nice way to talk to Claude.
+The original architecture sat a two-LLM router (Llama for cheap
+queries, Claude for hard ones) on top of a two-mode (local vs
+cloud) split. In practice both the routing decision and the cloud
+mode never paid off enough to justify the complexity, so the
+project was simplified to single-LLM Gemini 2.5 Flash in May 2026.
+The repo carries the result of that work — see "Migration history"
+above, the `pre-ollama-removal` git tag for the previous state.
 
 ## License
 
 GPL-3.0-or-later — see [LICENSE](LICENSE). The repo entered GPL-3.0
 when [firmware/components/robo_eyes/](firmware/components/robo_eyes/),
-a port of [FluxGarage RoboEyes V1.1.1](https://github.com/FluxGarage/RoboEyes)
+a port of
+[FluxGarage RoboEyes V1.1.1](https://github.com/FluxGarage/RoboEyes)
 by Dennis Hoelscher, was added as the v3-prototype face renderer.
-Building the firmware with the default `CONFIG_FACE_RENDERER_ROBO_EYES`
-produces a binary covered by GPL-3.0. The original cat-face renderer
-remains in tree as the alternative (`CONFIG_FACE_RENDERER_CAT_FACE`),
-but the source tree itself ships GPL code regardless of which renderer
-you build with.
+Building the firmware with the default
+`CONFIG_FACE_RENDERER_ROBO_EYES` produces a binary covered by
+GPL-3.0. The original cat-face renderer remains in tree as the
+alternative (`CONFIG_FACE_RENDERER_CAT_FACE`), but the source tree
+itself ships GPL code regardless of which renderer you build with.

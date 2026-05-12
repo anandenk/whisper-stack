@@ -10,35 +10,40 @@
 > "repository not found," run `git remote set-url origin <new-url>`.
 
 Workstation backend for a future ESP-32 + INMP441 voice device. Pipeline:
-**audio → STT → router → simple-LLM or complex-LLM → TTS → speaker + ESP-32 OLED**.
+**audio → STT → Gemini 2.5 Flash (+ tools) → streaming TTS → speaker + ESP-32 OLED**.
 
-The seven local-mode stages all shipped (see "Stage status" below). The
-codebase is now split into a backend abstraction so a single `MODE` env
-var picks the implementation set at process boot (see "MODE: local vs
-cloud"). Original 7-stage plan: [plan.md](plan.md). Two-mode refactor
-plan: [notes/two-mode-plan.md](notes/two-mode-plan.md).
+The seven original build stages shipped, then in **May 2026** the
+project was simplified from a two-LLM routed architecture (Ollama +
+Claude with an embedding router on top) plus a two-mode (local vs
+cloud) split into a single-LLM Gemini 2.5 Flash stack. The
+six-commit migration is documented in the git log (`gemini migration
+(N/6)`); the `pre-ollama-removal` git tag bookmarks the last commit
+with the multi-LLM stack — see "Ollama resurrection" below if you
+ever need any of it back. Original 7-stage plan:
+[plan.md](plan.md). Both `notes/two-mode-plan.md` and
+`notes/router-design.md` are now **SUPERSEDED**.
 
 ## Environment
 
 - **Working dir:** `C:\voice-ai-server` (local checkout still uses the pre-rename name; everything else — repo, docs, build commands — uses `whisper-stack`. The rename header at the top of this file describes the gap. Mentally substitute when you read build recipes that say `cd C:\whisper-stack\...`.)
 - **Venv:** `.venv` — **Python 3.13.13** (the system `python` is 3.14, which lacks ML wheels — do NOT use it)
 - **Run scripts directly via** `.venv/Scripts/python.exe tests/stageN_*.py` (or activate the venv first)
-- **GPU:** RTX 5070 Ti **Laptop**, Blackwell `sm_120`, 12 GB VRAM
-- **Ollama** running on `http://localhost:11434`, model `llama3.1:8b-instruct-q5_K_M` pre-pulled
+- **GPU:** RTX 5070 Ti **Laptop**, Blackwell `sm_120`, 12 GB VRAM (Whisper turbo takes ~2 GB; the LLM is hosted now so the rest is free).
+- **Gemini API:** `GOOGLE_API_KEY` in `.env`. Free tier covers casual use (20 req/day on `gemini-2.5-flash`); enable paid in Google Cloud Console for sustained use ($0.30 in / $2.50 out per 1M tokens — pennies per voice turn).
 
 ## Stage status
 
 | # | Stage | State |
 |---|---|---|
 | 1 | faster-whisper GPU | ✅ verified — RTF ~7.8x, `tests/stage1_whisper.py` |
-| 2 | Ollama Llama 3.1 8B | ✅ verified — ~90 TPS, 100% GPU, `tests/stage2_ollama.py` |
-| 3 | Anthropic API smoke | ✅ verified — `claude-sonnet-4-6`, ~1.8s, `tests/stage3_anthropic.py` |
-| 4 | Flask `/transcribe` + `/chat` + `/health` | ✅ verified — warm transcribe ~0.4s, chat ~1.5s, `tests/stage4_flask.py` |
-| 5 | Router + dual-LLM `/chat` | ✅ verified — embedding similarity, ~30ms classify, both models VRAM-resident, `tests/stage5_router.py` |
+| 4 | Flask `/transcribe` + `/chat` + `/health` | ✅ verified — warm transcribe ~0.4s, chat ~1.0s, `tests/stage4_flask.py` |
 | 6 | Piper TTS + `/speak` | ✅ verified — 22050 Hz mono, RTF 37x warm, `tests/stage6_tts.py` |
-| 7 | `/converse` end-to-end | ✅ verified — full pipeline 1.1–3.6s, `tests/stage7_e2e.py` |
+| 7 | `/converse` end-to-end | ✅ verified — full pipeline 1.1–3.6s, `tests/stage7_e2e.py` (route-free after Gemini migration) |
+| G | Gemini 2.5 Flash SDK smoke | ✅ verified — chat, function calling, `google_search`, streaming, `tests/stage_gemini.py` |
 
-Each stage leaves a re-runnable smoke test in `tests/`.
+Stages 2 (Ollama), 3 (Anthropic), and 5 (router) were retired in the
+Gemini migration. Each surviving stage leaves a re-runnable smoke
+test in `tests/`.
 
 ## Plans (read these before starting work)
 
@@ -47,9 +52,10 @@ risks. Don't merge them — they reflect distinct chunks of work at
 different statuses.
 
 - [plan.md](plan.md) — original 7-stage local-mode build. **Shipped.**
-- [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor (one codebase, two deploy shapes). **Phases 1, 2, 3, 4, 6, 8 shipped; 5 (Deepgram STT), 7 (OpenAI TTS), 9 (Fly.io deploy) queued behind cloud signups.**
-- [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **All 5 phases (A-E) shipped.** Set `VOICE_AI_SESSION_ID` for talk.py, type a session ID into the web client's Session field, or pass `session_id` form/JSON field on `/converse` / `/chat` to opt in. Absent = stateless, default behavior preserved.
-- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI; `tests/jarvis.py` is the workstation wake-word client (`pip install openwakeword` + download the bundled models, then say "hey jarvis"). `web_search` stays disabled until `TAVILY_API_KEY` is set.
+- [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor. **SUPERSEDED** by the Gemini migration (May 2026); single-mode now.
+- [notes/router-design.md](notes/router-design.md) — embedding-similarity router design + Tier 1 history. **SUPERSEDED** — router removed in the Gemini migration.
+- [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **All 5 phases (A-E) shipped.** Set `VOICE_AI_SESSION_ID` for talk.py, type a session ID into the web client's Session field, or pass `session_id` form/JSON field on `/converse` / `/chat` to opt in. Absent = stateless, default behavior preserved. Note: the `route=` field in the assistant meta line is no longer written (Gemini migration); the parser keeps an optional capture group so old session files still load.
+- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI; `tests/jarvis.py` is the workstation wake-word client (`pip install openwakeword` + download the bundled models, then say "hey jarvis"). Web search is now provided by Gemini's built-in `google_search` grounding — no third-party (Tavily) account needed.
 - [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md) — port `tests/jarvis.py`'s shape onto **ESP-WROOM-32 + INMP441 + SSD1306 OLED**. **All 8 milestones shipped on real hardware**: M1 bring-up, M2 button + buffered `/converse`, M3 VAD streaming, M4 server-side openWakeWord via `POST /listen`, M5 continuous mode after wake, M6 OLED polish (boot card + wake splash + VU bar + speaking screen). Plus M7 (HC-SR04 wave-to-wake), M8 (NEC IR remote for mute/snooze/cancel), and the cat-face OLED on I²C bus 1. Device is mic + display + WiFi only — TTS plays through the workstation's pinned Realtek output via `play_locally=true` on `/converse`. No on-device audio out (no I²S DAC, no audio playback task, no PCM queue). On-device esp-skainet wake word remains deferred to v2 hardware (needs PSRAM). The audio-corruption diagnosis (gotcha #9 below) localized a chronic mic-frame recycle issue to the LISTENING VU bar's per-frame I²C contention and removed it; firmware is now stable for arbitrarily long continuous chat.
 - **v3 prototype notes (early — hardware not yet finalized or ordered):**
   - [notes/build-modes.md](notes/build-modes.md) — the `CONFIG_VOICE_ENABLED` Kconfig switch that gates the entire voice path so display/servo iteration doesn't compete with the wake-word stream.
@@ -57,35 +63,58 @@ different statuses.
   - [notes/motion-character.md](notes/motion-character.md) — the eye-leads / head-follows gaze coupling architecture: RoboEyes drives the eyes autonomously, a small follower task reads `robo_eyes_get_eye_x_angle()` every 50 ms and commands the SG90 servo over an 800 ms eased move. Gated behind `CONFIG_GAZE_COUPLING_DEMO` (default `n`).
   - [notes/servo-motion-language.md](notes/servo-motion-language.md) — the SG90 servo's motion vocabulary, LEDC config, easing curves, and the standalone `firmware/examples/servo_test/` IDF project for isolated bench iteration.
 
-## MODE: local vs cloud
+## Stack
 
-The server picks one backend set at process boot via the `MODE` env var
-(default `local`). One process = one mode; no runtime switching.
+Single LLM, local STT/TTS, no routing layer. One install profile,
+one set of dependencies, one way the system runs.
 
-| | `MODE=local` (workstation) | `MODE=cloud` (VPS) |
+| Stage | Implementation | Notes |
 |---|---|---|
-| STT | faster-whisper (GPU) | Deepgram nova-3 *(Phase 5 — pending)* |
-| Simple LLM | Ollama Llama 3.1 8B | Claude Haiku 4.5 |
-| Complex LLM | Claude Sonnet 4.6 | Claude Sonnet 4.6 |
-| TTS | Piper (local synth + sounddevice play) | OpenAI tts-1 (PCM, no local play) *(Phase 7 — pending)* |
-| Router embedder | Ollama nomic-embed-text | sentence-transformers MiniLM-L6-v2 |
-| Audio playback | yes (system default output) | no-op (server has no audio device) |
+| STT | faster-whisper (local GPU) | `WhisperLocalSTT` in `server/backends/stt_whisper.py` |
+| LLM | Gemini 2.5 Flash (cloud) | `GeminiLLM` in `server/backends/llm_gemini.py` via the `google-genai` SDK |
+| TTS | Piper (local) | `PiperTTS` in `server/backends/tts_piper.py` |
+| Tools | `get_current_time` (custom) + `google_search` (built-in) | Mutually exclusive per Gemini call; picked by `_select_tools()` in `server/app.py` |
+| Audio playback | sounddevice → system default output | `play_locally=true` on `/converse` |
 
-The factory in [server/modes.py](server/modes.py) returns the right
-backend per call — `modes.get_stt()`, `modes.get_llm("simple"|"complex")`,
-`modes.get_tts()`, `modes.get_embedder()`. Backend imports live INSIDE the
-factory branches so cloud-mode boot doesn't pay the faster-whisper DLL
-bootstrap and local-mode boot doesn't pay the ~250 MB torch import.
+The factory in [server/modes.py](server/modes.py) returns each backend
+as a singleton: `modes.get_stt()`, `modes.get_llm()`, `modes.get_tts()`.
+The LLM factory is no-arg now (the `route` parameter was retired with
+the routing layer).
 
-Cloud-only branches that aren't wired yet raise `NotImplementedError`
-naming the phase that adds them. See [notes/two-mode-plan.md](notes/two-mode-plan.md)
-for the full plan.
+## Ollama resurrection
 
-`/health` reports `mode` so clients can confirm what they're talking to.
+If you ever need the pre-migration multi-LLM stack back — to test
+something LLM-related when Gemini is rate-limited, to compare model
+quality, or because you're rebuilding the project on a different
+LLM — the relevant files are recoverable from a git tag:
 
-Local-mode install uses the existing setup. Cloud-mode install uses
-[requirements-cloud.txt](requirements-cloud.txt) — slim, no GPU, no Piper,
-no faster-whisper.
+```powershell
+git tag --list pre-ollama-removal           # confirm the tag exists
+git show pre-ollama-removal --stat | head   # see what's in that commit
+
+# Restore the deleted backend files
+git show pre-ollama-removal:server/backends/llm_ollama.py    > server/backends/llm_ollama.py
+git show pre-ollama-removal:server/backends/llm_claude.py    > server/backends/llm_claude.py
+git show pre-ollama-removal:server/backends/embed_ollama.py  > server/backends/embed_ollama.py
+git show pre-ollama-removal:server/router.py                 > server/router.py
+git show pre-ollama-removal:server/tools/search.py           > server/tools/search.py
+git show pre-ollama-removal:tests/stage2_ollama.py           > tests/stage2_ollama.py
+git show pre-ollama-removal:tests/stage3_anthropic.py        > tests/stage3_anthropic.py
+git show pre-ollama-removal:tests/stage5_router.py           > tests/stage5_router.py
+
+# Re-add OLLAMA_HOST / OLLAMA_MODEL / EMBED_MODEL / ANTHROPIC_API_KEY /
+# ROUTER_MARGIN_S / TAVILY_API_KEY entries to server/config.py.
+# Re-add `anthropic` + `sentence-transformers` (if cloud embedder needed)
+# to requirements.txt.
+# Re-add the `from server.tools import search as _search` line to
+# server/tools/__init__.py.
+
+# Re-wire modes.py to return Ollama/Claude. Use the version at the tag
+# as a reference: git show pre-ollama-removal:server/modes.py | less
+```
+
+Realistic time-to-resurrect: ~10 minutes. The tag is permanent on
+origin (pushed during the migration), so this works from any clone.
 
 ## Stage gates
 
@@ -105,23 +134,6 @@ milestone would have failed its smoke test and the regression would have
 been caught at the source.
 
 ## Known issues / TODO
-
-- **Router Tier 1 shipped 2026-05-10.** The 95-query held-out fixture
-  ([tests/router_eval.py](tests/router_eval.py)) now scores **85.3%
-  at production margin 0.03** (up from 68.4% at the original 0.05),
-  with **only 4 under-routings** (false-simple — the asymmetric error)
-  vs 8 before. Eight of twelve categories at 100%; remaining failures
-  are mostly judgment-call borderlines and a few `quick_lookup` items
-  hugging the threshold. Tier 1 changes: lowered `ROUTER_MARGIN_S`
-  default 0.05 → 0.03; added regex shortcut for pure arithmetic +
-  single-word queries (zero-latency bypass); curated SIMPLE/COMPLEX
-  example sets for the weak neighborhoods. Re-run
-  `python tests/router_eval.py` after any router change to confirm
-  no regression. Tier 3 (LLM classifier) is **explicitly deferred**
-  — Tier 1 plateaued at a comfortable number, and the LLM tax
-  (~150 ms per turn, doubles cloud token spend) is hard to justify
-  for the remaining ~15 pp of headroom against mostly-borderline
-  failures.
 
 - **Audio corruption root-cause FIXED 2026-05-10.** Localized via the
   acoustic loopback control experiment (see gotcha #9 + commit `5695da9`
@@ -161,13 +173,13 @@ been caught at the source.
 
 2. **Cold-start penalty ~6s on whisper** due to `sm_120` PTX JIT compile. Stage 4 server needs a warmup call at startup.
 
-3. **VRAM budget is tight.** Whisper turbo (~2 GB) + Llama 8B Q5_K_M (~6 GB) ≈ 8.4 GB of 12 GB hot. ~3.5 GB headroom — acceptable, but don't add a third large model casually.
+3. **VRAM budget is comfortable post-migration.** Whisper turbo (~2 GB) of 12 GB hot — no other model competes for VRAM now that Llama and the embedder are gone. Any future GPU-resident model has ~10 GB of headroom.
 
 4. **Bluetooth audio adds 150–300 ms latency.** Calibrate stage 7 expectations accordingly.
 
-5. **`load_dotenv()` must use `override=True`.** An empty `ANTHROPIC_API_KEY=` is set somewhere in the user's Windows environment; the default `load_dotenv()` call refuses to overwrite it, so the real key in `.env` is silently ignored. Always: `load_dotenv(REPO_ROOT / ".env", override=True)`. Pattern is in `tests/stage3_anthropic.py`.
+5. **`load_dotenv()` must use `override=True`.** An empty `GOOGLE_API_KEY=` (or `ANTHROPIC_API_KEY=`, historically) can be set somewhere in the user's Windows environment; the default `load_dotenv()` call refuses to overwrite it, so the real key in `.env` is silently ignored. Always: `load_dotenv(REPO_ROOT / ".env", override=True)`. Pattern is at the top of `server/config.py` and `tests/stage_gemini.py`.
 
-6. **Use `127.0.0.1`, never `localhost`, for Ollama / any local HTTP.** On this Windows box, `localhost` resolution adds ~2 seconds per request (IPv6/DNS fallback). Ollama itself is fast — `total_duration` reports 15ms — but the client wall-clock is 2050ms. Discovered at stage 5: classify latency was 2050ms with `localhost`, dropped to 30ms with `127.0.0.1`. Default in `server/config.py:OLLAMA_HOST` is `http://127.0.0.1:11434`.
+6. **Use `127.0.0.1`, never `localhost`, for any local HTTP on Windows.** Localhost resolution adds ~2 seconds per request (IPv6/DNS fallback). Originally discovered with Ollama during the stage 5 router work — classify latency was 2050 ms with `localhost`, dropped to 30 ms with `127.0.0.1`. Ollama is gone now but the lesson stays: bind/connect on `127.0.0.1` for any local service, never `localhost`.
 
 7. **Audio gain pipeline lives on the server, not the device.** INMP441 +
    the firmware's natural `>>16` 24→16-bit conversion produces
@@ -334,40 +346,50 @@ been caught at the source.
 ```
 .venv/                       Python 3.13 virtualenv
 samples/jfk.wav              11s public-domain STT fixture
-models/piper/                Piper voice .onnx + .json (local-mode TTS)
-tests/stageN_*.py            per-stage local-mode smoke tests
-tests/cloud_*.py             cloud-backend smoke tests (Phase 5/6/7/8)
+models/piper/                Piper voice .onnx + .json
+tests/stageN_*.py            per-feature smoke tests
+tests/stage_gemini.py        Gemini SDK smoke (chat, tools, search, streaming)
 tests/talk.py                push-to-talk client
+tests/jarvis.py              wake-word client
 server/
 ├── app.py                   Flask routes; main() warms each backend via modes
-├── config.py                env loading + MODE validation
-├── modes.py                 factory: get_stt/get_llm/get_tts/get_embedder
-├── protocols.py             STT / LLM / TTS / Embedder Protocols
-├── router.py                embedding-similarity classifier; embedder injected
+├── config.py                env loading (Gemini key, Whisper, Piper, sessions)
+├── modes.py                 factory: get_stt / get_llm / get_tts
+├── protocols.py             STT / LLM / TTS Protocols
 ├── markdown.py              to_speakable_text (markdown/LaTeX stripper)
-├── audio.py                 pcm_to_wav, synth_to_wav (mode-independent)
-├── audio_out.py             local sounddevice playback; cloud no-op
-├── web/index.html           browser/phone client
+├── audio.py                 pcm_to_wav, synth_to_wav
+├── audio_out.py             sounddevice playback (TTS_OUTPUT_DEVICE pin)
+├── sessions.py              markdown session store (route= field retired,
+│                            parser still accepts old files)
+├── titler.py                Gemini-backed session auto-titling
+├── streaming.py             SentenceChunker for streaming TTS pipeline
+├── usage.py                 per-process token / cost accumulator (Gemini pricing)
+├── tools/
+│   ├── __init__.py          registry + register_tool / all_tools / get_tool
+│   ├── base.py              Tool dataclass + to_anthropic / to_ollama
+│   │                        (legacy schema methods still here for the
+│   │                        Ollama-resurrection recipe to work; ignored by
+│   │                        GeminiLLM, which inlines its own conversion)
+│   └── time.py              get_current_time tool (server-side, free)
+├── wakeword.py              server-side openWakeWord wrapper for POST /listen
+├── web/index.html           browser/phone client (streaming + VAD + continuous)
 └── backends/
-    ├── stt_whisper.py       local — WhisperLocalSTT (+ DLL bootstrap)
-    ├── llm_ollama.py        local-simple — OllamaLLM
-    ├── llm_claude.py        both — ClaudeLLM(model=Sonnet | Haiku)
-    ├── tts_piper.py         local — PiperTTS
-    ├── embed_ollama.py      local — OllamaEmbedder (nomic-embed-text)
-    └── embed_st.py          cloud — SentenceTransformerEmbedder (MiniLM-L6)
-plan.md                      original 7-stage build plan
-notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
+    ├── stt_whisper.py       WhisperLocalSTT (+ NVIDIA DLL bootstrap)
+    ├── llm_gemini.py        GeminiLLM (chat + chat_stream + tool dispatch)
+    └── tts_piper.py         PiperTTS
+plan.md                      original 7-stage build plan (historical)
 notes/sessions-plan.md       multi-turn session memory (A–E shipped)
 notes/voice-agent-plan.md    streaming TTS / VAD / continuous / wake (1–6 shipped)
 notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1–M8 shipped)
+notes/two-mode-plan.md       SUPERSEDED by the Gemini migration (May 2026)
+notes/router-design.md       SUPERSEDED by the Gemini migration (May 2026)
 notes/build-modes.md         v3 prototype — CONFIG_VOICE_ENABLED Kconfig gate
-notes/face-renderer.md       v3 prototype — RoboEyes face renderer + GPL-3.0 rationale
+notes/face-renderer.md       v3 prototype — RoboEyes face renderer + GPL-3.0
 notes/motion-character.md    v3 prototype — eye-leads / head-follows gaze coupling
 notes/servo-motion-language.md  v3 prototype — SG90 driver + motion vocabulary
-notes/router-design.md       router classifier design + Tier 1 history
 notes/network-diagnosis-summary.md  throughput-test reconstruction recipe
 notes/loopback-test-results.md  acoustic loopback control experiment (gotcha #9)
-requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
+requirements.txt             single consolidated install profile
 LICENSE                      GPL-3.0 (entered the project with the RoboEyes port)
 firmware/                    ESP-IDF v5.3.5 project (M1–M8 shipped + cat-face panel)
 ├── main/                    application code:
@@ -435,10 +457,12 @@ below — landed later that same day). State of the device:
   model / session id; brief "WAKE / score N.NN" splash on each wake
   event (200 ms hold); SPEAKING screen shows model name + per-call
   USD cost + token usage instead of truncated transcript chunks.
-  Cost comes from the server via a new `estimated_cost_usd` field
-  on `/converse` (computed from `usage.estimated_cost_usd()` so
-  prices live in one place). Local Llama replies show `cost  $0.0000`;
-  Sonnet/Haiku show real per-turn cost. *Note:* the M6 live VU bar
+  Cost comes from the server via the `estimated_cost_usd` field on
+  `/converse` (computed from `usage.estimated_cost_usd()` so prices
+  live in one place). Every turn now shows a real per-turn cost since
+  the LLM is hosted (Gemini 2.5 Flash); the historical zero-cost case
+  for local Llama is gone with the Gemini migration. *Note:* the M6
+  live VU bar
   on LISTENING was removed on 2026-05-10 (commit `5695da9`) — see
   gotcha #9. The cat-face panel's `?` stroke gives the same "I'm
   listening" feedback without the per-frame I²C contention that
@@ -785,17 +809,20 @@ Warmup runs at boot (~10s on cold start to amortize PTX JIT). Disable with `WARM
 
 Routes:
 - `GET /` — self-contained streaming web client (records on phone, plays in-browser via Web Audio; VAD + continuous + interrupt modes built in)
-- `GET /health` — model load status, `mode`, per-process `usage` block (tokens + USD-cost-since-boot)
+- `GET /health` — `{status, gpu_available, models_loaded, usage}`. `usage` is the per-process token counter + USD-cost-since-boot.
 - `POST /transcribe` — multipart `audio` → `{transcript, duration_s, latency_s, model, language}`
-- `POST /chat` — JSON `{message, session_id?, force_route?}` → router-dispatched LLM reply with `route`, `router_scores`
+- `POST /chat` — JSON `{message, session_id?}` → Gemini reply with `{reply, model, latency_s, input_tokens, output_tokens, stop_reason, tools_used?}`.
 - `POST /speak` — JSON `{text}` → synth + blocking play through default output
-- `POST /converse` — one-shot voice round-trip → STT → router → LLM → TTS → JSON with `transcript`, `route`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, `estimated_cost_usd`, plus non-blocking local playback. Accepts three upload shapes by `Content-Type`: `multipart/form-data` (params in form fields), `audio/l16; rate=N; channels=N` (raw int16 LE, params in query string — used by the ESP-32 firmware), or `audio/wav`. Add `?omit_audio_base64=1` to drop the WAV from the JSON (saves 100–200 KB per turn for firmware clients).
-- `POST /converse/stream` — SSE-streamed voice round-trip; the client plays the audio as PCM chunks arrive. Accepts the same three Content-Types as `/converse`. The web client uses this for sentence-by-sentence playback.
+- `POST /converse` — one-shot voice round-trip → STT → Gemini → TTS → JSON with `transcript`, `model`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, `llm_tokens`, `estimated_cost_usd`, plus non-blocking local playback. Accepts three upload shapes by `Content-Type`: `multipart/form-data` (params in form fields), `audio/l16; rate=N; channels=N` (raw int16 LE, params in query string — used by the ESP-32 firmware), or `audio/wav`. Add `?omit_audio_base64=1` to drop the WAV from the JSON (saves 100–200 KB per turn for firmware clients).
+- `POST /converse/stream` — SSE-streamed voice round-trip; the client plays the audio as PCM chunks arrive. Event types: `ready`, `transcript`, `model`, `text`, `tool_call`, `tool_result`, `audio`, `final`, `error`. Accepts the same three Content-Types as `/converse`. The web client uses this for sentence-by-sentence playback.
 - `POST /listen` — chunked-transfer raw int16 LE @ 16 kHz body; server runs openWakeWord and returns `{"wake": true, ...}` on detection (or `{"wake": false, "reason": "idle_timeout"|"client_closed"|"busy"}`). Long-lived, full-duplex pattern — see "M4 / wake-word gotchas" below. Used by `tests/jarvis.py` and by the ESP-32 firmware in IDLE state. Requires `pip install openwakeword` + `openwakeword.utils.download_models()` on the server.
 
 `CONVERSE_MAX_TOKENS=96` caps voice replies so they don't turn into 30s monologues. Tune via env.
 
-`/health` includes `mode` (`local`|`cloud`) and `models_loaded` (per-backend `is_loaded()` snapshot).
+**Tool selection.** `_select_tools()` in `server/app.py` picks one tool config per turn (Gemini 2.5 refuses to combine custom function declarations with `google_search` in a single request):
+- Query matches a time phrase (`"what time"`, `"time in "`, etc.) → register the `get_current_time` tool, no search.
+- Query matches a current-info keyword (`weather`, `news`, `today`, `current`, …) → enable `google_search` grounding, no custom tools.
+- Otherwise → bare chat, no tools.
 
 ## Talking to it (push-to-talk client)
 

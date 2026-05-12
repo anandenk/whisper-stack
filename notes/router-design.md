@@ -1,5 +1,13 @@
 # Router design — stage 5a
 
+> **⚠ SUPERSEDED — May 2026.** The two-LLM routing layer was retired
+> during the Gemini migration. The codebase now sends every query to
+> a single LLM (Gemini 2.5 Flash). This doc and the Tier 1 history it
+> describes are kept as a historical record of the routing approach
+> that preceded the migration. See `CLAUDE.md` § "Stack" for the
+> current shape and § "Ollama resurrection" if you ever need the
+> pre-migration backends + router back.
+
 **Goal:** Given a transcript, decide whether to send it to local Llama 3.1 8B (`simple`) or to Claude (`complex`). Wrong routes have **asymmetric cost**:
 
 - `complex → simple` (under-routed): Llama gives a weak answer to a question it can't handle. **High user-visible cost.**
