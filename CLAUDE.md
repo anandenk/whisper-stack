@@ -423,15 +423,44 @@ tests/oled_dump_c.py         regenerate firmware/main/cat_face.h from poses
 tools/                       diagnostic helpers (throughput_sink, serial_capture, loopback)
 ```
 
-## Firmware (ESP-WROOM-32)
+## Firmware (ESP32-S3-DevKitC-1 N8R8)
 
-ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 through M8 all shipped + cat-face OLED** (M5
-+ M6 both landed in the same workstation session 2026-05-06:
+ESP-IDF v5.3.5 project at `firmware/`. Build target is **`esp32s3`**
+(LX7 + octal PSRAM). v2-M1 (2026-05-12) migrated the WROOM-32 v1
+firmware to the S3-DevKitC-1 with N8R8 module (8 MB flash, 8 MB
+octal PSRAM). The pre-migration WROOM-32 build is preserved at git
+tag `pre-esp32-s3-port` — check that tag out to rebuild for the
+original DOIT V1 board. **M1 through M8 all shipped + cat-face OLED**
+(M5 + M6 both landed in the same workstation session 2026-05-06:
 continuous chat, then OLED polish — boot card, wake splash, live
 VU bar, model+tokens speaking screen. M7 + M8 + cat-face all shipped
 2026-05-10. Audio-corruption diagnosis and fix — gotcha #9
-below — landed later that same day). State of the device:
+below — landed later that same day). All of the above features
+ported forward to the S3 in v2-M1.
+
+### Pin map (locked, ESP32-S3-DevKitC-1 N8R8)
+
+S3 unavailable GPIOs: **22–25 don't exist on the package** (chip
+GPIOs are 0-21, 26-48); **26–37 are claimed by SPI flash + octal
+PSRAM** and must not be repurposed; **19–20 are USB-OTG D-/D+**,
+leave free for the native USB port; **45/46 are strapping pins**,
+avoid for digital inputs that float. All v1 (WROOM-32) GPIO
+assignments except BOOT had to move.
+
+| Signal | GPIO | Notes |
+|---|---|---|
+| BOOT button | 0 | on-board, unchanged from v1 |
+| INMP441 BCK | 4 | was 26 on v1 |
+| INMP441 WS  | 5 | was 25 on v1 |
+| INMP441 DIN | 6 | was 33 on v1 |
+| OLED status SDA | 7 | was 21 on v1 |
+| OLED status SCL | 15 | was 22 on v1 (GPIO 22 doesn't exist on S3) |
+| OLED face SDA | 16 | unchanged from v1 |
+| OLED face SCL | 17 | unchanged from v1 |
+| **Reserved — MAX98357A BCK / LRC / DIN** | 9 / 10 / 11 | for v2-M3 on-device audio out |
+| **Reserved — battery ADC (LiPo)** | 1 or 2 | for v2-M4 charging-board monitor |
+
+State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
@@ -686,9 +715,28 @@ $env:PATH = "C:\Espressif\python_env\idf5.3_py3.11_env\Scripts;$env:PATH"
 ```powershell
 cd C:\voice-ai-server\firmware
 idf.py build
-idf.py -p COM3 flash       # COM port from Device Manager — was COM3 on this box
-idf.py -p COM3 monitor     # interactive serial; Ctrl-T then Ctrl-X to exit
+idf.py -p COMn flash       # COM port from Device Manager. v1 (WROOM-32) was
+                           # COM3 via CP210x; v2 DevKitC-1 enumerates two ports
+                           # (UART + native USB) — flash via the UART one.
+idf.py -p COMn monitor     # interactive serial; Ctrl-T then Ctrl-X to exit
 ```
+
+**First-time S3 setup** (only after a fresh checkout or after
+`idf.py fullclean` blew away `sdkconfig`):
+
+```powershell
+cd C:\voice-ai-server\firmware
+idf.py set-target esp32s3       # regenerates sdkconfig from sdkconfig.defaults
+idf.py menuconfig               # enter WiFi creds (Whisper Stack Device menu)
+                                # + server host + API key + session id
+idf.py build
+```
+
+`set-target` is required after `fullclean` because the IDF stores
+the chip target in `sdkconfig`, and the regenerated defaults only
+hint at the target via `CONFIG_IDF_TARGET="esp32s3"`. If you skip
+the explicit `set-target` step, `idf.py build` will fail with
+"Project sdkconfig is for esp32 target, but esp32s3 was specified".
 
 Subsystem toggles in `firmware/main/app_state.h`:
 `ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`. Each subsystem's `_init`

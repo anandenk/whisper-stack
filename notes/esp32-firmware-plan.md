@@ -55,6 +55,17 @@ queue.** The device ignores `audio_base64` on `/converse` responses
 
 ### Pin map (locked, DOIT ESP32 DEVKIT V1)
 
+> **⚠ Superseded by v2 (2026-05-12).** The hardware migrated to
+> **ESP32-S3-DevKitC-1 N8R8** in v2-M1. The table below documents the
+> v1 ESP-WROOM-32 build (recoverable at git tag `pre-esp32-s3-port`)
+> and is preserved for historical context. **The v2-S3 pin map lives
+> in CLAUDE.md** under "Pin map (locked, ESP32-S3-DevKitC-1 N8R8)";
+> nearly every assignment had to move because GPIOs 22-25 don't
+> exist on the S3 and GPIOs 26-37 are claimed by SPI flash + octal
+> PSRAM. The v2 reserved I²S1 block for MAX98357A is now GPIO 9/10/11
+> (not 27/14/13 as the v1 row below tentatively reserved — those
+> are PSRAM pins on S3).
+
 | Function | GPIO | Notes |
 |---|---|---|
 | **I²S0 BCK** (mic SCK) | **GPIO 26** | Output. Standard I²S BCK choice. |
@@ -65,7 +76,7 @@ queue.** The device ignores `audio_base64` on `/converse` responses
 | **Trigger button** (M2+) | **GPIO 0 / BOOT** | Reuses the on-board BOOT button. **Strapping-pin caveat:** holding it during reset puts the chip in download mode, so don't long-press through a power cycle. Runtime presses are fine because the strap is sampled only at reset. |
 | **Reserved — status LED** | GPIO 2 | On-board blue LED on the DOIT V1; available for v2 status indication without extra wiring. NOT used in v1. |
 | **Reserved — second button** | GPIO 4 | Free for a v2 add-on (e.g. mute or session-clear). Not wired in v1. |
-| **Reserved — I²S1 BCK / LRCK / DIN** | GPIO 27 / 14 / 13 | For v2 MAX98357A on-device speaker output. Block-reserved so a future PCB layout doesn't have to re-route. NOT used in v1. |
+| **Reserved — I²S1 BCK / LRCK / DIN** | GPIO 27 / 14 / 13 | For v2 MAX98357A on-device speaker output. ~~Block-reserved so a future PCB layout doesn't have to re-route.~~ **Stale — v2 went to S3 N8R8 where these GPIOs are claimed by PSRAM. Real reservation is 9/10/11. See CLAUDE.md.** |
 
 GPIOs 6-11 are tied to the on-board flash and **must not be touched**.
 GPIOs 34-39 are input-only and reserved for future ADC use. GPIO 1/3

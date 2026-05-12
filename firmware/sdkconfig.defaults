@@ -1,12 +1,37 @@
 # sdkconfig.defaults — committed defaults; user copies this to ./sdkconfig
 # and edits the local copy with real WiFi creds + server addr (Step 7).
 
+# --- Chip target -----------------------------------------------------------
+# v2: ESP32-S3-DevKitC-1 with ESP32-S3-WROOM-1-N8R8 (8 MB flash, 8 MB octal
+# PSRAM). The pre-v2 WROOM-32 (LX6, no PSRAM) build is preserved at git tag
+# `pre-esp32-s3-port`; checkout that tag if you ever need to rebuild for the
+# original DOIT V1 board. GPIOs 22-25 (don't exist on S3) and 26-37 (claimed
+# by SPI flash + octal PSRAM) are unavailable — see pin map in
+# notes/esp32-firmware-plan.md.
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- PSRAM (N8R8 = 8 MB octal) --------------------------------------------
+# Required for esp-skainet on-device wake word (deferred milestone). Octal
+# PSRAM claims GPIOs 33-37 in addition to the flash pins 26-32 — keep all
+# of 26-37 off the user pin map.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# --- Console output -------------------------------------------------------
+# Bring-up uses the DevKitC-1's UART port (CP210x/CH340 bridge on the left
+# USB-C). The native USB-CDC port on the right is unused for now — switch
+# to it later by setting CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y if a
+# single-cable setup is preferred.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
 # --- Partition table -------------------------------------------------------
 # Built-in two-OTA layout: ota_0 (1.5MB) + ota_1 (1.5MB) + nvs + otadata.
 # OTA itself isn't wired in v1 but pre-allocating slots avoids a full
-# re-flash later when OTA lands.
+# re-flash later when OTA lands. 8 MB flash on N8R8 gives plenty of room.
 CONFIG_PARTITION_TABLE_TWO_OTA=y
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
 # --- Compiler / log level --------------------------------------------------
 CONFIG_COMPILER_OPTIMIZATION_PERF=y

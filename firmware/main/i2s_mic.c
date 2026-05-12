@@ -1,10 +1,14 @@
 // INMP441 → I²S0 → 16 kHz mono int16 ring buffer.
 //
-// Pin map (from notes/esp32-firmware-plan.md):
-//   I²S0 BCK (SCK) = GPIO 26
-//   I²S0 WS  (LRCK)= GPIO 25
-//   I²S0 SD  (DOUT)= GPIO 33
+// Pin map (v2, ESP32-S3-DevKitC-1 N8R8 — see notes/esp32-firmware-plan.md):
+//   I²S0 BCK (SCK) = GPIO 4
+//   I²S0 WS  (LRCK)= GPIO 5
+//   I²S0 SD  (DOUT)= GPIO 6
 //   INMP441 L/R    = tied to GND (mono left-channel slot)
+//
+// v1 used 26/25/33 on the WROOM-32; those GPIOs are claimed by flash +
+// octal PSRAM on the S3 N8R8 and cannot be reused. The v1 pinout is
+// recoverable at git tag `pre-esp32-s3-port`.
 //
 // The new driver/i2s_std.h replaces the legacy driver/i2s.h API. Tutorials
 // from before ~2023 won't apply.
@@ -29,9 +33,9 @@
 
 static const char *TAG = "i2s_mic";
 
-#define I2S_BCK_GPIO 26
-#define I2S_WS_GPIO  25
-#define I2S_SD_GPIO  33
+#define I2S_BCK_GPIO 4
+#define I2S_WS_GPIO  5
+#define I2S_SD_GPIO  6
 
 // 64 KB byte buffer = 32768 int16 samples = ~2.0 s at 16 kHz. Absorbs
 // chunked-upload backpressure under WiFi jitter that previously dropped
