@@ -10,6 +10,7 @@ python-dotenv
 requests
 numpy
 anthropic
+google-genai
 
 # tools/time.py uses zoneinfo + IANA tz database. Linux usually ships these
 # at the OS level; this Python package is the cross-platform fallback (also
