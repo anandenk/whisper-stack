@@ -23,7 +23,8 @@ the assistant hands-free.
 ## What's next (v2)
 
 V1 works but lives on a breadboard plugged into a USB cable. V2 turns
-it into a self-contained device:
+it into a self-contained device. **v2 hardware is arriving 2026-05-12**
+— firmware work starts once the parts are on hand.
 
 - **ESP32-S3 microcontroller** (replaces the ESP-WROOM-32). PSRAM
   unlocks on-device wake-word inference, eliminating the always-on
@@ -45,7 +46,34 @@ LiPo charging, MAX98357, 3W speaker, LiPo cell, switches, enclosure
 filament).
 **Estimated time:** ~5 weekends, phased so each phase is independently
 testable.
-**Currently seeking funding** for parts + tooling.
+
+## v3 — bench prototyping (early, hardware not finalized)
+
+V3 is the fully-3D-printed enclosed desk-assistant form factor. The
+hardware (custom round display, enclosure design, on-device wake
+word) has not been ordered or finalized yet. What's in tree today
+is bench prototyping of the two pieces that need iteration before
+the hardware decisions get locked in:
+
+- **Animated face renderer** — a port of
+  [FluxGarage RoboEyes](https://github.com/FluxGarage/RoboEyes)
+  (GPL-3.0) in [firmware/components/robo_eyes/](firmware/components/robo_eyes/),
+  with state→mood mapping and an autonomous idle-wander gaze. Runs
+  on the v1 firmware's second SSD1306 panel today; design portable
+  to the future round display via a layout config.
+- **Plastic SG90 servo head + gaze coupling** — the head follows
+  where the eyes are already looking (50 ms poll, 800 ms eased move).
+  Bench prototype only; the motion vocabulary is being tuned before
+  committing to a specific servo + enclosure geometry.
+
+Both are Kconfig-gated on the v1 firmware (`CONFIG_FACE_RENDERER`,
+`CONFIG_GAZE_COUPLING_DEMO`) with defaults that preserve v1 behavior
+where it matters. See [notes/face-renderer.md](notes/face-renderer.md),
+[notes/motion-character.md](notes/motion-character.md), and
+[notes/servo-motion-language.md](notes/servo-motion-language.md) for
+design docs.
+
+**Currently seeking funding** for v2 + v3 parts + tooling.
 
 ```
 audio in → STT → router → simple-LLM or complex-LLM → streaming TTS → audio out
@@ -273,17 +301,31 @@ notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1-M6 all shipped)
 CLAUDE.md                    project instructions for Claude Code agents
 firmware/                    ESP-IDF v5.3.5 project for ESP-WROOM-32
 ├── main/                    application code:
-│   ├── main.c                state machine, button polling, OLED orchestration
-│   ├── oled.c/.h             SSD1306 + 6×8 ASCII font
+│   ├── main.c                state machine, button polling, OLED orchestration,
+│   │                         face_task (cat-face or RoboEyes), optional servo follower
+│   ├── app_state.h           app_state_t + ENABLE_OLED/MIC/WIFI subsystem toggles
+│   ├── oled.c/.h             SSD1306 driver (status panel + face panel multi-panel API)
+│   ├── cat_face.h            auto-gen pose tables — legacy face renderer
 │   ├── wifi.c/.h             WPA2-PSK or WPA2-Enterprise STA, Kconfig-selected
-│   ├── i2s_mic.c/.h          INMP441 → 16 kHz int16 ring buffer
-│   ├── http_client.c/.h      esp_http_client wrapper for /converse (M3 streaming)
+│   ├── i2s_mic.c/.h          INMP441 → 16 kHz int16 ring buffer + STATS dump
 │   ├── vad.c/.h              peak-threshold VAD with cancel hook (M3)
+│   ├── http_client.c/.h      esp_http_client wrapper for /converse (M3 streaming)
 │   ├── listen_stream.c/.h    raw-socket /listen client + 500 ms pre-roll (M4)
-│   └── Kconfig.projbuild     WiFi creds, server addr, API key, session id
+│   ├── wake_source.h         wake_source_t enum (VOICE / GESTURE / BUTTON / IR)
+│   ├── gesture.c/.h          M7 — HC-SR04 wave-to-wake (runtime-gated)
+│   ├── ir_remote.c/.h        M8 — NEC IR receiver via RMT-RX (runtime-gated)
+│   ├── control_state.c/.h    M8 — shared mute/snooze/cancel state with mutex
+│   └── Kconfig.projbuild     WiFi creds, server addr, API key, session id,
+│                             FACE_RENDERER choice, VOICE_ENABLED, GAZE_COUPLING_DEMO,
+│                             M7/M8 submenus
+├── components/              v3 bench-prototype components:
+│   ├── robo_eyes/            FluxGarage RoboEyes V1.1.1 port (GPL-3.0)
+│   └── servo/                ESP-IDF LEDC-based SG90 driver
+├── examples/
+│   └── servo_test/           standalone IDF project for isolated servo bench
 ├── sdkconfig.defaults       committed defaults; idf.py menuconfig to fill creds
 ├── partitions: built-in two-OTA layout (CONFIG_PARTITION_TABLE_TWO_OTA)
-└── .gitignore               build/, sdkconfig (creds), managed_components/
+└── .gitignore               build/, sdkconfig (creds), managed_components/, *.ref
 ```
 
 ## Routes
@@ -331,8 +373,8 @@ requires an `X-API-Key` header. The web page persists the key in
   streaming TTS, VAD, continuous + interrupt, "hey jarvis" wake word —
   see [notes/voice-agent-plan.md](notes/voice-agent-plan.md)
 
-- **ESP-WROOM-32 firmware — M1 through M6 all shipped on real
-  hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
+- **ESP-WROOM-32 firmware — M1 through M8 + cat-face panel all shipped
+  on real hardware** ([`firmware/`](firmware/), ESP-IDF 5.3.5).
   - **M1** — full module skeleton: SSD1306 OLED via
     `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
     **WPA2-PSK or WPA2-Enterprise** (Kconfig choice; verified on WPA2-Enterprise
@@ -341,7 +383,7 @@ requires an `X-API-Key` header. The web page persists the key in
   - **M2** — BOOT button → 3 s recording → `/converse` round-trip,
     workstation Realtek output speaks the reply. Preserved as a
     fallback under `#define M2_BUFFERED_FALLBACK`.
-  - **M3** — VAD-bounded recording (peak ≥ 300, silence dwell 2.5 s)
+  - **M3** — VAD-bounded recording (peak ≥ 200, silence dwell 2.5 s)
     streamed over HTTP chunked-transfer — no heap cap on length.
     Long-press BOOT (≥ 1 s) cancels mid-recording.
   - **M4** — hands-free **"hey jarvis"** via server-side openWakeWord
@@ -358,14 +400,37 @@ requires an `X-API-Key` header. The web page persists the key in
     Phase 6B.
   - **M6** — OLED polish: 2-second boot card (IP / server /
     wake model / session id), brief "WAKE / score N.NN" splash on
-    each wake event, live VU bar during LISTENING with a threshold
-    marker so you can see your voice clearing the VAD floor, and a
-    SPEAKING screen that shows the model name + per-call USD cost
-    + token usage instead of truncated transcript fragments. Cost
-    comes from the server (`estimated_cost_usd` on `/converse`) so
-    pricing lives in one place; local Llama replies print
-    `cost  $0.0000`. Partial-row OLED flushes keep the bar
-    flicker-free.
+    each wake event, and a SPEAKING screen that shows the model name +
+    per-call USD cost + token usage instead of truncated transcript
+    fragments. Cost comes from the server (`estimated_cost_usd` on
+    `/converse`) so pricing lives in one place; local Llama replies
+    print `cost  $0.0000`. *Note:* the M6 live VU bar was removed on
+    2026-05-10 as part of the audio-corruption fix (see below); the
+    cat-face panel's `?` stroke animation gives the same "I'm
+    listening" feedback without the per-frame I²C contention.
+  - **M7** — **HC-SR04 wave-to-wake** (opt-in alternative wake source).
+    Wave a hand 10 cm in front of the sensor — no speaking required.
+    Runtime-gated on `CONFIG_WAKE_GESTURE_ENABLED`. The wake-source
+    label appears on the OLED splash (VOICE / GESTURE / BUTTON / IR).
+  - **M8** — **NEC IR remote** for mute / snooze / cancel (opt-in).
+    Mute closes the listening socket so the device stops responding
+    to ambient speech; snooze pauses both wake sources with a
+    countdown; cancel kills a turn mid-LISTENING or mid-SPEAKING.
+    Runtime-gated on `CONFIG_IR_ENABLED`; first-time setup learns the
+    NEC codes from the serial log.
+  - **Cat-face OLED panel** (2026-05-10) — a second SSD1306 128×64
+    panel on a separate I²C bus (bus 1, GPIO 16/17) renders an
+    animated cat mascot synchronized to the app state machine. IDLE
+    blinks, LISTENING traces `?`, THINKING cycles dots, SPEAKING
+    smiles with mouth pulse. Graceful if the second panel isn't
+    wired — logs a warning and continues.
+  - **Audio-corruption diagnosis + fix** (2026-05-10) — a chronic
+    "frames recycled mid-LISTENING" issue (originally misdiagnosed as
+    weak WiFi) was root-caused via an acoustic loopback control
+    experiment to per-frame `oled_flush_row()` I²C contention from
+    the LISTENING VU bar. Removing the bar dropped frame-recycle
+    from 16.5% → 0.0% across matched test runs. Device now sustains
+    arbitrarily long continuous-chat sessions cleanly.
   - **Multi-turn memory** — firmware passes `?session_id=esp32` on
     `/converse`, so wakes (and follow-ups within continuous mode)
     remember context (10 min idle TTL by default).
@@ -394,3 +459,15 @@ depending on whether you're willing to pay for cloud STT/TTS in
 exchange for not running a 24/7 GPU machine.
 
 It's also a pretty nice way to talk to Claude.
+
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE). The repo entered GPL-3.0
+when [firmware/components/robo_eyes/](firmware/components/robo_eyes/),
+a port of [FluxGarage RoboEyes V1.1.1](https://github.com/FluxGarage/RoboEyes)
+by Dennis Hoelscher, was added as the v3-prototype face renderer.
+Building the firmware with the default `CONFIG_FACE_RENDERER_ROBO_EYES`
+produces a binary covered by GPL-3.0. The original cat-face renderer
+remains in tree as the alternative (`CONFIG_FACE_RENDERER_CAT_FACE`),
+but the source tree itself ships GPL code regardless of which renderer
+you build with.

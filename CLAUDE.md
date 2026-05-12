@@ -20,7 +20,7 @@ plan: [notes/two-mode-plan.md](notes/two-mode-plan.md).
 
 ## Environment
 
-- **Working dir:** `C:\whisper-stack`
+- **Working dir:** `C:\voice-ai-server` (local checkout still uses the pre-rename name; everything else — repo, docs, build commands — uses `whisper-stack`. The rename header at the top of this file describes the gap. Mentally substitute when you read build recipes that say `cd C:\whisper-stack\...`.)
 - **Venv:** `.venv` — **Python 3.13.13** (the system `python` is 3.14, which lacks ML wheels — do NOT use it)
 - **Run scripts directly via** `.venv/Scripts/python.exe tests/stageN_*.py` (or activate the venv first)
 - **GPU:** RTX 5070 Ti **Laptop**, Blackwell `sm_120`, 12 GB VRAM
@@ -50,7 +50,12 @@ different statuses.
 - [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor (one codebase, two deploy shapes). **Phases 1, 2, 3, 4, 6, 8 shipped; 5 (Deepgram STT), 7 (OpenAI TTS), 9 (Fly.io deploy) queued behind cloud signups.**
 - [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **All 5 phases (A-E) shipped.** Set `VOICE_AI_SESSION_ID` for talk.py, type a session ID into the web client's Session field, or pass `session_id` form/JSON field on `/converse` / `/chat` to opt in. Absent = stateless, default behavior preserved.
 - [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI; `tests/jarvis.py` is the workstation wake-word client (`pip install openwakeword` + download the bundled models, then say "hey jarvis"). `web_search` stays disabled until `TAVILY_API_KEY` is set.
-- [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md) — port `tests/jarvis.py`'s shape onto **ESP-WROOM-32 + INMP441 + SSD1306 OLED**. **Hardware + wake-word path locked, no firmware code yet.** Device is mic + display + WiFi only — TTS plays through the workstation's pinned Realtek output via `play_locally=true` on `/converse`. No on-device audio out (no I²S DAC, no audio playback task, no PCM queue). Wake word: **server-side openWakeWord via a new `POST /listen` chunked-transfer endpoint** (Path B; PSRAM-less WROOM-32 verified, on-device esp-skainet deferred to v2). Path C (button-only) documented as fallback if continuous mic streaming proves unreliable. Six milestones; M4 has both server-side scope (the `/listen` endpoint, in-scope and not conditional) and firmware-side scope (the device's chunked-transfer client).
+- [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md) — port `tests/jarvis.py`'s shape onto **ESP-WROOM-32 + INMP441 + SSD1306 OLED**. **All 8 milestones shipped on real hardware**: M1 bring-up, M2 button + buffered `/converse`, M3 VAD streaming, M4 server-side openWakeWord via `POST /listen`, M5 continuous mode after wake, M6 OLED polish (boot card + wake splash + VU bar + speaking screen). Plus M7 (HC-SR04 wave-to-wake), M8 (NEC IR remote for mute/snooze/cancel), and the cat-face OLED on I²C bus 1. Device is mic + display + WiFi only — TTS plays through the workstation's pinned Realtek output via `play_locally=true` on `/converse`. No on-device audio out (no I²S DAC, no audio playback task, no PCM queue). On-device esp-skainet wake word remains deferred to v2 hardware (needs PSRAM). The audio-corruption diagnosis (gotcha #9 below) localized a chronic mic-frame recycle issue to the LISTENING VU bar's per-frame I²C contention and removed it; firmware is now stable for arbitrarily long continuous chat.
+- **v3 prototype notes (early — hardware not yet finalized or ordered):**
+  - [notes/build-modes.md](notes/build-modes.md) — the `CONFIG_VOICE_ENABLED` Kconfig switch that gates the entire voice path so display/servo iteration doesn't compete with the wake-word stream.
+  - [notes/face-renderer.md](notes/face-renderer.md) — FluxGarage RoboEyes V1.1.1 ported into `firmware/components/robo_eyes/` as a second selectable face renderer (`CONFIG_FACE_RENDERER` choice, default `ROBO_EYES`, alternative `CAT_FACE`). **This is the reason the repo is now GPL-3.0** — see the LICENSE section below.
+  - [notes/motion-character.md](notes/motion-character.md) — the eye-leads / head-follows gaze coupling architecture: RoboEyes drives the eyes autonomously, a small follower task reads `robo_eyes_get_eye_x_angle()` every 50 ms and commands the SG90 servo over an 800 ms eased move. Gated behind `CONFIG_GAZE_COUPLING_DEMO` (default `n`).
+  - [notes/servo-motion-language.md](notes/servo-motion-language.md) — the SG90 servo's motion vocabulary, LEDC config, easing curves, and the standalone `firmware/examples/servo_test/` IDF project for isolated bench iteration.
 
 ## MODE: local vs cloud
 
@@ -352,25 +357,59 @@ server/
     └── embed_st.py          cloud — SentenceTransformerEmbedder (MiniLM-L6)
 plan.md                      original 7-stage build plan
 notes/two-mode-plan.md       two-mode refactor plan (1, 2, 3, 4, 6, 8 landed)
+notes/sessions-plan.md       multi-turn session memory (A–E shipped)
+notes/voice-agent-plan.md    streaming TTS / VAD / continuous / wake (1–6 shipped)
+notes/esp32-firmware-plan.md ESP-WROOM-32 firmware plan (M1–M8 shipped)
+notes/build-modes.md         v3 prototype — CONFIG_VOICE_ENABLED Kconfig gate
+notes/face-renderer.md       v3 prototype — RoboEyes face renderer + GPL-3.0 rationale
+notes/motion-character.md    v3 prototype — eye-leads / head-follows gaze coupling
+notes/servo-motion-language.md  v3 prototype — SG90 driver + motion vocabulary
+notes/router-design.md       router classifier design + Tier 1 history
+notes/network-diagnosis-summary.md  throughput-test reconstruction recipe
+notes/loopback-test-results.md  acoustic loopback control experiment (gotcha #9)
 requirements-cloud.txt       slim cloud install (no GPU/Piper/Whisper)
-firmware/                    ESP-IDF v5.3.5 project (M1 + M2 shipped)
-└── main/                    main.c + oled.c/h + wifi.c/h + i2s_mic.c/h
-                             + http_client.c/h + app_state.h
-                             + cat_face.h    (auto-gen from tests/oled_dump_c.py)
-tests/oled_animate.py        live tkinter cat-face state-machine preview
+LICENSE                      GPL-3.0 (entered the project with the RoboEyes port)
+firmware/                    ESP-IDF v5.3.5 project (M1–M8 shipped + cat-face panel)
+├── main/                    application code:
+│   ├── main.c               state machine, button polling, OLED orchestration,
+│   │                        face_task (cat-face or RoboEyes), optional servo follower
+│   ├── app_state.h          app_state_t + ENABLE_OLED/MIC/WIFI subsystem toggles
+│   ├── oled.{c,h}           SSD1306 driver (status panel + face panel multi-panel API)
+│   ├── cat_face.h           auto-gen from tests/oled_dump_c.py — legacy face renderer
+│   ├── wifi.{c,h}           WPA2-PSK or WPA2-Enterprise STA (Kconfig choice)
+│   ├── i2s_mic.{c,h}        INMP441 → 16 kHz int16 ring buffer + STATS dump
+│   ├── vad.{c,h}            peak-threshold VAD with cancel hook (M3+)
+│   ├── http_client.{c,h}    esp_http_client wrapper for /converse (buffered + streaming)
+│   ├── listen_stream.{c,h}  raw-socket /listen client + 500 ms pre-roll (M4)
+│   ├── wake_source.h        wake_source_t enum (VOICE / GESTURE / BUTTON / IR)
+│   ├── gesture.{c,h}        M7 — HC-SR04 wave-to-wake (runtime-gated)
+│   ├── ir_remote.{c,h}      M8 — NEC IR receiver via RMT-RX (runtime-gated)
+│   ├── control_state.{c,h}  M8 — shared mute/snooze/cancel state with mutex
+│   └── Kconfig.projbuild    WiFi creds, server addr, API key, session id,
+│                            FACE_RENDERER choice, VOICE_ENABLED, GAZE_COUPLING_DEMO,
+│                            M7/M8 submenus
+├── components/              v3 prototype components:
+│   ├── robo_eyes/           FluxGarage RoboEyes V1.1.1 port — GPL-3.0
+│   └── servo/               ESP-IDF LEDC-based SG90 driver
+├── examples/
+│   └── servo_test/          standalone IDF project for isolated servo bench iteration
+├── sdkconfig.defaults       committed defaults; idf.py menuconfig fills creds
+└── .gitignore               build/, sdkconfig (creds), managed_components/, *.ref
+tests/oled_animate.py        live tkinter face state-machine preview (cat-face design)
 tests/oled_preview.py        static PNG + C-array dump for one frame
 tests/oled_dump_c.py         regenerate firmware/main/cat_face.h from poses
+tools/                       diagnostic helpers (throughput_sink, serial_capture, loopback)
 ```
 
 ## Firmware (ESP-WROOM-32)
 
 ESP-IDF v5.3.5 project at `firmware/`. Build target is `esp32` (LX6
-classic, NOT s3). **M1 + M2 + M3 + M4 + M5 + M6 shipped** (M5 + M6
-both landed in the same workstation session 2026-05-06: continuous
-chat, then OLED polish — boot card, wake splash, live VU bar,
-model+tokens speaking screen). **Cat-face OLED shipped 2026-05-10** —
-a second SSD1306 panel on a separate I²C bus renders an animated cat
-mascot synchronized to the app state machine. State of the device:
+classic, NOT s3). **M1 through M8 all shipped + cat-face OLED** (M5
++ M6 both landed in the same workstation session 2026-05-06:
+continuous chat, then OLED polish — boot card, wake splash, live
+VU bar, model+tokens speaking screen. M7 + M8 + cat-face all shipped
+2026-05-10. Audio-corruption diagnosis and fix — gotcha #9
+below — landed later that same day). State of the device:
 
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
@@ -394,16 +433,16 @@ mascot synchronized to the app state machine. State of the device:
   Session memory carries across turns via `session_id=esp32`.
 - **OLED polish** (M6): boot card (~2 s) shows IP / server / wake
   model / session id; brief "WAKE / score N.NN" splash on each wake
-  event (200 ms hold); live VU bar on line 6 during LISTENING /
-  follow-up turns with a 1-px-wide threshold marker (you literally
-  see whether your voice is clearing `VAD_PEAK_THRESHOLD`); SPEAKING
-  screen shows model name + per-call USD cost + token usage instead
-  of truncated transcript chunks. Cost comes from the server via a
-  new `estimated_cost_usd` field on `/converse` (computed from
-  `usage.estimated_cost_usd()` so prices live in one place). Local
-  Llama replies show `cost  $0.0000`; Sonnet/Haiku show real per-
-  turn cost. Bar updates use `oled_flush_row()` (~3.5 ms partial
-  flush) to avoid full-frame flicker.
+  event (200 ms hold); SPEAKING screen shows model name + per-call
+  USD cost + token usage instead of truncated transcript chunks.
+  Cost comes from the server via a new `estimated_cost_usd` field
+  on `/converse` (computed from `usage.estimated_cost_usd()` so
+  prices live in one place). Local Llama replies show `cost  $0.0000`;
+  Sonnet/Haiku show real per-turn cost. *Note:* the M6 live VU bar
+  on LISTENING was removed on 2026-05-10 (commit `5695da9`) — see
+  gotcha #9. The cat-face panel's `?` stroke gives the same "I'm
+  listening" feedback without the per-frame I²C contention that
+  caused chronic mic-frame recycle.
 - All three subsystems (`ENABLE_OLED` / `ENABLE_MIC` / `ENABLE_WIFI`
   in `firmware/main/app_state.h`) are on.
 - **Cat-face OLED** (2026-05-10): a second SSD1306 128×64 panel on
@@ -423,10 +462,82 @@ mascot synchronized to the app state machine. State of the device:
   or unpowered, it logs a warning and the rest of the firmware boots
   normally (face_task simply isn't spawned).
 
-All planned firmware milestones are shipped. The device is feature-
-complete for v1; further work is hardware (e.g. ESP32-S3 with PSRAM
-to enable on-device wake word, or MAX98357A for standalone audio
-out) or quality-of-life polish.
+**v1 firmware is feature-complete.** All planned milestones (M1–M8 +
+cat-face panel) shipped on real hardware. The audio-corruption
+root-cause fix (gotcha #9 below) is in place; the device runs
+arbitrarily long continuous-chat sessions cleanly.
+
+**v2 hardware is arriving 2026-05-12** (today, as of the most recent
+CLAUDE.md edit): MAX98357A I²S DAC + 3W speaker (so the device speaks
+its own replies without routing through the workstation), plus a
+LiPo + USB-C charging board for multi-day runtime. Once the hardware
+is on hand, v2 firmware work begins — at minimum: an I²S audio-out
+task, PCM playback queue, mid-stream interrupt detection. The
+existing v1 code path stays as the fallback (`play_locally=true` on
+`/converse` still works through Realtek).
+
+**v3 prototyping has begun on the v1 device** — see the next
+subsection. v3 hardware (custom round display, 3D-printed enclosure)
+has not been ordered or finalized yet; what's in tree is bench
+prototyping of the motion + face-renderer pieces that will eventually
+land on v3.
+
+### v3 prototype scaffolding (in progress, Kconfig-gated)
+
+Five commits on 2026-05-11 (between 16:29 and 18:18 local) added
+v3-prototype infrastructure to the v1 firmware. Everything is gated behind Kconfig
+flags whose defaults preserve v1 behavior — pull this commit on the
+v1 device, run `idf.py build flash` without touching menuconfig, and
+the device behaves identically to its v1 self.
+
+| Kconfig flag                  | Default            | When to flip                                                                  |
+|-------------------------------|--------------------|-------------------------------------------------------------------------------|
+| `CONFIG_VOICE_ENABLED`        | `y`                | Set `n` for display/servo iteration without the wake-word stream live         |
+| `CONFIG_FACE_RENDERER`        | `ROBO_EYES`        | `CAT_FACE` reverts to the pre-v3 cat-face look (still in tree, still working) |
+| `CONFIG_GAZE_COUPLING_DEMO`   | `n`                | Set `y` to spawn the SG90 servo follower task (head follows eye gaze)         |
+
+What landed:
+
+- **[firmware/components/robo_eyes/](firmware/components/robo_eyes/)** — port of
+  [FluxGarage RoboEyes V1.1.1](https://github.com/FluxGarage/RoboEyes)
+  by Dennis Hoelscher to ESP-IDF C. Two rounded-rectangle animated
+  eyes with autoblinker, idle gaze wander, and four moods (DEFAULT /
+  TIRED / ANGRY / HAPPY) mapped to the existing app states. Adds one
+  read-only accessor (`robo_eyes_get_eye_x_angle()`) so a follower can
+  read the eye's current horizontal angle without touching the
+  library's motion logic. Design rationale in [notes/face-renderer.md](notes/face-renderer.md).
+- **[firmware/components/servo/](firmware/components/servo/)** — LEDC-based SG90
+  driver. Easing math (ease-in-out cubic for `servo_move_to`), idle
+  drift, four named postures. Wiring + tuning knobs in
+  [notes/servo-motion-language.md](notes/servo-motion-language.md).
+- **[firmware/examples/servo_test/](firmware/examples/servo_test/)** — standalone IDF
+  project that exercises only the servo component, for isolated bench
+  iteration without touching the main firmware.
+- **Eye-leads / head-follows gaze coupling** in `main.c`'s
+  `servo_follow_task` (gated on `CONFIG_GAZE_COUPLING_DEMO`). The
+  RoboEyes library runs in its stock autonomous mode (no external
+  drive); the follower task samples eye angle every 50 ms, maps
+  `[-90°, +90°]` eye → `[-60°, +60°]` servo with a 5° change
+  threshold, and eases the servo over 800 ms. Matches the natural
+  biological sequence (eyes orient first, head follows). Rationale +
+  tuning knobs in [notes/motion-character.md](notes/motion-character.md).
+
+### License (GPL-3.0)
+
+The repo entered GPL-3.0 with the RoboEyes integration (commit
+`79dc10e`). Specifically: `firmware/components/robo_eyes/` is a
+derivative of FluxGarage RoboEyes V1.1.1, which is licensed
+**GPL-3.0-or-later**. Building the firmware with the default
+`CONFIG_FACE_RENDERER_ROBO_EYES` produces a binary covered by
+GPL-3.0. Selecting `CONFIG_FACE_RENDERER_CAT_FACE` instead does
+*not* unlicense the repo — the source tree includes the GPL code
+regardless. Upstream copyright is preserved in every ported file.
+Full license text in [LICENSE](LICENSE).
+
+This was an eyes-open trade — clean-room "RoboEyes-inspired"
+renderer was considered and rejected because the stated goal was
+to get a polished animated face running immediately, not to
+reinvent the eye shapes.
 
 ### Cat-face design + iteration
 
@@ -560,6 +671,17 @@ Subsystem toggles in `firmware/main/app_state.h`:
 call in `main.c` is `#if`-gated; the .c files always compile but
 unreferenced functions get `--gc-sections`-removed at link time.
 
+A second-tier gate added during v3 prototyping lives in Kconfig, not
+app_state.h: `CONFIG_VOICE_ENABLED` (default `y`) is the **master
+switch for the entire voice path** — when off, `i2s_mic_init`,
+`listen_stream_init`, and the `/converse` round-trip helpers are
+all gated out, but WiFi, OLED, cat-face / RoboEyes face renderer,
+gesture, IR, and the BOOT button stay live. Use `=n` only for
+display / servo bring-up where you don't want the wake-word stream
+hammering the CPU and network. Default `y` keeps every pre-v3 build
+behaving exactly as documented. Full menuconfig flow + GC notes in
+[notes/build-modes.md](notes/build-modes.md).
+
 ### sdkconfig fragility
 
 `firmware/sdkconfig` (gitignored) holds the WiFi creds + server IP +
@@ -662,11 +784,14 @@ Enumerate candidates:
 Warmup runs at boot (~10s on cold start to amortize PTX JIT). Disable with `WARMUP=0` env var. Default bind: `127.0.0.1:5000`.
 
 Routes:
-- `GET /health` — model load status
+- `GET /` — self-contained streaming web client (records on phone, plays in-browser via Web Audio; VAD + continuous + interrupt modes built in)
+- `GET /health` — model load status, `mode`, per-process `usage` block (tokens + USD-cost-since-boot)
 - `POST /transcribe` — multipart `audio` → `{transcript, duration_s, latency_s, model, language}`
-- `POST /chat` — JSON `{message, force_route?}` → router-dispatched LLM reply with `route`, `router_scores`
+- `POST /chat` — JSON `{message, session_id?, force_route?}` → router-dispatched LLM reply with `route`, `router_scores`
 - `POST /speak` — JSON `{text}` → synth + blocking play through default output
-- `POST /converse` — multipart `audio` (+ optional `force_route` form field) → STT → router → LLM → TTS → JSON with `transcript`, `route`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, plus non-blocking local playback
+- `POST /converse` — one-shot voice round-trip → STT → router → LLM → TTS → JSON with `transcript`, `route`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, `estimated_cost_usd`, plus non-blocking local playback. Accepts three upload shapes by `Content-Type`: `multipart/form-data` (params in form fields), `audio/l16; rate=N; channels=N` (raw int16 LE, params in query string — used by the ESP-32 firmware), or `audio/wav`. Add `?omit_audio_base64=1` to drop the WAV from the JSON (saves 100–200 KB per turn for firmware clients).
+- `POST /converse/stream` — SSE-streamed voice round-trip; the client plays the audio as PCM chunks arrive. Accepts the same three Content-Types as `/converse`. The web client uses this for sentence-by-sentence playback.
+- `POST /listen` — chunked-transfer raw int16 LE @ 16 kHz body; server runs openWakeWord and returns `{"wake": true, ...}` on detection (or `{"wake": false, "reason": "idle_timeout"|"client_closed"|"busy"}`). Long-lived, full-duplex pattern — see "M4 / wake-word gotchas" below. Used by `tests/jarvis.py` and by the ESP-32 firmware in IDLE state. Requires `pip install openwakeword` + `openwakeword.utils.download_models()` on the server.
 
 `CONVERSE_MAX_TOKENS=96` caps voice replies so they don't turn into 30s monologues. Tune via env.
 
@@ -709,4 +834,4 @@ For testing the ESP-32-style flow from anywhere (e.g., phone on different WiFi):
 
 The `cloudflared` quick-mode URL changes every time you restart it. For a stable URL, register a free Cloudflare account, attach a domain, and create a named tunnel — see Cloudflare docs.
 
-**Auth model:** when `API_KEY` is set, all of `/converse`, `/chat`, `/transcribe`, `/speak` require the matching `X-API-Key` header. `GET /` and `GET /health` stay public. When `API_KEY` is empty, no auth is enforced (LAN-only mode).
+**Auth model:** when `API_KEY` is set, all of `/converse`, `/converse/stream`, `/chat`, `/transcribe`, `/speak`, `/listen` require the matching `X-API-Key` header. `GET /` and `GET /health` stay public. The authoritative list is `PROTECTED_PATHS` in [server/app.py](server/app.py). When `API_KEY` is empty, no auth is enforced (LAN-only mode).
