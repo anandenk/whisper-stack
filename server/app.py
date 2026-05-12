@@ -1,4 +1,4 @@
-"""Flask app: /transcribe, /chat (with router), /converse, /speak, /health, / (web client).
+"""Flask app: /transcribe, /chat, /converse, /speak, /health, / (web client).
 
 Run from repo root:
     python -m server.app
@@ -22,10 +22,40 @@ from typing import Iterator
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from server import audio, audio_out, config, markdown, modes, router, titler, usage, wakeword
+from server import audio, audio_out, config, markdown, modes, titler, usage, wakeword
 from server.sessions import Session, SessionStore
 from server.streaming import SentenceChunker
-from server.tools import all_tools
+from server.tools.time import get_current_time
+
+
+# Tool selection helper — Gemini 2.5 forbids combining google_search with
+# custom function_declarations in one request, so we pick one per query.
+# Time-shaped queries go to the local `time` tool (free, instant, no search
+# round-trip). Other "I need current info" queries enable google_search
+# grounding inside the Gemini call. Conversational / coding / everything
+# else goes to bare chat with no tools.
+_TIME_PHRASES = (
+    "what time", "what's the time", "current time", "time in ",
+    "what day", "what's the date", "today's date", "what year",
+)
+_SEARCH_KEYWORDS = frozenset({
+    "weather", "temperature", "forecast",
+    "news", "headlines", "today", "yesterday", "tomorrow",
+    "current", "latest", "right now", "currently",
+    "search", "look up", "find out", "google",
+    "stock", "price of", "exchange rate",
+    "score", "scores", "who won",
+})
+
+
+def _select_tools(query: str) -> tuple[list | None, bool]:
+    """Return (tools_list, enable_search). Mutually exclusive per Gemini 2.5."""
+    q = query.lower()
+    if any(p in q for p in _TIME_PHRASES):
+        return [get_current_time], False
+    if any(kw in q for kw in _SEARCH_KEYWORDS):
+        return None, True
+    return None, False
 
 # HTTP-facing stream IDs are stricter than the SessionStore's filesystem-safety
 # check. Conservative charset: alphanumeric, underscore, dash, 1-64 chars. Keeps
@@ -291,14 +321,14 @@ def health():
     # singleton if the factory has already run, but is_loaded() reflects whether
     # the underlying model has actually been instantiated.
     stt_backend = modes.get_stt()
+    llm_backend = modes.get_llm()
     tts_backend = modes.get_tts()
     return jsonify({
         "status": "ok",
-        "mode": config.MODE,
         "gpu_available": gpu_available,
         "models_loaded": {
             "stt": stt_backend.is_loaded(),
-            "router": router.is_loaded(),
+            "llm": llm_backend.is_loaded(),
             "tts": tts_backend.is_loaded(),
         },
         "usage": usage.snapshot(),
@@ -339,30 +369,11 @@ def chat():
     if not isinstance(message, str) or not message.strip():
         return jsonify({"error": "'message' must be a non-empty string"}), 400
 
-    force_route = data.get("force_route")
-    if force_route is not None and force_route not in ("simple", "complex"):
-        return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
-
     session_id, sid_err = _validated_session_id(data.get("session_id"))
     if sid_err:
         return jsonify({"error": sid_err}), 400
 
     try:
-        # Always classify (even when forcing) so we record what the router would have decided.
-        decision = router.classify(message)
-        route = force_route if force_route is not None else decision["route"]
-        force_routed = force_route is not None
-
-        # Auto-escalate "tool-likely" simple queries to complex. Keeps users
-        # from getting a "my training cutoff" answer when a tool could have
-        # served the real-time question. force_route="simple" overrides this
-        # — explicit user intent wins.
-        auto_escalated = False
-        if (not force_routed) and route == "simple" and router.is_tool_likely(message):
-            route = "complex"
-            auto_escalated = True
-        decision["auto_escalated"] = auto_escalated
-
         # If a session_id is present, load the active session and feed its
         # recent window as `history` to the LLM. Then append this new turn.
         # Absent session_id = fully stateless (existing behavior).
@@ -373,31 +384,30 @@ def chat():
             window = session.recent_window(config.SESSION_WINDOW_TURNS)
             history = [m for turn in window for m in turn.to_message_pair()]
 
-        # Tools flow ONLY to the complex route. Auto-escalation already moved
-        # tool-likely queries there; the simple route (Llama 3.1 8B) becomes
-        # confused when given tools for non-tool conversation — it'll call
-        # tools spontaneously on greetings or output raw JSON tool-call
-        # syntax mid-conversation. Don't tempt it.
-        tools = (all_tools() or None) if route == "complex" else None
+        tools, enable_search = _select_tools(message)
 
-        llm_result = modes.get_llm(route).chat(message, history=history, tools=tools)
+        llm_result = modes.get_llm().chat(
+            message,
+            history=history,
+            tools=tools,
+            enable_search=enable_search,
+        )
         usage.record(
             llm_result.get("model"),
             input_tokens=llm_result.get("input_tokens"),
             output_tokens=llm_result.get("output_tokens"),
-            route=route,
         )
 
         if session is not None:
             session.append_turn(
                 user_text=message,
                 reply_text=llm_result["reply"],
-                route=route,
+                route="default",
                 model=llm_result["model"],
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
-                auto_escalated=auto_escalated,
+                auto_escalated=False,
                 tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, message, llm_result["reply"])
@@ -405,19 +415,7 @@ def chat():
         traceback.print_exc()
         return jsonify({"error": f"chat failed: {exc!r}"}), 500
 
-    body = {
-        **llm_result,
-        "route": route,
-        "force_routed": force_routed,
-        "auto_escalated": decision.get("auto_escalated", False),
-        "router_latency_s": decision["latency_s"],
-        "router_scores": {
-            "simple": decision["score_simple"],
-            "complex": decision["score_complex"],
-            "margin": decision["margin"],
-            "margin_threshold": decision["margin_threshold"],
-        },
-    }
+    body = {**llm_result}
     if session is not None:
         # Surface the active session file so the client can grep for it later
         # without having to know the rollover rules.
@@ -484,10 +482,6 @@ def converse():
     except OSError as e:
         app.logger.warning("could not save debug audio: %s", e)
 
-    force_route = get_field("force_route")
-    if force_route is not None and force_route not in ("simple", "complex"):
-        return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
-
     session_id, sid_err = _validated_session_id(get_field("session_id"))
     if sid_err:
         return jsonify({"error": sid_err}), 400
@@ -518,21 +512,6 @@ def converse():
         if not transcript.strip():
             return jsonify({"error": "transcript was empty — no speech detected"}), 422
 
-        t = time.perf_counter()
-        decision = router.classify(transcript)
-        timings["route"] = time.perf_counter() - t
-        route = force_route if force_route is not None else decision["route"]
-        force_routed = force_route is not None
-
-        # Auto-escalate "tool-likely" simple-route queries to complex (Sonnet)
-        # — same logic as /chat. Voice users asking "what's the weather"
-        # benefit just like text users do.
-        auto_escalated = False
-        if (not force_routed) and route == "simple" and router.is_tool_likely(transcript):
-            route = "complex"
-            auto_escalated = True
-        decision["auto_escalated"] = auto_escalated
-
         # Load conversation history if a session_id is in play. We append the
         # turn AFTER the LLM call but BEFORE TTS — that way if TTS or playback
         # crashes, the conversation state still persists.
@@ -543,17 +522,16 @@ def converse():
             window = session.recent_window(config.SESSION_WINDOW_TURNS)
             history = [m for turn in window for m in turn.to_message_pair()]
 
-        # Tools complex-route-only. See /chat for the rationale — Llama 3.1 8B
-        # (simple route) misbehaves when handed a tool list mid-conversation.
-        tools = (all_tools() or None) if route == "complex" else None
+        tools, enable_search = _select_tools(transcript)
 
         t = time.perf_counter()
-        llm_result = modes.get_llm(route).chat(
+        llm_result = modes.get_llm().chat(
             transcript,
             max_tokens=config.CONVERSE_MAX_TOKENS,
             system_prompt=config.VOICE_SYSTEM_PROMPT,
             history=history,
             tools=tools,
+            enable_search=enable_search,
         )
         timings["llm"] = time.perf_counter() - t
         reply_text = llm_result["reply"]
@@ -561,7 +539,6 @@ def converse():
             llm_result.get("model"),
             input_tokens=llm_result.get("input_tokens"),
             output_tokens=llm_result.get("output_tokens"),
-            route=route,
         )
 
         # Persist the turn while it's fresh — store the raw reply, NOT the
@@ -571,12 +548,12 @@ def converse():
             session.append_turn(
                 user_text=transcript,
                 reply_text=reply_text,
-                route=route,
+                route="default",
                 model=llm_result["model"],
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
-                auto_escalated=auto_escalated,
+                auto_escalated=False,
                 tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, transcript, reply_text)
@@ -609,20 +586,11 @@ def converse():
 
     body = {
         "transcript": transcript,
-        "route": route,
-        "force_routed": force_routed,
-        "auto_escalated": decision.get("auto_escalated", False),
         "model": llm_result["model"],
         "reply_text": reply_text,
         "audio_sample_rate": sample_rate,
         "audio_duration_s": (len(raw_pcm) // 2) / sample_rate if sample_rate else 0.0,
         "timings": timings,
-        "router_scores": {
-            "simple": decision["score_simple"],
-            "complex": decision["score_complex"],
-            "margin": decision["margin"],
-            "margin_threshold": decision["margin_threshold"],
-        },
         "llm_tokens": {
             "input": llm_result.get("input_tokens"),
             "output": llm_result.get("output_tokens"),
@@ -648,10 +616,10 @@ def converse_stream():
 
     Three upload shapes accepted, chosen by Content-Type:
 
-      * multipart/form-data           file in `audio` part, params (force_route,
-                                      session_id, play_locally) in form fields.
-                                      The default for browser/MediaRecorder
-                                      clients.
+      * multipart/form-data           file in `audio` part, params
+                                      (session_id, play_locally) in form
+                                      fields. The default for browser /
+                                      MediaRecorder clients.
       * audio/l16; rate=N; channels=N raw int16 LE PCM in the body, params from
                                       query string. Skips WAV-wrapping on the
                                       device — the natural shape for ESP-32 +
@@ -705,10 +673,6 @@ def converse_stream():
     except OSError as e:
         app.logger.warning("could not save debug audio: %s", e)
 
-    force_route = get_field("force_route")
-    if force_route is not None and force_route not in ("simple", "complex"):
-        return jsonify({"error": "force_route must be 'simple', 'complex', or omitted"}), 400
-
     session_id, sid_err = _validated_session_id(get_field("session_id"))
     if sid_err:
         return jsonify({"error": sid_err}), 400
@@ -725,7 +689,6 @@ def converse_stream():
         t_total = time.perf_counter()
         try:
             yield _sse_event("ready", {
-                "mode": config.MODE,
                 "session_id": session_id,
                 "play_locally": play_locally,
             })
@@ -747,36 +710,16 @@ def converse_stream():
                 })
                 return
 
-            t = time.perf_counter()
-            decision = router.classify(transcript)
-            timings["route"] = time.perf_counter() - t
-            route = force_route if force_route is not None else decision["route"]
-            force_routed = force_route is not None
+            llm = modes.get_llm()
 
-            auto_escalated = False
-            if (not force_routed) and route == "simple" and router.is_tool_likely(transcript):
-                route = "complex"
-                auto_escalated = True
-
-            llm = modes.get_llm(route)
-
-            yield _sse_event("route", {
-                "route": route,
-                "force_routed": force_routed,
-                "auto_escalated": auto_escalated,
+            yield _sse_event("model", {
                 "model": getattr(llm, "model", "unknown"),
-                "router_scores": {
-                    "simple": decision["score_simple"],
-                    "complex": decision["score_complex"],
-                    "margin": decision["margin"],
-                    "margin_threshold": decision["margin_threshold"],
-                },
             })
 
             # Load conversation history if a session_id was supplied. Mirrors
             # /converse: window of recent turns becomes the LLM's `history`,
             # and the new turn is appended on `final` (using last-round text,
-            # not joined deltas — see ClaudeLLM.chat_stream docstring).
+            # not joined deltas — see GeminiLLM.chat_stream docstring).
             session: Session | None = None
             history: list[dict] | None = None
             if session_id is not None:
@@ -784,10 +727,7 @@ def converse_stream():
                 window = session.recent_window(config.SESSION_WINDOW_TURNS)
                 history = [m for turn in window for m in turn.to_message_pair()]
 
-            # Tools complex-route-only — same rationale as /chat and /converse:
-            # Llama 3.1 8B (simple) misbehaves with tools mid-conversation, and
-            # auto-escalation has already moved tool-likely queries to Sonnet.
-            tool_list = (all_tools() or None) if route == "complex" else None
+            tool_list, enable_search = _select_tools(transcript)
 
             reply_text = ""
             llm_input_tokens = 0
@@ -844,6 +784,7 @@ def converse_stream():
                     system_prompt=config.VOICE_SYSTEM_PROMPT,
                     history=history,
                     tools=tool_list,
+                    enable_search=enable_search,
                 )
                 for ev in stream_iter:
                     etype = ev.get("type")
@@ -887,20 +828,18 @@ def converse_stream():
                             ev.get("model") or getattr(llm, "model", None),
                             input_tokens=llm_input_tokens,
                             output_tokens=llm_output_tokens,
-                            route=route,
                         )
             except NotImplementedError:
-                # Backend hasn't implemented streaming. Both shipped
-                # backends (ClaudeLLM, OllamaLLM) do as of 3C, so this
-                # is a safety-net path for any backend added later
-                # without streaming. Fall back to non-streaming chat()
-                # and a single synth() over the whole reply.
+                # Backend hasn't implemented streaming. GeminiLLM does;
+                # this is a safety net for any future backend added
+                # without streaming.
                 result = llm.chat(
                     transcript,
                     max_tokens=config.CONVERSE_MAX_TOKENS,
                     system_prompt=config.VOICE_SYSTEM_PROMPT,
                     history=history,
                     tools=tool_list,
+                    enable_search=enable_search,
                 )
                 reply_text = result["reply"]
                 llm_input_tokens = int(result.get("input_tokens") or 0)
@@ -921,12 +860,12 @@ def converse_stream():
                 session.append_turn(
                     user_text=transcript,
                     reply_text=reply_text,
-                    route=route,
+                    route="default",
                     model=getattr(llm, "model", "unknown"),
                     latency_s=timings["llm"],
                     input_tokens=llm_input_tokens,
                     output_tokens=llm_output_tokens,
-                    auto_escalated=auto_escalated,
+                    auto_escalated=False,
                     tools_used=tools_used or None,
                 )
                 _maybe_autotitle(session, transcript, reply_text)
@@ -1026,7 +965,7 @@ def listen():
 
 
 def main():
-    print(f"MODE={config.MODE}", flush=True)
+    print(f"LLM={config.GEMINI_MODEL}", flush=True)
     # One-shot session prune at boot when SESSION_TTL_DAYS is configured.
     # No background daemon — files just stop accumulating between restarts.
     if config.SESSION_TTL_DAYS is not None:
@@ -1043,13 +982,8 @@ def main():
         # specific labels so a user can tell which stage is slow if boot stalls.
         print("Warming up STT...", flush=True)
         modes.get_stt().warmup()
-        print("Warming up router (embedding example sets)...", flush=True)
-        router.attach_embedder(modes.get_embedder())
-        router.warmup()
-        print("Warming up simple-route LLM...", flush=True)
-        modes.get_llm("simple").warmup()
-        print("Warming up complex-route LLM...", flush=True)
-        modes.get_llm("complex").warmup()
+        print("Warming up LLM...", flush=True)
+        modes.get_llm().warmup()
         print("Warming up TTS...", flush=True)
         modes.get_tts().warmup()
         # Pre-load the openwakeword model so the first /listen request

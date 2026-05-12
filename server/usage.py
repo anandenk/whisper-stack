@@ -9,11 +9,13 @@ expected" eyeballing.
 
 Pricing reference (2026, USD per 1M tokens; update when rates change):
 
-    claude-sonnet-4-6   $3.00 input  /  $15.00 output
-    claude-haiku-4-5    $1.00 input  /   $5.00 output
+    gemini-2.5-flash    $0.30 input  /   $2.50 output
+    claude-sonnet-4-6   $3.00 input  /  $15.00 output  (legacy, see commit 5)
+    claude-haiku-4-5    $1.00 input  /   $5.00 output  (legacy, see commit 5)
 
 Local models (Ollama / Llama) and STT/TTS calls aren't billed by token,
-so they're recorded as call counts only, with cost zero.
+so they're recorded as call counts only, with cost zero. Verify Gemini
+rates at https://ai.google.dev/pricing — they shift.
 """
 
 from __future__ import annotations
@@ -21,9 +23,10 @@ from __future__ import annotations
 import threading
 import time
 
-# Substring-keyed so dated aliases (e.g. "claude-sonnet-4-6-20260101")
-# still match. First match wins.
+# Substring-keyed so dated aliases (e.g. "gemini-2.5-flash-001") still match.
+# First match wins.
 _PRICING_PER_1M_USD: dict[str, dict[str, float]] = {
+    "gemini-2.5-flash":  {"input": 0.30, "output":  2.50},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5":  {"input": 1.00, "output":  5.00},
 }

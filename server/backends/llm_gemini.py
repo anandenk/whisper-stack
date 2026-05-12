@@ -56,11 +56,17 @@ def _function_call_from_parts(parts) -> tuple[str, dict, str | None] | None:
 
 
 def _stop_reason(resp) -> str:
-    """Best-effort stop_reason string from a Gemini response."""
+    """Best-effort stop_reason string from a Gemini response.
+
+    candidates[0].finish_reason is a FinishReason enum (e.g.
+    FinishReason.STOP). Use `.name` so we get "stop" not "finishreason.stop".
+    """
     if not resp.candidates:
         return "stop"
     fr = getattr(resp.candidates[0], "finish_reason", None)
-    return str(fr).lower() if fr else "stop"
+    if fr is None:
+        return "stop"
+    return str(getattr(fr, "name", fr)).lower()
 
 
 def _accumulate_usage(resp) -> tuple[int, int]:

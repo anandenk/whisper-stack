@@ -1,24 +1,20 @@
-"""Backend factory — one process serves one MODE, picked at boot.
+"""Backend factory — singletons for the three runtime backends.
 
-Five lru_cache'd factory functions, each returning a singleton for the
-configured backend. Backend-specific imports live INSIDE the factory branches
-so cloud-mode boot doesn't pay the ~250 MB torch import for sentence-transformers
-when faster_whisper isn't even installable on a Linux VPS, and vice versa.
+After the Gemini migration there is one LLM (Gemini 2.5 Flash) and STT/TTS
+remain local. The MODE-branching that used to live here for the LLM is gone;
+get_stt/get_tts still gate on config.MODE because commit 5 will be the one
+to fully drop the obsolete branches.
 
 Usage:
     from server import modes
     text = modes.get_stt().transcribe(path)["transcript"]
-    reply = modes.get_llm("simple").chat(text)["reply"]
+    reply = modes.get_llm().chat(text)["reply"]
     raw, sr = modes.get_tts().synth(reply)
-
-The factories raise NotImplementedError for cloud branches not yet wired
-(Phases 5/7/8). Local mode is fully functional today.
 """
 
 from __future__ import annotations
 
 import functools
-from typing import Literal
 
 from server import config
 from server.protocols import LLM, STT, TTS, Embedder
@@ -34,18 +30,10 @@ def get_stt() -> STT:
     )
 
 
-@functools.lru_cache(maxsize=2)
-def get_llm(route: Literal["simple", "complex"]) -> LLM:
-    if route == "complex":
-        # Same Sonnet model in both modes.
-        from server.backends.llm_claude import ClaudeLLM
-        return ClaudeLLM(model=config.ANTHROPIC_MODEL)
-    if config.MODE == "local":
-        from server.backends.llm_ollama import OllamaLLM
-        return OllamaLLM()
-    # cloud-mode simple = Claude Haiku
-    from server.backends.llm_claude import ClaudeLLM
-    return ClaudeLLM(model=config.ANTHROPIC_HAIKU_MODEL)
+@functools.lru_cache(maxsize=1)
+def get_llm() -> LLM:
+    from server.backends.llm_gemini import GeminiLLM
+    return GeminiLLM()
 
 
 @functools.lru_cache(maxsize=1)
