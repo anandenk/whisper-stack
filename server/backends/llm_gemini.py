@@ -101,7 +101,18 @@ class GeminiLLM:
     def _build_config(self, max_tokens: int, system_prompt: str | None,
                       tools: list[Tool] | None,
                       enable_search: bool) -> types.GenerateContentConfig:
-        kwargs: dict = {"max_output_tokens": max_tokens}
+        # Gemini 2.5 Flash has "thinking" enabled by default; internal
+        # reasoning tokens count against max_output_tokens. For voice the
+        # replies are short (1–2 sentences) and we already cap
+        # max_output_tokens at CONVERSE_MAX_TOKENS=96, so thinking will
+        # silently eat the budget on harder queries (grounded search,
+        # "what did you mean" follow-ups) and the visible reply gets
+        # truncated to e.g. "Currently," or "My". Setting thinking_budget=0
+        # disables thinking entirely.
+        kwargs: dict = {
+            "max_output_tokens": max_tokens,
+            "thinking_config": types.ThinkingConfig(thinking_budget=0),
+        }
         if system_prompt:
             kwargs["system_instruction"] = system_prompt
 
