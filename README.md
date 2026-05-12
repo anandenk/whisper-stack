@@ -11,8 +11,11 @@ ESP-WROOM-32 hardware client. Migrated from a two-LLM routed
 architecture to single-model Gemini 2.5 Flash in May 2026; the
 two-mode (local vs cloud) split was retired in the same migration.
 **Built by:** Anand Enkhjin .
-**Looking to fund:** v2 — battery-powered, enclosed, on-device wake
-word, USB-C charging.
+**Hardware status:** v2 funded and ordered (arriving May 2026 —
+ESP32-S3-DevKitC-1-N8R8, MAX98357 I²S amp, 3W speaker, 2 Ah LiPo,
+TP4056 charging). v3 funded, parts list locked (GC9A01 1.28″ round
+TFT, MG90S servos, capacitive touch buttons, 3D-printable enclosure
+hardware), not yet ordered.
 
 In plain terms: you speak into a microphone, a speech-recognition
 model transcribes the audio, the text is sent to Google's Gemini 2.5
@@ -50,13 +53,16 @@ filament).
 **Estimated time:** ~5 weekends, phased so each phase is independently
 testable.
 
-## v3 — bench prototyping (early, hardware not finalized)
+## v3 — bench prototyping (parts list locked, build pending)
 
-V3 is the fully-3D-printed enclosed desk-assistant form factor. The
-hardware (custom round display, enclosure design, on-device wake
-word) has not been ordered or finalized yet. What's in tree today
-is bench prototyping of the two pieces that need iteration before
-the hardware decisions get locked in:
+V3 is the fully-3D-printed enclosed desk-assistant form factor.
+Parts are funded and the hardware decisions are locked: GC9A01
+1.28″ round TFT (240×240) for the face panel, MG90S metal-geared
+micro-servo for the head, TTP223 capacitive touch buttons,
+threaded-insert assembly hardware for the 3D-printed enclosure.
+On-device wake word stays deferred to when the ESP32-S3's PSRAM is
+in hand (v2 covers that). What's in tree today is bench prototyping
+of the two pieces that need iteration before assembly:
 
 - **Animated face renderer** — a port of
   [FluxGarage RoboEyes](https://github.com/FluxGarage/RoboEyes)
@@ -76,7 +82,7 @@ where it matters. See [notes/face-renderer.md](notes/face-renderer.md),
 [notes/servo-motion-language.md](notes/servo-motion-language.md) for
 design docs.
 
-**Currently seeking funding** for v2 + v3 parts + tooling.
+**v2 and v3 are both funded and on the way.**
 
 ```
 audio in → STT → Gemini 2.5 Flash (with tools) → streaming TTS → audio out
