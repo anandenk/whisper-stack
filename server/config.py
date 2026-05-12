@@ -61,9 +61,12 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 
 WARMUP_AUDIO = REPO_ROOT / "samples" / "jfk.wav"
 
-# /converse caps reply length so a chatty LLM doesn't turn into 30s of audio.
-# Voice replies should be short (1-2 sentences). Tune via env if needed.
-CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "96"))
+# /converse caps reply length so a runaway prompt can't generate 30s of audio.
+# We aim to constrain length via the system prompt (see VOICE_SYSTEM_PROMPT)
+# rather than hard-truncating, so this is a safety net, not the primary limit.
+# 256 leaves comfortable room for a well-behaved 1-2 sentence reply with
+# grounding citations.
+CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "256"))
 
 # Tool use safety cap — max iterations of the model -> tool -> model loop
 # inside one chat() call. Prevents a runaway "model keeps calling tools" bug
@@ -113,17 +116,28 @@ WAKEWORD_CONVERSATION_TIMEOUT_S = float(
 # enable while running tools/loopback_test.py.
 LOOPBACK_KEEP_PER_TURN = os.environ.get("LOOPBACK_KEEP_PER_TURN", "0") == "1"
 
-# System prompt prepended to LLM calls from /converse. Targets two failure modes:
-# (1) markdown formatting (asterisks, bullets) read literally by the TTS engine,
-# (2) verbose replies turning into 20+ seconds of audio.
+# System prompt prepended to LLM calls from /converse. Voice replies should
+# be tight: one or two sentences, no formatting, no padding. Earlier
+# versions said "1-2 sentences unless the question really needs more
+# detail" which the model read as permission to dump a 6-sentence
+# weather forecast with bulleted day-by-day breakdowns. The rules below
+# are intentionally absolute and ban the specific failure modes we saw:
+# markdown bullets that the TTS reads literally as the word "asterisk",
+# parenthetical unit conversions ("78°F (26°C)") that double the audio
+# length, and "would you like me to..." filler.
 VOICE_SYSTEM_PROMPT = os.environ.get(
     "VOICE_SYSTEM_PROMPT",
-    "You are a voice assistant; your reply will be read aloud by a text-to-speech "
-    "engine. Reply in plain conversational prose only - no markdown (no asterisks, "
-    "underscores, bullets, headers, code blocks, horizontal rules), and no LaTeX "
-    "or mathematical notation. If the answer involves math, describe it in plain "
-    "words (e.g. 'the derivative of natural log of x is one over x' - never "
-    "'d/dx ln(x) = 1/x' or '\\frac{1}{x}'). Keep replies to 1-2 short sentences "
-    "unless the question genuinely needs more detail. Make it sound natural when "
-    "spoken.",
+    "You are a voice assistant. Your reply is read aloud immediately by a "
+    "text-to-speech engine.\n\n"
+    "ANSWER IN EXACTLY ONE SENTENCE. If the question truly cannot be "
+    "answered in one sentence, two is the absolute maximum. Never more.\n\n"
+    "Do not:\n"
+    "- Produce lists, bullets, paragraphs, or multi-period forecasts.\n"
+    "- Include parenthetical unit conversions. Pick one unit. "
+    "Say 'seventy-nine degrees' not '79°F (26°C)'.\n"
+    "- Add preamble ('Sure!', 'Great question', 'Let me explain'), "
+    "filler, or follow-up offers ('Would you like me to...').\n"
+    "- Use any markdown (asterisks, underscores, hyphens-as-bullets, "
+    "headers, code blocks) or LaTeX. Describe math in plain words.\n\n"
+    "Get to the answer immediately. Make it sound natural when spoken.",
 )

@@ -69,6 +69,27 @@ def _stop_reason(resp) -> str:
     return str(getattr(fr, "name", fr)).lower()
 
 
+def _maybe_inline_brevity_directive(message: str, enable_search: bool) -> str:
+    """Inline a brevity instruction when google_search grounding is on.
+
+    Gemini's `google_search` mode reliably ignores `system_instruction`'s
+    "answer in one sentence" rule because the grounding path treats the
+    system prompt as advice and the search results as the authority on
+    content. Inline instructions (in the user message) survive that
+    override. Without this nudge a "what's the weather" voice query
+    returns a four-sentence forecast with day/night breakdowns; with
+    it the same query returns a single sentence.
+    """
+    if not enable_search:
+        return message
+    return (
+        f"{message}\n\n"
+        "Answer this in exactly one short spoken sentence. Pick one unit "
+        "of measurement (no parenthetical conversions). No lists, no "
+        "multi-period breakdowns."
+    )
+
+
 def _accumulate_usage(resp) -> tuple[int, int]:
     """Pull (input_tokens, output_tokens) out of a response's usage_metadata."""
     um = getattr(resp, "usage_metadata", None)
@@ -103,14 +124,18 @@ class GeminiLLM:
                       enable_search: bool) -> types.GenerateContentConfig:
         # Gemini 2.5 Flash has "thinking" enabled by default; internal
         # reasoning tokens count against max_output_tokens. For voice the
-        # replies are short (1–2 sentences) and we already cap
-        # max_output_tokens at CONVERSE_MAX_TOKENS=96, so thinking will
-        # silently eat the budget on harder queries (grounded search,
-        # "what did you mean" follow-ups) and the visible reply gets
-        # truncated to e.g. "Currently," or "My". Setting thinking_budget=0
-        # disables thinking entirely.
+        # replies are short (1–2 sentences) and we cap max_output_tokens
+        # at CONVERSE_MAX_TOKENS, so thinking will silently eat the budget
+        # on harder queries (grounded search, "what did you mean" follow-ups)
+        # and the visible reply gets truncated to e.g. "Currently," or
+        # "My". Setting thinking_budget=0 disables thinking entirely.
+        #
+        # temperature=0.4 keeps the model adhering to the system prompt's
+        # "one sentence" rule. At Gemini's default ~1.0 it ignores the rule
+        # for grounded queries and dumps a multi-period forecast.
         kwargs: dict = {
             "max_output_tokens": max_tokens,
+            "temperature": 0.4,
             "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
         if system_prompt:
@@ -168,7 +193,10 @@ class GeminiLLM:
         client = self._get_client()
         t0 = time.perf_counter()
 
-        contents = self._build_initial_contents(message, history)
+        contents = self._build_initial_contents(
+            _maybe_inline_brevity_directive(message, enable_search),
+            history,
+        )
         cfg = self._build_config(max_tokens, system_prompt, tools, enable_search)
         tool_index = {t.name: t for t in tools} if tools else {}
 
@@ -253,7 +281,10 @@ class GeminiLLM:
         client = self._get_client()
         t0 = time.perf_counter()
 
-        contents = self._build_initial_contents(message, history)
+        contents = self._build_initial_contents(
+            _maybe_inline_brevity_directive(message, enable_search),
+            history,
+        )
         cfg = self._build_config(max_tokens, system_prompt, tools, enable_search)
         tool_index = {t.name: t for t in tools} if tools else {}
 
@@ -268,6 +299,13 @@ class GeminiLLM:
             round_text_parts: list[str] = []
             assistant_content = None
             fc_info: tuple[str, dict, str | None] | None = None
+            # Per-round running totals. Gemini's streaming usage_metadata is
+            # CUMULATIVE within the round, not per-chunk delta, so we
+            # overwrite with the latest non-zero values instead of summing.
+            # Earlier code summed and reported ~3x the real token count,
+            # which broke /converse's estimated_cost_usd reporting.
+            round_input_tokens = 0
+            round_output_tokens = 0
 
             stream = client.models.generate_content_stream(
                 model=self.model, contents=contents, config=cfg,
@@ -278,10 +316,14 @@ class GeminiLLM:
                     round_text_parts.append(piece)
                     yield {"type": "text", "delta": piece}
 
-                # The last chunk carries usage_metadata + finish_reason.
+                # The last chunk carries the cumulative usage_metadata. We
+                # take whatever the most recent chunk reports as the round's
+                # total (the SDK's running cumulative pattern).
                 inp, out = _accumulate_usage(chunk)
-                total_input_tokens += inp
-                total_output_tokens += out
+                if inp:
+                    round_input_tokens = inp
+                if out:
+                    round_output_tokens = out
                 sr = _stop_reason(chunk)
                 if sr:
                     stop_reason = sr
@@ -292,6 +334,13 @@ class GeminiLLM:
                     if fc_here is not None:
                         fc_info = fc_here
                         assistant_content = chunk.candidates[0].content
+
+            # Roll the round's final cumulative totals into the
+            # cross-round totals. Multi-round tool dispatch will sum
+            # correctly because each round's totals are independent
+            # cumulatives that we add in once per round.
+            total_input_tokens += round_input_tokens
+            total_output_tokens += round_output_tokens
 
             if fc_info is None:
                 last_round_text_parts = round_text_parts
