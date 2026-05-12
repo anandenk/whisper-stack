@@ -455,8 +455,8 @@ assignments except BOOT had to move.
 | INMP441 DIN | 6 | was 33 on v1 |
 | OLED status SDA | 7 | was 21 on v1 |
 | OLED status SCL | 15 | was 22 on v1 (GPIO 22 doesn't exist on S3) |
-| OLED face SDA | 16 | unchanged from v1 |
-| OLED face SCL | 17 | unchanged from v1 |
+| OLED face SDA | 12 | was 16 in v2-M1 first cut; moved 2026-05-12 after intermittent I²C failures on the DevKitC-1's GPIO 16/17 path (not panel-side — confirmed by panel swap) |
+| OLED face SCL | 13 | was 17 in v2-M1 first cut; see above |
 | **Reserved — MAX98357A BCK / LRC / DIN** | 9 / 10 / 11 | for v2-M3 on-device audio out |
 | **Reserved — battery ADC (LiPo)** | 1 or 2 | for v2-M4 charging-board monitor |
 

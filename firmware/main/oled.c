@@ -2,15 +2,19 @@
 //
 // Two panels supported, each on its own I²C bus (v2, ESP32-S3-DevKitC-1):
 //   MAIN — SDA=GPIO 7,  SCL=GPIO 15, addr 0x3C, I²C bus auto-allocated
-//   FACE — SDA=GPIO 16, SCL=GPIO 17, addr 0x3C, I²C bus auto-allocated
+//   FACE — SDA=GPIO 12, SCL=GPIO 13, addr 0x3C, I²C bus auto-allocated
 // Same chip on both, so they share the SSD1306 panel-init flow. The bus
 // init is the only part that's per-panel (different pins / different IDF
 // i2c_master handles).
 //
-// v1 (WROOM-32) used MAIN=21/22. GPIO 22 doesn't exist on the S3 package
-// (chip GPIOs are 0-21, 26-48), so the status OLED moves. FACE stays at
-// 16/17 — both pins exist on the S3 and the face panel's external wiring
-// is preserved. v1 pin map is at git tag `pre-esp32-s3-port`.
+// v1 (WROOM-32) used MAIN=21/22 + FACE=16/17. GPIO 22 doesn't exist on
+// the S3 package, so MAIN moved to 7/15 in v2-M1. FACE was initially
+// kept at 16/17 in v2-M1 but the GPIO 16/17 path on this DevKitC-1
+// proved unreliable in bench testing (intermittent I²C transaction
+// failures on the very first SSD1306 init command — not a panel issue,
+// confirmed by panel swap). Moved to 12/13 in a v2-M1 follow-up;
+// adjacent on the left header, no other conflicts. v1 pin map is at
+// git tag `pre-esp32-s3-port`.
 
 #include "oled.h"
 #include "app_state.h"
@@ -27,8 +31,8 @@ static const char *TAG = "oled";
 
 #define MAIN_SDA_GPIO        7
 #define MAIN_SCL_GPIO        15
-#define FACE_SDA_GPIO        16
-#define FACE_SCL_GPIO        17
+#define FACE_SDA_GPIO        12
+#define FACE_SCL_GPIO        13
 #define OLED_I2C_ADDR        0x3C
 #define OLED_I2C_FREQ_HZ     400000
 
