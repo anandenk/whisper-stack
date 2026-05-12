@@ -659,21 +659,16 @@ async function readSse(body, onEvent) {
 function handleSseEvent(event, data) {
   switch (event) {
     case 'ready':
-      statusEl.textContent = `Stream open (mode=${data.mode}).`;
+      statusEl.textContent = `Stream open.`;
       break;
     case 'transcript':
       transcriptEl.textContent = data.transcript;
-      statusEl.textContent = `Transcribed in ${data.latency_s.toFixed(2)}s. Routing…`;
+      statusEl.textContent = `Transcribed in ${data.latency_s.toFixed(2)}s. Generating…`;
       break;
-    case 'route': {
-      const tag = data.auto_escalated ? ` (auto-escalated)` : '';
-      statusEl.textContent = `Routed to ${data.route} (${data.model})${tag}. Generating…`;
-      metaEl.textContent =
-        `route=${data.route} (${data.model})` +
-        (data.auto_escalated ? '  auto_escalated' : '') +
-        (data.force_routed ? '  force_routed' : '');
+    case 'model':
+      statusEl.textContent = `Using ${data.model}. Generating…`;
+      metaEl.textContent = `model=${data.model}`;
       break;
-    }
     case 'text':
       replyEl.textContent += data.delta;
       break;
@@ -721,7 +716,7 @@ function showFinalSummary(d, wallS) {
   const t = d.timings || {};
   metaEl.textContent =
     `${metaEl.textContent}\n` +
-    `stt=${(t.stt ?? 0).toFixed(2)}s  route=${(t.route ?? 0).toFixed(3)}s  ` +
+    `stt=${(t.stt ?? 0).toFixed(2)}s  ` +
     `llm=${(t.llm ?? 0).toFixed(2)}s  tts=${(t.tts ?? 0).toFixed(2)}s  ` +
     `total=${(t.total ?? 0).toFixed(2)}s  http_wall=${wallS.toFixed(2)}s\n` +
     `audio_duration=${(d.audio_duration_s ?? 0).toFixed(2)}s  ` +

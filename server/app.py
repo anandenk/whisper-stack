@@ -402,12 +402,10 @@ def chat():
             session.append_turn(
                 user_text=message,
                 reply_text=llm_result["reply"],
-                route="default",
                 model=llm_result["model"],
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
-                auto_escalated=False,
                 tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, message, llm_result["reply"])
@@ -548,12 +546,10 @@ def converse():
             session.append_turn(
                 user_text=transcript,
                 reply_text=reply_text,
-                route="default",
                 model=llm_result["model"],
                 latency_s=float(llm_result["latency_s"]),
                 input_tokens=int(llm_result.get("input_tokens") or 0),
                 output_tokens=int(llm_result.get("output_tokens") or 0),
-                auto_escalated=False,
                 tools_used=llm_result.get("tools_used"),
             )
             _maybe_autotitle(session, transcript, reply_text)
@@ -860,12 +856,10 @@ def converse_stream():
                 session.append_turn(
                     user_text=transcript,
                     reply_text=reply_text,
-                    route="default",
                     model=getattr(llm, "model", "unknown"),
                     latency_s=timings["llm"],
                     input_tokens=llm_input_tokens,
                     output_tokens=llm_output_tokens,
-                    auto_escalated=False,
                     tools_used=tools_used or None,
                 )
                 _maybe_autotitle(session, transcript, reply_text)

@@ -102,17 +102,13 @@ def test_schema_converters() -> None:
 
 
 def test_llm_protocol_accepts_tools_kwarg() -> None:
-    print("[7] both backends accept tools= without crashing (Phase 2A no-op)")
-    # We don't actually call the backends — too expensive per run. Just
-    # verify the chat() signature accepts tools= via inspect.
+    print("[7] GeminiLLM.chat accepts tools= kwarg")
     import inspect
-    from server.backends.llm_claude import ClaudeLLM
-    from server.backends.llm_ollama import OllamaLLM
+    from server.backends.llm_gemini import GeminiLLM
 
-    for cls in (ClaudeLLM, OllamaLLM):
-        sig = inspect.signature(cls.chat)
-        must("tools" in sig.parameters,
-             f"{cls.__name__}.chat is missing the tools= kwarg: {sig}")
+    sig = inspect.signature(GeminiLLM.chat)
+    must("tools" in sig.parameters,
+         f"GeminiLLM.chat is missing the tools= kwarg: {sig}")
     print("  OK")
 
 

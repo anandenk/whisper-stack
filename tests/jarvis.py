@@ -414,9 +414,8 @@ def post_converse_stream(wav_bytes: bytes) -> dict | None:
                     if cur_event == "transcript" and not transcript_seen:
                         transcript_seen = True
                         print(f"  you said: {data.get('transcript', '')!r}")
-                    elif cur_event == "route":
-                        tag = " (auto-escalated)" if data.get("auto_escalated") else ""
-                        print(f"  route={data.get('route')} model={data.get('model')}{tag}")
+                    elif cur_event == "model":
+                        print(f"  model={data.get('model')}")
                     elif cur_event == "tool_call":
                         print(f"  tool_call: {data.get('name')}({data.get('input', {})})")
                     elif cur_event == "tool_result":

@@ -33,8 +33,7 @@ def get_tool(name: str) -> Tool:
     return REGISTRY[name]
 
 
-# Side-effect imports register the default tools. Order = display order in
-# /health-style listings; doesn't affect model behavior. `search` registers
-# itself ONLY if TAVILY_API_KEY is set — see search.py for the rationale.
+# Side-effect import registers the `time` tool. Web search lives inside the
+# GeminiLLM backend now via the built-in google_search grounding — no longer
+# a custom Tool that needs registering.
 from server.tools import time as _time  # noqa: F401, E402
-from server.tools import search as _search  # noqa: F401, E402

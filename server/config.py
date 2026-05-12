@@ -1,7 +1,7 @@
 """Centralized config + .env loading.
 
 Imported first by every other server module. `load_dotenv(override=True)` is
-mandatory: an empty ANTHROPIC_API_KEY exists in the user's Windows env vars,
+mandatory: an empty GOOGLE_API_KEY can exist in the user's Windows env vars,
 and without override the real key in .env is silently ignored.
 """
 
@@ -15,12 +15,7 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env", override=True)
 
-# Selects the backend set instantiated at process boot. One process serves
-# one mode — no runtime switching. Validated here so a typo fails fast.
-MODE = os.environ.get("MODE", "local").strip().lower()
-if MODE not in ("local", "cloud"):
-    raise SystemExit(f"MODE must be 'local' or 'cloud', got {MODE!r}")
-
+# ---- STT (faster-whisper, local GPU) ----------------------------------------
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16")
@@ -31,55 +26,11 @@ WHISPER_COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16")
 _whisper_lang_raw = os.environ.get("WHISPER_LANGUAGE", "en").strip()
 WHISPER_LANGUAGE: str | None = _whisper_lang_raw if _whisper_lang_raw else None
 
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-# Cloud-mode simple-route model. The bare alias may need to be the dated form
-# (e.g. claude-haiku-4-5-20251001); Phase 6 verifies and updates if needed.
-ANTHROPIC_HAIKU_MODEL = os.environ.get("ANTHROPIC_HAIKU_MODEL", "claude-haiku-4-5")
-
-# Google Gemini — single-LLM target after the routing-stack migration.
-# GeminiLLM is added in commit 3 of the migration and wired into modes.py in
-# commit 4. Both keys read empty until the .env is updated; gating on
-# config.GOOGLE_API_KEY inside the backend avoids a hard import failure for
-# anyone still on a pre-migration .env.
+# ---- LLM (Google Gemini) ----------------------------------------------------
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
-# [cloud] STT — Deepgram nova-3
-DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "").strip()
-
-# [cloud] TTS — OpenAI tts-1 (PCM)
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1")
-OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "alloy")
-
-# Use 127.0.0.1 not 'localhost' on Windows — DNS/IPv6 fallback adds ~2s per request.
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-OLLAMA_GENERATE_URL = f"{OLLAMA_HOST}/api/generate"
-OLLAMA_CHAT_URL = f"{OLLAMA_HOST}/api/chat"
-OLLAMA_EMBED_URL = f"{OLLAMA_HOST}/api/embed"
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b-instruct-q5_K_M")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
-
-# Router: simple wins only when it beats complex by this much. Ties → complex.
-# Encodes asymmetric error cost (under-routing is worse than over-routing).
-# Lowered from 0.05 → 0.03 (Tier 1, 2026-05-10): after the SIMPLE/COMPLEX
-# example-set additions, tests/router_eval.py shows 0.03 is the new
-# empirical optimum at 85.3% overall accuracy with only 4 under-routings
-# (vs 0.02 → 83.2% with 7, and the original 0.05 → 68.4% with 8).
-ROUTER_MARGIN_S = float(os.environ.get("ROUTER_MARGIN_S", "0.03"))
-
-HOST = os.environ.get("HOST", "127.0.0.1")
-PORT = int(os.environ.get("PORT", "5000"))
-WARMUP = os.environ.get("WARMUP", "1") == "1"
-
-# Optional shared-secret auth. When set (e.g. in .env), all protected routes
-# (/converse, /chat, /transcribe, /speak) require an X-API-Key header that
-# matches. Generate with:  python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Leave empty for local-only LAN use.
-API_KEY = os.environ.get("API_KEY", "").strip()
-
-WARMUP_AUDIO = REPO_ROOT / "samples" / "jfk.wav"
-
+# ---- TTS (Piper, local) -----------------------------------------------------
 PIPER_MODELS_DIR = REPO_ROOT / "models" / "piper"
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-amy-medium")
 PIPER_MODEL_PATH = PIPER_MODELS_DIR / f"{PIPER_VOICE}.onnx"
@@ -96,23 +47,31 @@ PIPER_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.85"))
 # them; pin A2DP/stereo or a wired/USB device.
 TTS_OUTPUT_DEVICE = os.environ.get("TTS_OUTPUT_DEVICE", "").strip()
 
+# ---- HTTP server ------------------------------------------------------------
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", "5000"))
+WARMUP = os.environ.get("WARMUP", "1") == "1"
+
+# Optional shared-secret auth. When set (e.g. in .env), all protected routes
+# (/converse, /chat, /transcribe, /speak, /listen) require an X-API-Key header
+# that matches. Generate with:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Leave empty for local-only LAN use.
+API_KEY = os.environ.get("API_KEY", "").strip()
+
+WARMUP_AUDIO = REPO_ROOT / "samples" / "jfk.wav"
+
 # /converse caps reply length so a chatty LLM doesn't turn into 30s of audio.
 # Voice replies should be short (1-2 sentences). Tune via env if needed.
 CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "96"))
 
 # Tool use safety cap — max iterations of the model -> tool -> model loop
 # inside one chat() call. Prevents a runaway "model keeps calling tools" bug
-# from billing forever. Each round is one Anthropic / Ollama call.
+# from billing forever. Each round is one Gemini call.
 TOOL_MAX_ROUNDS = int(os.environ.get("TOOL_MAX_ROUNDS", "5"))
 
-# [both] web search via Tavily (https://tavily.com). Free tier covers 1k
-# queries/mo. When unset, the web_search tool is NOT registered — the model
-# simply doesn't see it as an option, so it can't try and fail.
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
-
-# Multi-turn session memory (see notes/sessions-plan.md).
+# ---- Sessions (multi-turn memory; see notes/sessions-plan.md) ---------------
 # - SESSION_DIR is REPO_ROOT-relative unless an absolute path is given.
-#   On a Fly.io VM this should point at a mounted volume so redeploys don't wipe history.
 # - Idle timeout: gap between requests beyond which a new session file rolls over.
 #   Lazy check at request time — no daemon, no scheduler.
 # - Window: max recent turns sent to the LLM as `history`. Idle is the real
@@ -123,14 +82,12 @@ SESSION_DIR = _session_dir_path if _session_dir_path.is_absolute() else (REPO_RO
 SESSION_IDLE_TIMEOUT_MIN = float(os.environ.get("SESSION_IDLE_TIMEOUT_MIN", "10"))
 SESSION_WINDOW_TURNS = int(os.environ.get("SESSION_WINDOW_TURNS", "30"))
 # Optional TTL: if set, sessions older than N days are deleted at server boot.
-# Unset / empty = never prune. Disk cost is trivial for one user, but on a
-# Fly.io volume (cloud mode) this caps growth without a daemon.
+# Unset / empty = never prune.
 _session_ttl_raw = os.environ.get("SESSION_TTL_DAYS", "").strip()
 SESSION_TTL_DAYS: float | None = float(_session_ttl_raw) if _session_ttl_raw else None
 
-# Wake-word client (tests/jarvis.py). Used only when running that client;
-# the Flask server itself doesn't read these. Pulling them through config.py
-# keeps the .env layout consistent with other knobs.
+# ---- Wake-word client (tests/jarvis.py) -------------------------------------
+# Used only when running that client; the Flask server itself doesn't read these.
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL", "hey_jarvis")
 WAKEWORD_THRESHOLD = float(os.environ.get("WAKEWORD_THRESHOLD", "0.5"))
 # Optional chime played on wake-word detection. Empty / non-existent path
@@ -144,9 +101,7 @@ WAKEWORD_CHIME: Path = (
 )
 # After the reply finishes, jarvis.py optionally stays in continuous mode
 # for this long (no further wake word required) before returning to
-# passive wake-word listening. Phase 6B uses this; 6A always returns
-# immediately. Tunable so households with chatty backgrounds can dial it
-# down.
+# passive wake-word listening.
 WAKEWORD_CONVERSATION_TIMEOUT_S = float(
     os.environ.get("WAKEWORD_CONVERSATION_TIMEOUT_S", "30")
 )

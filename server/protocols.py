@@ -1,20 +1,16 @@
-"""Structural interfaces for the four pluggable backends (STT, LLM, TTS, Embedder).
+"""Structural interfaces for the three pluggable backends (STT, LLM, TTS).
 
-Mode-independent. Cloud-mode and local-mode implementations live under
-`server/backends/*`. The factory in `server/modes.py` instantiates the right
-one based on the `MODE` env var at process boot.
+Implementations live under `server/backends/*`. The factory in
+`server/modes.py` instantiates them as singletons.
 
 These are typing.Protocols on purpose — backend classes don't subclass them,
-they just match the shape. Method signatures use plain dicts where the
-existing code already does (no point introducing dataclasses for this migration).
+they just match the shape.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable, Iterator, Protocol
-
-import numpy as np
 
 
 class STT(Protocol):
@@ -130,13 +126,3 @@ class TTS(Protocol):
     def is_loaded(self) -> bool: ...
 
 
-class Embedder(Protocol):
-    def embed(self, texts: list[str]) -> np.ndarray:
-        """Returns (n, dim) float32 array. Dim is implementation-defined
-        (Ollama nomic-embed-text = 768, MiniLM-L6 = 384). Vectors are NOT
-        required to be L2-normalized — the router normalizes."""
-        ...
-
-    def warmup(self) -> None: ...
-
-    def is_loaded(self) -> bool: ...

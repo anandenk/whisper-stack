@@ -1,8 +1,8 @@
 """Stage 7 verification: end-to-end /converse pipeline.
 
-Generates 3 source audio files via Piper (factual, complex, casual chat), POSTs each to
-/converse, asserts the response shape (NOT the route — that's stage 5's job to calibrate),
-and prints a per-stage timing breakdown plus which stage dominates each interaction.
+Generates 3 source audio files via Piper (factual, complex, casual chat),
+POSTs each to /converse, asserts the response shape, and prints a per-stage
+timing breakdown plus which stage dominates each interaction.
 
 You'll hear three reply audios play through your default output as the test runs.
 
@@ -33,13 +33,10 @@ SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
 API_KEY = os.environ.get("API_KEY", "").strip()
 AUTH_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
-# (label, prompt-text-to-synth, expected_route_hint)
-# expected_route_hint is for human-readable output only — NOT asserted, since
-# router calibration is the user's choice (see stage 5 design notes).
 QUERIES = [
-    ("factual",  "Could you tell me, briefly, what is the capital of France?",                    "simple"),
-    ("complex",  "In one sentence, explain why a Python function might raise a NoneType error.",  "complex"),
-    ("chat",     "Hi there, how are you doing today?",                                            "either"),
+    ("factual",  "Could you tell me, briefly, what is the capital of France?"),
+    ("complex",  "In one sentence, explain why a Python function might raise a NoneType error."),
+    ("chat",     "Hi there, how are you doing today?"),
 ]
 
 
@@ -47,11 +44,6 @@ def must(cond: bool, msg: str) -> None:
     if not cond:
         print(f"FAIL: {msg}", file=sys.stderr)
         sys.exit(1)
-
-
-# Per-mode expected model substring for the simple route. Complex route is
-# Sonnet in both modes ("claude" matches), simple is Llama (local) or Haiku (cloud).
-SIMPLE_MODEL_SUBSTR_BY_MODE = {"local": "llama", "cloud": "haiku"}
 
 
 def wait_for_health(timeout_s: float = 60.0) -> dict:
@@ -91,62 +83,44 @@ def main() -> int:
     print(f"Waiting for server at {BASE}/health ...")
     h = wait_for_health()
     must(h.get("status") == "ok", f"unexpected /health: {h}")
-    server_mode = h.get("mode", "local")
-    must(server_mode in SIMPLE_MODEL_SUBSTR_BY_MODE,
-         f"unexpected /health.mode: {server_mode!r}")
-    simple_substr = SIMPLE_MODEL_SUBSTR_BY_MODE[server_mode]
-    print(f"  -> {h}")
-    print(f"  server MODE={server_mode}; simple-route model expected to contain {simple_substr!r}\n")
+    print(f"  -> {h}\n")
 
     SAMPLES_DIR.mkdir(exist_ok=True)
     print(f"Generating {len(QUERIES)} fixture audio files via Piper...")
     fixtures = []
-    for label, text, hint in QUERIES:
+    for label, text in QUERIES:
         path = SAMPLES_DIR / f"_converse_{label}.wav"
         synth_fixture(text, path)
         size_kb = path.stat().st_size / 1024
-        fixtures.append((label, text, hint, path))
+        fixtures.append((label, text, path))
         print(f"  {path.name}  ({size_kb:.0f} KB)  src: {text!r}")
     print()
 
     results = []
-    for label, src_text, hint, path in fixtures:
-        print(f"--- {label}  (expected route hint: {hint}) ---")
+    for label, src_text, path in fixtures:
+        print(f"--- {label} ---")
         print(f"  src text: {src_text!r}")
         wall_t0 = time.perf_counter()
         d = post_converse(path)
         wall = time.perf_counter() - wall_t0
 
-        # Wiring assertions — NOT semantic assertions on the route
-        for k in ("transcript", "route", "model", "reply_text", "audio_base64",
-                  "audio_sample_rate", "audio_duration_s", "timings", "router_scores"):
+        for k in ("transcript", "model", "reply_text", "audio_base64",
+                  "audio_sample_rate", "audio_duration_s", "timings"):
             must(k in d, f"missing key {k!r} in response: {list(d.keys())}")
-        must(d["route"] in ("simple", "complex"), f"bad route: {d['route']!r}")
-        # model name should match the route taken (per-mode for simple route)
-        if d["route"] == "simple":
-            must(simple_substr in d["model"].lower(),
-                 f"simple route but model={d['model']!r} (MODE={server_mode}, "
-                 f"expected substring {simple_substr!r})")
-        else:
-            must("claude" in d["model"].lower(), f"complex route but model={d['model']!r}")
-        # audio_base64 should be non-empty + decode successfully
         wav = base64.b64decode(d["audio_base64"])
         must(wav.startswith(b"RIFF"), "audio_base64 doesn't decode to a WAV (no RIFF header)")
         must(d["audio_duration_s"] > 0.1, f"reply audio too short: {d['audio_duration_s']:.2f}s")
-        # Timings present + roughly add up
-        for tk in ("stt", "route", "llm", "tts", "total"):
+        for tk in ("stt", "llm", "tts", "total"):
             must(tk in d["timings"], f"missing timing {tk!r}")
-        sub_sum = d["timings"]["stt"] + d["timings"]["route"] + d["timings"]["llm"] + d["timings"]["tts"]
-        # total should be >= sum of sub-stages, with some overhead. Allow 2s slack.
+        sub_sum = d["timings"]["stt"] + d["timings"]["llm"] + d["timings"]["tts"]
         must(d["timings"]["total"] >= sub_sum - 0.05,
              f"total={d['timings']['total']:.2f} < sub_sum={sub_sum:.2f}")
 
         print(f"  transcript:  {d['transcript']!r}")
-        print(f"  route:       {d['route']}  (model={d['model']})")
         print(f"  reply:       {d['reply_text'][:200]}{'...' if len(d['reply_text']) > 200 else ''}")
         t = d["timings"]
-        print(f"  timings (s): stt={t['stt']:.2f}  route={t['route']:.3f}  llm={t['llm']:.2f}  tts={t['tts']:.2f}  total={t['total']:.2f}  http_wall={wall:.2f}")
-        # Identify the dominant stage
+        print(f"  timings (s): stt={t['stt']:.2f}  llm={t['llm']:.2f}  tts={t['tts']:.2f}  "
+              f"total={t['total']:.2f}  http_wall={wall:.2f}")
         named = {"stt": t["stt"], "llm": t["llm"], "tts": t["tts"]}
         dom = max(named, key=named.get)
         print(f"  dominant stage: {dom}  ({named[dom]:.2f}s, {named[dom]/t['total']*100:.0f}% of total)")
@@ -154,8 +128,6 @@ def main() -> int:
         print()
 
         results.append((label, d, wall))
-        # Allow the previous reply to finish playing before the next /converse
-        # cuts it off via sd.play (single audio stream).
         time.sleep(d["audio_duration_s"] + 0.5)
 
     print("=" * 64)
@@ -164,7 +136,8 @@ def main() -> int:
     print("  Per-query summary:")
     for label, d, wall in results:
         t = d["timings"]
-        print(f"    {label:<8} route={d['route']:<8} stt={t['stt']:.2f}s  llm={t['llm']:.2f}s  tts={t['tts']:.2f}s  total={t['total']:.2f}s")
+        print(f"    {label:<8} model={d['model']:<24} stt={t['stt']:.2f}s  "
+              f"llm={t['llm']:.2f}s  tts={t['tts']:.2f}s  total={t['total']:.2f}s")
     print("=" * 64)
     return 0
 

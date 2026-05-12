@@ -1,20 +1,14 @@
 """Auto-titler for sessions.
 
-One Anthropic-Haiku call after the first turn of a new session lands.
-Generates a 3-5 word title; the slug derived from it goes into the file
-header + filename.
-
-Bypasses the modes factory on purpose: titling is a small, low-cost task
-that wants Haiku regardless of MODE (Sonnet would be overkill, Llama would
-be slower and less reliable). Failures are swallowed by the caller — a
-title is cosmetic and a transient API error shouldn't 500 the user's
-first conversation turn.
+One Gemini call after the first turn of a new session lands. Generates a
+3-5 word title; the slug derived from it goes into the file header +
+filename. Failures are swallowed by the caller — a title is cosmetic and
+a transient API error shouldn't 500 the user's first conversation turn.
 """
 
 from __future__ import annotations
 
-from server import config
-from server.backends.llm_claude import ClaudeLLM
+from server.backends.llm_gemini import GeminiLLM
 
 _TITLE_SYSTEM_PROMPT = (
     "You generate short, descriptive titles for conversations. "
@@ -24,13 +18,13 @@ _TITLE_SYSTEM_PROMPT = (
     "no labels like 'Title:'. Lowercase or mixed case is fine."
 )
 
-_titler: ClaudeLLM | None = None
+_titler: GeminiLLM | None = None
 
 
-def _get_titler() -> ClaudeLLM:
+def _get_titler() -> GeminiLLM:
     global _titler
     if _titler is None:
-        _titler = ClaudeLLM(model=config.ANTHROPIC_HAIKU_MODEL)
+        _titler = GeminiLLM()
     return _titler
 
 

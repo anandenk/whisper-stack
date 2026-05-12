@@ -2,20 +2,12 @@
 
 In-memory, resets on every server restart. /health exposes a snapshot so
 `curl /health | jq .usage` gives a quick cost-since-boot view. Solo-use
-visibility — not designed for billing accuracy or long-horizon
-analytics; pricing constants are best-effort against public rates and
-may drift. The intent is "is something using more tokens than I
-expected" eyeballing.
+visibility — not designed for billing accuracy or long-horizon analytics;
+pricing constants are best-effort against public rates and may drift.
 
-Pricing reference (2026, USD per 1M tokens; update when rates change):
+Pricing reference (USD per 1M tokens; verify at https://ai.google.dev/pricing):
 
-    gemini-2.5-flash    $0.30 input  /   $2.50 output
-    claude-sonnet-4-6   $3.00 input  /  $15.00 output  (legacy, see commit 5)
-    claude-haiku-4-5    $1.00 input  /   $5.00 output  (legacy, see commit 5)
-
-Local models (Ollama / Llama) and STT/TTS calls aren't billed by token,
-so they're recorded as call counts only, with cost zero. Verify Gemini
-rates at https://ai.google.dev/pricing — they shift.
+    gemini-2.5-flash    $0.30 input  /  $2.50 output
 """
 
 from __future__ import annotations
@@ -24,14 +16,9 @@ import threading
 import time
 
 # Substring-keyed so dated aliases (e.g. "gemini-2.5-flash-001") still match.
-# First match wins.
 _PRICING_PER_1M_USD: dict[str, dict[str, float]] = {
-    "gemini-2.5-flash":  {"input": 0.30, "output":  2.50},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-haiku-4-5":  {"input": 1.00, "output":  5.00},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
 }
-# Substrings that mark a model as local/free.
-_LOCAL_MODEL_MARKERS = ("llama",)
 
 _LOCK = threading.Lock()
 _BOOT_TIME = time.time()
@@ -52,8 +39,7 @@ def record_wake_detection() -> None:
 
 def record(model: str | None,
            input_tokens: int | float | None = 0,
-           output_tokens: int | float | None = 0,
-           route: str | None = None) -> None:
+           output_tokens: int | float | None = 0) -> None:
     """Increment counters for a single LLM call. Safe to call with None
     arguments — defensive against backends that didn't surface a metric
     on a particular call."""
@@ -79,13 +65,10 @@ def estimated_cost_usd(model: str | None,
                        output_tokens: int | float | None) -> float:
     """Per-call USD cost estimate for one LLM invocation.
 
-    Returns 0.0 for local models (Llama, etc.) and for unknown models we
-    don't have pricing for. Same pricing constants and matching rules as
-    snapshot(), so per-call values reconcile with the running totals.
+    Returns 0.0 for unknown models. Same pricing constants and matching rules
+    as snapshot(), so per-call values reconcile with the running totals.
     """
     if not model:
-        return 0.0
-    if any(m in model.lower() for m in _LOCAL_MODEL_MARKERS):
         return 0.0
     rates = _model_rates(model)
     if rates is None:
@@ -107,8 +90,7 @@ def snapshot() -> dict:
     per_model: dict[str, dict] = {}
     cost_usd = 0.0
     for model, c in per_model_raw.items():
-        is_local = any(m in model.lower() for m in _LOCAL_MODEL_MARKERS)
-        rates = None if is_local else _model_rates(model)
+        rates = _model_rates(model)
         model_cost = 0.0
         if rates is not None:
             model_cost = (c["input"] / 1e6 * rates["input"]

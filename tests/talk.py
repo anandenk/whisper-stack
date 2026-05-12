@@ -342,9 +342,9 @@ def main() -> int:
         t = d["timings"]
         print()
         print(f"  You said:  {d['transcript']!r}")
-        print(f"  Route:     {d['route']}  (model: {d['model']})")
+        print(f"  Model:     {d['model']}")
         print(f"  Reply:     {d['reply_text']}")
-        print(f"  Timings:   stt={t['stt']:.2f}  route={t['route']:.3f}  "
+        print(f"  Timings:   stt={t['stt']:.2f}  "
               f"llm={t['llm']:.2f}  tts={t['tts']:.2f}  total={t['total']:.2f}  http={http_wall:.2f}")
         if "session_file" in d:
             print(f"  Session:   {d['session_file']}")

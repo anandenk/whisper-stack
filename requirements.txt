@@ -1,0 +1,38 @@
+# whisper-stack dependencies — single install profile after the Gemini
+# migration. The two-file local/cloud split (and `requirements-cloud.txt`)
+# is gone; there's only one deploy shape now.
+#
+# Local-only system bits the pip install does NOT cover (document in CLAUDE.md):
+#   * NVIDIA CUDA / cuBLAS / cuDNN wheels — needed at faster-whisper import.
+#     On Windows the per-process `os.add_dll_directory` shim in
+#     server/backends/stt_whisper.py points at site-packages/nvidia/*/bin.
+#   * Piper voice models — drop the .onnx + .json files under models/piper/
+#     and set PIPER_VOICE in .env.
+#   * openwakeword's bundled models — `python -c "import openwakeword;
+#     openwakeword.utils.download_models()"` once per machine.
+
+flask
+python-dotenv
+requests
+numpy
+
+# LLM (cloud)
+google-genai
+
+# STT (local, GPU)
+faster-whisper
+
+# TTS (local)
+piper-tts
+
+# Wake-word detection (server-side, used by /listen for the ESP-32 firmware
+# and tests/jarvis.py).
+openwakeword
+
+# Local audio playback (server speaks the reply when play_locally=true).
+sounddevice
+
+# tools/time.py uses zoneinfo + IANA tz database. Linux usually ships these
+# at the OS level; this Python package is the cross-platform fallback (also
+# required on Windows venvs).
+tzdata
