@@ -36,6 +36,14 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 # (e.g. claude-haiku-4-5-20251001); Phase 6 verifies and updates if needed.
 ANTHROPIC_HAIKU_MODEL = os.environ.get("ANTHROPIC_HAIKU_MODEL", "claude-haiku-4-5")
 
+# Google Gemini — single-LLM target after the routing-stack migration.
+# GeminiLLM is added in commit 3 of the migration and wired into modes.py in
+# commit 4. Both keys read empty until the .env is updated; gating on
+# config.GOOGLE_API_KEY inside the backend avoids a hard import failure for
+# anyone still on a pre-migration .env.
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
 # [cloud] STT — Deepgram nova-3
 DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "").strip()
 
