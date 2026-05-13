@@ -1,22 +1,27 @@
-// whisper-stack ESP-WROOM-32 firmware — main entry point.
+// whisper-stack ESP32-S3-DevKitC-1 firmware — main entry point.
 //
 // Each subsystem is gated on its ENABLE_X flag in app_state.h.
 //
 // State machine: IDLE → LISTENING → THINKING → SPEAKING → IDLE.
 //
-// M4: while IDLE, listen_stream_task holds an open chunked-transfer
-// POST to /listen, draining the audio_in ring buffer. On wake fired
-// (or BOOT button as a manual fallback), it transitions to LISTENING
-// and calls do_round_trip_streaming_with_preroll(). The pre-roll is
-// the last ~500 ms of audio that was already streamed to /listen so
-// the start of the user's question (which often overlaps the tail of
-// "...jarvis") isn't lost when VAD takes over.
+// v2-M2 (was M4): while IDLE, wake.c runs an in-process AFE+WakeNet
+// pipeline (esp-sr 2.4.4) — mic frames flow through AFE feed, fetch
+// returns WAKENET_DETECTED events. On wake (or BOOT button as a
+// manual fallback), wake.c calls do_round_trip_streaming_with_preroll()
+// with the last 1 s of mic audio as preroll, transitioning to
+// LISTENING. The preroll matters because the start of the user's
+// question often runs straight through the wake word ("Hey Kira
+// what's the weather"). Pre-v2-M2 (v1) firmware used a server-side
+// /listen chunked-POST path (listen_stream.c, deleted in v2-M2-c) —
+// kept the same do_round_trip contract so the LISTENING / THINKING
+// / SPEAKING side didn't change.
 //
 // M5: after each reply finishes SPEAKING, do_round_trip_streaming_with_preroll
 // loops into another VAD recording (no preroll, longer initial timeout)
 // so follow-up questions don't need re-waking. Silent for
-// WS_CONVERSATION_TIMEOUT_MS → return to IDLE and let listen_stream_task
-// re-arm /listen for the next wake word. Mirrors tests/jarvis.py 6B.
+// WS_CONVERSATION_TIMEOUT_MS → return to IDLE; wake.c re-arms AFE
+// (or it's been running continuously, depending on M6 status —
+// see notes/esp32-v2-plan.md).
 //
 // M3 path is preserved as do_round_trip_streaming_with_preroll(...,
 // NULL, 0) — i.e. preroll-less. M2's buffered fallback is still gated
@@ -50,7 +55,7 @@
 #include "i2s_mic.h"
 #include "http_client.h"
 #include "vad.h"
-#include "listen_stream.h"
+#include "wake.h"
 #include "wake_source.h"
 #include "control_state.h"
 #include "gesture.h"
@@ -747,11 +752,15 @@ void app_main(void)
 #endif
 
 #if ENABLE_MIC && ENABLE_WIFI && CONFIG_VOICE_ENABLED
-    if (listen_stream_init(ip) != ESP_OK) {
-        ESP_LOGE(TAG, "listen_stream_init failed");
+    // v2-M2: on-device wake-word via esp-sr (wake.c). Server-side
+    // /listen + listen_stream.c retired in v2-M2-c. The /listen route
+    // + wakeword.py stay in tree for web client + tests/jarvis.py.
+    if (wake_init(ip) != ESP_OK) {
+        ESP_LOGE(TAG, "wake_init failed; no wake source — only BOOT button "
+                      "and (if enabled) gesture/IR will wake the device");
     }
 #elif ENABLE_MIC && ENABLE_WIFI
-    ESP_LOGI(TAG, "voice disabled — skipping listen_stream init");
+    ESP_LOGI(TAG, "voice disabled — skipping wake init");
 #endif
 
 #if CONFIG_GAZE_COUPLING_DEMO

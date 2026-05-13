@@ -171,6 +171,25 @@ menu "Whisper Stack Device"
             hammering the CPU and network. See notes/build-modes.md
             for the full menuconfig flow.
 
+    config WAKE_INPUT_GAIN_X10
+        int "Pre-AFE input gain (×10, so 10 = 1.0×)"
+        depends on VOICE_ENABLED
+        default 10
+        range 1 200
+        help
+            Optional pre-AFE gain applied per int16 mic sample with
+            saturation clipping, in tenths (10 = 1.0×, 60 = 6.0×, etc).
+            Default 1.0× (no pre-amp) because AFE-SR runs AGC before
+            WakeNet — pre-amping fights AGC by lifting silence into
+            its "compress" envelope, which lowers gain on real speech
+            and hurts recall.
+
+            Only raise above 10 if recall is poor in M2-d smoke
+            testing AND the silence-amplification concern proves
+            negligible in practice. The wakeword.py server-side
+            LISTEN_GAIN=6× was needed because openWakeWord has no
+            AGC; that justification does not transfer here.
+
     menu "M7 — HC-SR04 ultrasonic gesture wake"
 
         config WAKE_GESTURE_ENABLED

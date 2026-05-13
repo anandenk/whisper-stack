@@ -1,0 +1,13 @@
+## IDF Component Manager manifest for the firmware's `main` component.
+##
+## v2-M2: pulls in Espressif's esp-sr (a.k.a. esp-skainet) library for
+## on-device wake-word detection via WakeNet + AFE. The component ships
+## stock wake-word models including `wn9_jarvis_tts`, which we select
+## via `idf.py menuconfig` → ESP Speech Recognition.
+##
+## See notes/esp32-v2-plan.md for the M2 plan and the partition-table
+## verification step (esp-sr may or may not auto-inject the `model`
+## partition; first build tells us).
+
+dependencies:
+  espressif/esp-sr: "^2.4.4"

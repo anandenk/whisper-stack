@@ -326,13 +326,13 @@ been caught at the source.
      added) — bisection at 9ff64b2 (May 6) also degraded eventually,
      just later. Same code path, same failure mode.
 
-   Long-term fix: on-device wake-word (`esp-skainet` on the ESP32-S3
-   v2 hardware that's already on order — see
-   [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md))
-   eliminates the continuous `/listen` stream entirely, removing the
-   chronic exposure window. ESP32-C5 (5 GHz dual-band) would also
-   help by reducing 2.4 GHz contention, but it doesn't fix the
-   architectural issue the way on-device wake does.
+   Long-term fix **shipped in v2-M2** (`wake.c` + esp-sr 2.4.4 on
+   the ESP32-S3-DevKitC-1 N8R8). On-device WakeNet eliminates the
+   continuous `/listen` stream entirely — the only firmware↔server
+   traffic now is per-turn `/converse` uploads. The chronic exposure
+   window is gone. ESP32-C5 (5 GHz dual-band) would still help by
+   reducing 2.4 GHz contention, but isn't architecturally needed
+   anymore.
 
    To re-run the throughput test in a future session, see the
    step-by-step reconstruction recipe in
@@ -402,7 +402,8 @@ firmware/                    ESP-IDF v5.3.5 project (M1–M8 shipped + cat-face 
 │   ├── i2s_mic.{c,h}        INMP441 → 16 kHz int16 ring buffer + STATS dump
 │   ├── vad.{c,h}            peak-threshold VAD with cancel hook (M3+)
 │   ├── http_client.{c,h}    esp_http_client wrapper for /converse (buffered + streaming)
-│   ├── listen_stream.{c,h}  raw-socket /listen client + 500 ms pre-roll (M4)
+│   ├── wake.{c,h}           on-device esp-sr WakeNet + AFE (v2-M2, replaced
+│   │                        the M4-era listen_stream.c server-side path)
 │   ├── wake_source.h        wake_source_t enum (VOICE / GESTURE / BUTTON / IR)
 │   ├── gesture.{c,h}        M7 — HC-SR04 wave-to-wake (runtime-gated)
 │   ├── ir_remote.{c,h}      M8 — NEC IR receiver via RMT-RX (runtime-gated)
@@ -465,11 +466,17 @@ State of the device:
 - OLED renders status text, WiFi STA gets a DHCP lease on enterprise Wi-Fi
   via WPA2-Enterprise (802.1X), INMP441 captures audio with RMS/peak
   responsive to sound.
-- **Hands-free wake** (M4): say "hey jarvis", server-side openWakeWord
-  fires, device transitions to LISTENING with a **1 s pre-roll** (bumped
-  from 512 ms after real-use feedback — 500 ms wasn't enough to catch
-  short lead-in words like "what is the X" when wake fires mid-"jarvis").
-  BOOT button is preserved as a manual-wake fallback.
+- **Hands-free wake** (M4 → v2-M2): say "Hey Kira", on-device
+  esp-sr WakeNet (`wn9_heykira_tts3`) fires inside `wake.c`, device
+  transitions to LISTENING with a **1 s pre-roll** (bumped from 512 ms
+  after real-use feedback — 500 ms wasn't enough to catch short
+  lead-in words like "what is the X" when wake fires mid-utterance).
+  The v1 M4 path (server-side openWakeWord via `/listen` —
+  retired in v2-M2-c) said "Hey Jarvis"; the v2 path is on-device,
+  uses Espressif's stock `wn9_heykira_tts3` model from esp-sr 2.4.4
+  (no `hi_jarvis` variant in the stock list), and eliminates the
+  chronic /listen network exposure that drove gotcha #9. BOOT button
+  is preserved as a manual-wake fallback.
 - VAD-bounded recording (M3) streams over **HTTP chunked-transfer**
   as it's captured — no heap cap on length. VAD stops on 2.5 s of
   silence (`vad.h`) after voice has been heard, or returns NO_SPEECH
@@ -615,11 +622,20 @@ Two presets: `OLED_128x64` (current panel) and `ROUND_240` (placeholder
 for the future round display, dimensions guessed — re-tune when real
 hardware arrives).
 
-### M4 / wake-word gotchas (worth preserving)
+### M4 / wake-word gotchas (HISTORICAL — superseded by v2-M2)
+
+> **Superseded 2026-05-12.** `listen_stream.c` was deleted in v2-M2-c
+> when on-device WakeNet (wake.c + esp-sr) replaced the server-side
+> /listen path. The gotchas below are preserved because (a) the
+> server-side `/listen` route + `wakeword.py` still exist for the
+> web client + `tests/jarvis.py`, so the SERVER-side defenses (item
+> 4) still apply, and (b) the lessons are recoverable from git tag
+> `pre-esp32-s3-port` if anyone ever needs to resurrect the
+> firmware-side `/listen` path.
 
 These were all bench-verified during the M4 hardening session
-2026-05-05; the device works hands-free for arbitrarily long
-sessions of /listen now.
+2026-05-05; the device worked hands-free for arbitrarily long
+sessions of /listen until v2-M2 retired the path entirely.
 
 1. **`/listen` cannot use `esp_http_client`** — it's a full-duplex
    pattern (firmware writes chunks indefinitely, server may reply

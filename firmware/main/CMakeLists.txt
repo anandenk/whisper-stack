@@ -12,7 +12,12 @@ idf_component_register(
         "i2s_mic.c"
         "http_client.c"
         "vad.c"
-        "listen_stream.c"
+        # v2-M2: on-device wake word via esp-sr (WakeNet + AFE).
+        # Replaced listen_stream.c (server-side /listen client) in v2-M2-c.
+        # The /listen server route + wakeword.py stay in tree for the
+        # web client + tests/jarvis.py. The firmware path is now
+        # entirely on-device.
+        "wake.c"
         # M7 — HC-SR04 ultrasonic gesture wake (compiled-in always;
         # runtime-gated on CONFIG_WAKE_GESTURE_ENABLED inside gesture.c).
         "gesture.c"
@@ -57,4 +62,7 @@ idf_component_register(
         esp_timer
         # M8: NEC IR decoding via the RMT peripheral
         esp_driver_rmt
+        # v2-M2: on-device wake-word via esp-sr (managed component).
+        # Provides model_path.h + esp_wn_models.h + the AFE/WakeNet APIs.
+        espressif__esp-sr
 )

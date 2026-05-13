@@ -27,11 +27,36 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
 # --- Partition table -------------------------------------------------------
-# Built-in two-OTA layout: ota_0 (1.5MB) + ota_1 (1.5MB) + nvs + otadata.
-# OTA itself isn't wired in v1 but pre-allocating slots avoids a full
-# re-flash later when OTA lands. 8 MB flash on N8R8 gives plenty of room.
-CONFIG_PARTITION_TABLE_TWO_OTA=y
+# v2-M2 needs a custom CSV to add a `model` partition for esp-sr's
+# srmodels.bin (WakeNet wake-word models — esp-sr does NOT auto-inject
+# the partition, see its CMakeLists.txt's CONFIG_PARTITION_TABLE_CUSTOM
+# branch). Built-in `partitions_two_ota.csv` lacked the model entry, so
+# we switched to `partitions_two_ota_model.csv`. Same OTA layout shape,
+# bumped app partitions 1 MB → 1.5 MB to absorb esp-sr's ~500 KB of
+# static-library code growth.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_two_ota_model.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# --- esp-sr wake-word selection -------------------------------------------
+# v2-M2: enable only the "Hey Kira" wake-word model (two-word phrase
+# gives lower FP rate than the single-word options in conversational
+# backgrounds). Other stock models stay disabled to keep srmodels.bin
+# small. (The plan originally called for wn9_jarvis_tts; we switched
+# to Hey Kira on 2026-05-12 — see notes/esp32-v2-plan.md for the
+# trade-off discussion and FP-rate fallback options.)
+CONFIG_SR_WN_WN9_HEYKIRA_TTS3=y
+# Use WebRTC noise suppression + VAD for the AFE pipeline; the deep-learning
+# variants (nsnet2 / vadnet1) are heavier and not needed until we tune.
+CONFIG_SR_NSN_WEBRTC=y
+CONFIG_SR_VADN_WEBRTC=y
+
+# --- v2-M2 on-device wake-word ------------------------------------------
+# listen_stream.c (the v1 server-side /listen client) was deleted in
+# v2-M2-c — wake.c (esp-sr WakeNet) is the only wake path. The
+# /listen route on the server stays in tree for web client +
+# tests/jarvis.py, just no longer used by the firmware.
+CONFIG_WAKE_INPUT_GAIN_X10=10
 
 # --- Compiler / log level --------------------------------------------------
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
@@ -60,10 +85,10 @@ CONFIG_WS_SESSION_ID="esp32"
 # rate. On contended 2.4 GHz links retransmits stall the producer and
 # audio frames get recycled. 64 KB absorbs ~10× more in flight before
 # backpressuring. See CLAUDE.md gotcha #9.
+# The CONFIG_TCP_*_DEFAULT names were renamed to CONFIG_LWIP_TCP_*_DEFAULT
+# in IDF 5.x — keeping only the new names to avoid reconfigure warnings.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
 CONFIG_LWIP_TCP_WND_DEFAULT=32768
-CONFIG_TCP_SND_BUF_DEFAULT=32768
-CONFIG_TCP_WND_DEFAULT=32768
 
 # --- M7 (HC-SR04 wave-to-wake) and M8 (IR remote) -------------------------
 # Both default OFF — opt in via menuconfig. Codes default 0; firmware logs
