@@ -33,10 +33,10 @@ audio in → STT → Gemini 2.5 Flash (with tools) → streaming TTS → audio o
        get_current_time  +  google_search (built-in)
 ```
 
-Four voice clients reach the same server, all working today: a
+Three voice clients reach the same server, all working today: a
 self-contained web page (any browser, including phones), a
-push-to-talk CLI, a workstation-side "hey jarvis" wake-word loop,
-and the custom **ESP32-S3 + INMP441 + SSD1306×2** voice device.
+push-to-talk CLI, and the custom **ESP32-S3 + INMP441 + SSD1306×2**
+voice device.
 
 ## What works today
 
@@ -46,8 +46,8 @@ and the custom **ESP32-S3 + INMP441 + SSD1306×2** voice device.
 - **On-device wake word ("Hey Kira").** The v2 firmware runs
   Espressif's esp-sr WakeNet model `wn9_heykira_tts3` directly on
   the ESP32-S3 chip — no continuous network stream needed.
-  Eliminated the chronic `/listen` exposure that was the v1
-  firmware's biggest source of audio corruption (gotcha #9).
+  Eliminated the chronic exposure that was the v1 firmware's
+  biggest source of audio corruption (gotcha #9).
 - **AFE-driven mic pipeline.** The mic feeds through Espressif's
   Audio Front End (noise suppression + AGC + ML VAD via
   `vadnet1_medium`) so typing, clicks, and other transient noise
@@ -72,25 +72,20 @@ and the custom **ESP32-S3 + INMP441 + SSD1306×2** voice device.
   "Hey Kira" wake. This is the same default Alexa / Siri use, since
   in a shared room continuous mode picks up every nearby voice as
   input. Flip the Kconfig to opt in for solo-use scenarios.
-- **Server-side "hey jarvis" wake-word client** (`tests/jarvis.py`).
-  Workstation-side openWakeWord — different model and wake phrase
-  from the on-device path. No tap, no Enter — say "hey jarvis",
-  ask, get a reply.
-- **Four voice clients.** Self-contained web page at `GET /`
+- **Three voice clients.** Self-contained web page at `GET /`
   (records on phone, plays through Web Audio); push-to-talk CLI
-  (`tests/talk.py`); workstation wake-word loop (`tests/jarvis.py`);
-  and the custom **ESP32-S3 + INMP441 mic + two SSD1306 OLEDs**
-  firmware ([`firmware/`](firmware/)) — on-device "Hey Kira",
-  speaking-screen overlay with model + token cost. WPA2-Enterprise
-  WiFi verified on an 802.1X campus network. Workstation
-  Realtek output speaks the reply (on-device DAC is v2-M3, not
-  yet wired).
+  (`tests/talk.py`); and the custom **ESP32-S3 + INMP441 mic + two
+  SSD1306 OLEDs** firmware ([`firmware/`](firmware/)) — on-device
+  "Hey Kira", speaking-screen overlay with model + token cost.
+  WPA2-Enterprise WiFi verified on an 802.1X campus network.
+  Workstation Realtek output speaks the reply (on-device DAC is
+  v2-M3, not yet wired).
 - **Per-process token / cost accounting.** `GET /health` returns
   `usage` with input/output tokens + USD-cost-since-boot per model.
   `/converse` also returns a per-call `estimated_cost_usd` for
   per-turn cost display.
 - **Auth.** Optional `API_KEY` shared-secret on `/converse`,
-  `/converse/stream`, `/chat`, `/transcribe`, `/speak`, `/listen`.
+  `/converse/stream`, `/chat`, `/transcribe`, `/speak`.
   `GET /` and `/health` stay public.
 - **Cloudflare Tunnel runbook** for off-LAN access without
   port-forwarding.
@@ -182,10 +177,6 @@ mkdir -Force models\kokoro | Out-Null
 $base = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 curl.exe -sSL -o models\kokoro\kokoro-v1.0.onnx "$base/kokoro-v1.0.onnx"
 curl.exe -sSL -o models\kokoro\voices-v1.0.bin "$base/voices-v1.0.bin"
-
-# Optional: download openwakeword models for tests/jarvis.py (workstation
-# wake-word client; not needed for the ESP32-S3 firmware path)
-.\.venv\Scripts\python.exe -c "import openwakeword; openwakeword.utils.download_models()"
 ```
 
 ### Run
@@ -214,13 +205,6 @@ and Kokoro warms its model. Subsequent boots are warm.
 .\.venv\Scripts\python.exe tests\talk.py
 # Enter to start, then stop talking — VAD auto-sends after 1.5 s.
 # Set VOICE_AI_SESSION_ID for multi-turn memory.
-```
-
-**Workstation wake-word CLI** (hands-free, says "hey jarvis"):
-```powershell
-.\.venv\Scripts\python.exe tests\jarvis.py
-# Different from the on-device "Hey Kira" — this one uses
-# openWakeWord on the workstation mic.
 ```
 
 **Remote** (phone on different WiFi, ESP-32 testing):
@@ -257,9 +241,6 @@ subsystem. Highlights:
 - `CONVERSE_MAX_TOKENS=96` — cap voice-mode reply length
 - `TOOL_MAX_ROUNDS=5` — safety cap on tool-call iterations per
   request
-- `WAKEWORD_THRESHOLD=0.5` — `tests/jarvis.py` (workstation client)
-  detection sensitivity. The on-device firmware path uses esp-sr's
-  own threshold, not this knob.
 
 ## Project layout
 
@@ -270,7 +251,6 @@ models/piper/                Piper voice .onnx + .json (gitignored, fallback onl
 models/kokoro/               Kokoro ONNX model + voices bin (gitignored)
 sessions/                    conversation history, one .md per session (gitignored)
 tests/talk.py                push-to-talk CLI (with VAD)
-tests/jarvis.py              workstation "hey jarvis" wake-word CLI
 tests/stage_*.py             per-feature smoke tests
 server/
 ├── app.py                   Flask routes
@@ -285,7 +265,6 @@ server/
 ├── markdown.py              to_speakable_text (markdown/LaTeX stripper)
 ├── audio.py                 pcm_to_wav, synth_to_wav
 ├── audio_out.py             local sounddevice playback
-├── wakeword.py              server-side openWakeWord wrapper (jarvis.py, web client)
 ├── web/index.html           browser/phone client
 └── backends/
     ├── stt_whisper.py       WhisperLocalSTT
@@ -326,11 +305,10 @@ firmware/                    ESP-IDF v5.3.5 project for ESP32-S3-DevKitC-1 N8R8
 | `POST /speak` | JSON `{text}` → synth + blocking play through default output |
 | `POST /converse` | One-shot voice round-trip; server plays reply locally when `play_locally=true`. Accepts multipart, raw `audio/l16`, or `audio/wav`. Add `?omit_audio_base64=1` to drop the WAV from the JSON response |
 | `POST /converse/stream` | SSE-streamed voice round-trip; client plays the audio. Same three Content-Types as `/converse`. The web client uses this |
-| `POST /listen` | Chunked-transfer raw int16 LE @ 16 kHz body; server runs openWakeWord and returns `{"wake": true, ...}` on detection. Used by `tests/jarvis.py` and the v1 ESP-WROOM-32 firmware. **The v2 ESP32-S3 firmware does NOT use this — it does wake detection on-device** |
 
 When `API_KEY` is set, every route except `GET /` and `GET /health`
 requires an `X-API-Key` header. The web page persists the key in
-`localStorage`; `talk.py` and `jarvis.py` read it from `.env`.
+`localStorage`; `talk.py` reads it from `.env`.
 
 ### Upload formats
 
@@ -361,9 +339,9 @@ the AFE mic-quality pipeline.
   response.
 - **M2** — BOOT button → 3 s recording → `/converse` round-trip.
 - **M3** — VAD-bounded recording over HTTP chunked-transfer.
-- **M4** — hands-free wake. v1 used server-side openWakeWord ("hey
-  jarvis"); v2-M2 replaced this with on-device esp-sr WakeNet
-  ("Hey Kira") — see below.
+- **M4** — hands-free wake. v1 used server-side openWakeWord;
+  v2-M2 replaced this with on-device esp-sr WakeNet ("Hey Kira")
+  — see below.
 - **M5** — continuous-mode follow-ups. **Default-off in v2** since
   multi-person scenarios make it pick up every voice in the room
   as input. Flip `CONFIG_WS_CONTINUOUS_MODE_ENABLED` to re-enable.
@@ -388,10 +366,10 @@ the AFE mic-quality pipeline.
   ([`firmware/main/wake.c`](firmware/main/wake.c)) with the
   `wn9_heykira_tts3` model running on the S3 — "Hey Kira" detected
   entirely on-chip with no continuous network stream. Removed
-  ~600 lines of `listen_stream.c` (raw-socket /listen client).
-  Architecturally fixes the v1 firmware's chronic mic-frame recycle
-  issue (gotcha #9) — the exposure window simply isn't there
-  anymore.
+  ~600 lines of `listen_stream.c` (the raw-socket client that
+  streamed mic audio to the server). Architecturally fixes the v1
+  firmware's chronic mic-frame recycle issue (gotcha #9) — the
+  exposure window simply isn't there anymore.
 - **v2-M6 — AFE-driven mic pipeline.** Promotes AFE from M2's
   "wake-only" role to "all audio always." `vadnet1_medium` ML VAD
   replaces the peak-threshold detector — typing, clicks, and other

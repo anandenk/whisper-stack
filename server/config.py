@@ -68,8 +68,8 @@ PORT = int(os.environ.get("PORT", "5000"))
 WARMUP = os.environ.get("WARMUP", "1") == "1"
 
 # Optional shared-secret auth. When set (e.g. in .env), all protected routes
-# (/converse, /chat, /transcribe, /speak, /listen) require an X-API-Key header
-# that matches. Generate with:
+# (/converse, /converse/stream, /chat, /transcribe, /speak) require an
+# X-API-Key header that matches. Generate with:
 #   python -c "import secrets; print(secrets.token_urlsafe(32))"
 # Leave empty for local-only LAN use.
 API_KEY = os.environ.get("API_KEY", "").strip()
@@ -103,26 +103,6 @@ SESSION_WINDOW_TURNS = int(os.environ.get("SESSION_WINDOW_TURNS", "30"))
 # Unset / empty = never prune.
 _session_ttl_raw = os.environ.get("SESSION_TTL_DAYS", "").strip()
 SESSION_TTL_DAYS: float | None = float(_session_ttl_raw) if _session_ttl_raw else None
-
-# ---- Wake-word client (tests/jarvis.py) -------------------------------------
-# Used only when running that client; the Flask server itself doesn't read these.
-WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL", "hey_jarvis")
-WAKEWORD_THRESHOLD = float(os.environ.get("WAKEWORD_THRESHOLD", "0.5"))
-# Optional chime played on wake-word detection. Empty / non-existent path
-# falls back to an in-process synthetic beep so the user always gets a
-# confirmation sound. REPO_ROOT-relative unless absolute.
-_wakeword_chime_raw = os.environ.get("WAKEWORD_CHIME", "samples/chime.wav").strip()
-_wakeword_chime_path = Path(_wakeword_chime_raw)
-WAKEWORD_CHIME: Path = (
-    _wakeword_chime_path if _wakeword_chime_path.is_absolute()
-    else (REPO_ROOT / _wakeword_chime_path)
-)
-# After the reply finishes, jarvis.py optionally stays in continuous mode
-# for this long (no further wake word required) before returning to
-# passive wake-word listening.
-WAKEWORD_CONVERSATION_TIMEOUT_S = float(
-    os.environ.get("WAKEWORD_CONVERSATION_TIMEOUT_S", "30")
-)
 
 # Loopback-test toggle: when "1", every /converse upload is ALSO saved as
 # samples/_loopback_turn_<unix-ts>.wav (post-normalize) and

@@ -23,18 +23,6 @@ _PRICING_PER_1M_USD: dict[str, dict[str, float]] = {
 _LOCK = threading.Lock()
 _BOOT_TIME = time.time()
 _COUNTERS: dict[str, dict[str, int]] = {}
-# Per-process count of POST /listen detections that fired (wake==True).
-# Surfaced in /health.usage so the user can confirm wake activity is
-# happening without grepping logs. Local inference, cost zero.
-_WAKE_DETECTIONS = 0
-
-
-def record_wake_detection() -> None:
-    """Increment the wake-detection counter. Called by /listen on a
-    successful detection."""
-    global _WAKE_DETECTIONS
-    with _LOCK:
-        _WAKE_DETECTIONS += 1
 
 
 def record(model: str | None,
@@ -109,5 +97,4 @@ def snapshot() -> dict:
         "output_tokens": total_output,
         "estimated_cost_usd": round(cost_usd, 4),
         "per_model": per_model,
-        "wake_detections": _WAKE_DETECTIONS,
     }

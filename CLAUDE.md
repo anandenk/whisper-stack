@@ -55,8 +55,8 @@ different statuses.
 - [notes/two-mode-plan.md](notes/two-mode-plan.md) — `MODE=local` vs `MODE=cloud` refactor. **SUPERSEDED** by the Gemini migration (May 2026); single-mode now.
 - [notes/router-design.md](notes/router-design.md) — embedding-similarity router design + Tier 1 history. **SUPERSEDED** — router removed in the Gemini migration.
 - [notes/sessions-plan.md](notes/sessions-plan.md) — multi-turn conversation memory, server-side, idle-bounded sessions in markdown files. **All 5 phases (A-E) shipped.** Set `VOICE_AI_SESSION_ID` for talk.py, type a session ID into the web client's Session field, or pass `session_id` form/JSON field on `/converse` / `/chat` to opt in. Absent = stateless, default behavior preserved. Note: the `route=` field in the assistant meta line is no longer written (Gemini migration); the parser keeps an optional capture group so old session files still load.
-- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, "hey jarvis" wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI; `tests/jarvis.py` is the workstation wake-word client (`pip install openwakeword` + download the bundled models, then say "hey jarvis"). Web search is now provided by Gemini's built-in `google_search` grounding — no third-party (Tavily) account needed.
-- [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md) — port `tests/jarvis.py`'s shape onto **ESP-WROOM-32 + INMP441 + SSD1306 OLED**. **All 8 milestones shipped on real hardware**: M1 bring-up, M2 button + buffered `/converse`, M3 VAD streaming, M4 server-side openWakeWord via `POST /listen`, M5 continuous mode after wake, M6 OLED polish (boot card + wake splash + VU bar + speaking screen). Plus M7 (HC-SR04 wave-to-wake), M8 (NEC IR remote for mute/snooze/cancel), and the cat-face OLED on I²C bus 1. Device is mic + display + WiFi only — TTS plays through the workstation's pinned Realtek output via `play_locally=true` on `/converse`. No on-device audio out (no I²S DAC, no audio playback task, no PCM queue). On-device esp-skainet wake word remains deferred to v2 hardware (needs PSRAM). The audio-corruption diagnosis (gotcha #9 below) localized a chronic mic-frame recycle issue to the LISTENING VU bar's per-frame I²C contention and removed it; firmware is now stable for arbitrarily long continuous chat.
+- [notes/voice-agent-plan.md](notes/voice-agent-plan.md) — auto-titling, tool use (web search + time), streaming TTS, VAD, continuous + interrupt mode, wake word. **All 6 milestones shipped.** Web client at `/` is the streaming + continuous + interrupt UI. The original M6 workstation wake-word client (`tests/jarvis.py` + server `/listen` route + `server/wakeword.py` + openWakeWord) has been retired — superseded by on-device wake on the v2 firmware (esp-sr "Hey Kira") and tap-to-talk in the web client. Plan doc preserves the v1 design as accurate history. Web search is now provided by Gemini's built-in `google_search` grounding — no third-party (Tavily) account needed.
+- [notes/esp32-firmware-plan.md](notes/esp32-firmware-plan.md) — **ESP-WROOM-32 + INMP441 + SSD1306 OLED** firmware. **All 8 milestones shipped on real hardware**: M1 bring-up, M2 button + buffered `/converse`, M3 VAD streaming, M4 server-side openWakeWord via the (now-retired) `POST /listen` route, M5 continuous mode after wake, M6 OLED polish (boot card + wake splash + VU bar + speaking screen). Plus M7 (HC-SR04 wave-to-wake), M8 (NEC IR remote for mute/snooze/cancel), and the cat-face OLED on I²C bus 1. Device is mic + display + WiFi only — TTS plays through the workstation's pinned Realtek output via `play_locally=true` on `/converse`. No on-device audio out (no I²S DAC, no audio playback task, no PCM queue). On-device esp-skainet wake word remains deferred to v2 hardware (needs PSRAM). The audio-corruption diagnosis (gotcha #9 below) localized a chronic mic-frame recycle issue to the LISTENING VU bar's per-frame I²C contention and removed it; firmware is now stable for arbitrarily long continuous chat.
 - **v3 prototype notes (parts list locked, funding approved, not yet ordered):**
   - [notes/build-modes.md](notes/build-modes.md) — the `CONFIG_VOICE_ENABLED` Kconfig switch that gates the entire voice path so display/servo iteration doesn't compete with the wake-word stream.
   - [notes/face-renderer.md](notes/face-renderer.md) — FluxGarage RoboEyes V1.1.1 ported into `firmware/components/robo_eyes/` as a second selectable face renderer (`CONFIG_FACE_RENDERER` choice, default `ROBO_EYES`, alternative `CAT_FACE`). **This is the reason the repo is now GPL-3.0** — see the LICENSE section below.
@@ -184,20 +184,14 @@ been caught at the source.
 7. **Audio gain pipeline lives on the server, not the device.** INMP441 +
    the firmware's natural `>>16` 24→16-bit conversion produces
    conversational-speech peaks of only ~1500-2000 in int16 — clean but
-   so quiet that whisper hallucinates and openWakeWord misses wake
-   events. We compensate at *two* server-side stages:
-   - **`/converse`**: `_peak_normalize_wav()` in `server/app.py` reads
-     each upload, finds the peak, scales to a target peak (~24000)
-     with a max-gain cap (~12×) and silence floor (~200). Adaptive,
-     never clips. Tunable via `NORMALIZE_TARGET_PEAK`/`NORMALIZE_MAX_GAIN`
-     constants — no firmware reflash to retune.
-   - **`/listen`**: `wakeword.py` applies a fixed `LISTEN_GAIN` (default
-     6×) to each 80 ms frame before `model.predict()`. Boosts wake-word
-     recall dramatically. Fixed (not adaptive) because frame-level
-     normalization would amplify silence noise into false positives.
-   - **Debug listening**: every `/converse` upload is also dumped to
-     `samples/_last_received.wav` (post-normalize) so you can hear
-     exactly what whisper saw.
+   so quiet that whisper hallucinates. We compensate server-side in
+   `_peak_normalize_wav()` in `server/app.py`: each `/converse` upload
+   is read, the peak is found, and the buffer is scaled to a target
+   peak (~24000) with a max-gain cap (~12×) and silence floor (~200).
+   Adaptive, never clips. Tunable via `NORMALIZE_TARGET_PEAK` /
+   `NORMALIZE_MAX_GAIN` constants — no firmware reflash to retune.
+   Every upload is also dumped to `samples/_last_received.wav`
+   (post-normalize) so you can hear exactly what whisper saw.
 
    We deliberately do *not* compensate in firmware — server-side gain
    is way easier to tune (no reflash) and the lost-precision argument
@@ -205,15 +199,17 @@ been caught at the source.
    academic, since those bits are dominated by INMP441's noise floor
    for voice levels.
 
-8. **`/converse` socket timeout is 30 s, not the original 5 s.** The
-   `FastFailHandler` in `server/app.py` was added at M4 with
-   `timeout=5` to recover stuck `/listen` connections. But it applies
-   globally, and 5 s is too aggressive for `/converse` chunked uploads
-   under enterprise Wi-Fi jitter — long recordings hit
-   `TimeoutError: timed out` mid-`request.get_data()` and surface as
-   500s. 30 s is well above the firmware's per-frame cadence (~80 ms)
-   and the wakeword module's own 2 s lock-acquire timeout still
-   handles short-term `/listen` contention.
+   (Historically there was also a fixed `LISTEN_GAIN` in
+   `server/wakeword.py` applied to `/listen` frames before
+   `model.predict()`; that path was retired with the workstation
+   wake-word client.)
+
+8. *(Retired — the `FastFailHandler`/30s socket timeout that lived
+   here was added to recover stuck `/listen` connections. The `/listen`
+   route and the workstation wake-word client were retired, so the
+   server now uses Werkzeug's default request handler. Numbering kept
+   so cross-references to "gotcha #9" elsewhere in this file still
+   resolve.)*
 
 9. **Audio corruption (`recycled=N`, `ring overflow during LISTENING`)
    was originally misdiagnosed as a weak-WiFi problem on 2026-05-09;
@@ -351,7 +347,6 @@ models/piper/                Piper voice .onnx + .json (rollback path)
 tests/stageN_*.py            per-feature smoke tests
 tests/stage_gemini.py        Gemini SDK smoke (chat, tools, search, streaming)
 tests/talk.py                push-to-talk client
-tests/jarvis.py              wake-word client
 server/
 ├── app.py                   Flask routes; main() warms each backend via modes
 ├── config.py                env loading (Gemini key, Whisper, Kokoro/Piper, sessions)
@@ -372,7 +367,6 @@ server/
 │   │                        Ollama-resurrection recipe to work; ignored by
 │   │                        GeminiLLM, which inlines its own conversion)
 │   └── time.py              get_current_time tool (server-side, free)
-├── wakeword.py              server-side openWakeWord wrapper for POST /listen
 ├── web/index.html           browser/phone client (streaming + VAD + continuous)
 └── backends/
     ├── stt_whisper.py       WhisperLocalSTT (+ NVIDIA DLL bootstrap)
@@ -657,69 +651,29 @@ Two presets: `OLED_128x64` (current panel) and `ROUND_240` (placeholder
 for the future round display, dimensions guessed — re-tune when real
 hardware arrives).
 
-### M4 / wake-word gotchas (HISTORICAL — superseded by v2-M2)
+### M4 / wake-word gotchas (RETIRED)
 
-> **Superseded 2026-05-12.** `listen_stream.c` was deleted in v2-M2-c
-> when on-device WakeNet (wake.c + esp-sr) replaced the server-side
-> /listen path. The gotchas below are preserved because (a) the
-> server-side `/listen` route + `wakeword.py` still exist for the
-> web client + `tests/jarvis.py`, so the SERVER-side defenses (item
-> 4) still apply, and (b) the lessons are recoverable from git tag
-> `pre-esp32-s3-port` if anyone ever needs to resurrect the
-> firmware-side `/listen` path.
-
-These were all bench-verified during the M4 hardening session
-2026-05-05; the device worked hands-free for arbitrarily long
-sessions of /listen until v2-M2 retired the path entirely.
-
-1. **`/listen` cannot use `esp_http_client`** — it's a full-duplex
-   pattern (firmware writes chunks indefinitely, server may reply
-   mid-stream), and IDF's HTTP client doesn't expose the underlying
-   transport handle so we can't `select()` for a mid-stream response.
-   `firmware/main/listen_stream.c` uses raw lwIP sockets with a
-   manual chunked-encode + recv-until-FIN parser. `/converse` keeps
-   `esp_http_client` because its one-shot upload pattern works fine.
-2. **`SO_LINGER` with `l_linger=0` on the /listen socket.** Makes
-   `close()` send TCP RST instead of FIN. Critical: when something
-   forces an unclean close (e.g. transient transport error), there's
-   no FIN-queued-behind-unACK'd-data deadlock that would leave the
-   server's `request.stream.read` blocked indefinitely. RST is
-   appropriate — in-flight audio is already old and the server
-   doesn't care about it.
-3. **Do NOT set `SO_SNDTIMEO` on /listen.** The socket needs to wait
-   indefinitely for the server to drain — sustained streaming has
-   normal periods of TCP backpressure. We tried `SO_SNDTIMEO=5s` as
-   defense in depth and it caused periodic ~17 s reconnect cycles
-   that dropped wake-word audio. The server-side defenses (item 4)
-   make a wedged server unable to wedge the firmware, so we don't
-   need a firmware-side timeout.
-4. **Server hardening for /listen** (`server/app.py` + `wakeword.py`):
-   - Pre-warm openWakeWord model in `main()`'s WARMUP sequence so the
-     first request doesn't pay the ~1.2 s lazy-load cost.
-   - `app.run(threaded=True)` — Werkzeug dev server is single-threaded
-     by default; one stuck /listen would queue everything.
-   - Custom `FastFailHandler(WSGIRequestHandler)` with `timeout = 5`
-     — Werkzeug's default 60 s socket timeout is too long for our
-     pattern; 5 s lets dead connections die fast and recycle the
-     wakeword lock.
-   - `wakeword.stream_predict` acquires `_LOCK` with `timeout=2.0`;
-     if contended, returns `{"wake": false, "reason": "busy"}` so the
-     firmware retries on its next reconnect cycle without piling up.
-   - `read_chunk` wrapped in `try/except (OSError, IOError)` so an
-     ECONNRESET (from the firmware's SO_LINGER=0 close) is caught
-     and treated as `client_closed`, releasing the lock cleanly.
-5. **30-second `listen: alive — N frames streamed (free heap M B)`
-   heartbeat** in `run_listen_session`. Silent listen_stream looks
-   identical to a stuck listen_stream without it. The heartbeat is
-   the diagnostic signal — if frames-streamed stops climbing, the
-   device is wedged.
+> **Retired.** `listen_stream.c` was deleted in v2-M2-c when on-device
+> WakeNet (`wake.c` + esp-sr) replaced the server-side /listen path.
+> The matching server-side `/listen` route + `server/wakeword.py` +
+> `tests/jarvis.py` workstation client have now also been retired
+> (the web client uses tap-to-talk via `/converse/stream`, so nothing
+> on the server still needs `/listen`).
+>
+> Original M4 hardening notes (full-duplex socket handling on the
+> firmware side, SO_LINGER=0, SO_SNDTIMEO behavior, the `FastFailHandler`
+> 5 s socket timeout, `wakeword._LOCK` contention, the 30 s listen
+> heartbeat) are recoverable from git tag `pre-esp32-s3-port` if the
+> path ever needs to be resurrected. They no longer apply to anything
+> in the live tree.
 
 ### VAD tuning notes (worth preserving for future-Claude)
 
-`firmware/main/vad.h` defaults differ from `tests/jarvis.py` based on
-real-mic real-room behavior at the workstation:
+`firmware/main/vad.h` defaults differ from the workstation-side VAD
+of the retired `tests/jarvis.py` client (jarvis used 600 / 1500),
+based on real-mic real-room behavior at the workstation:
 
-- **`VAD_PEAK_THRESHOLD = 200`** (jarvis.py uses 600). INMP441 has no
+- **`VAD_PEAK_THRESHOLD = 200`** (jarvis.py used 600). INMP441 has no
   AGC and at typical reading distance (~12+ in.) conversational-speech
   peaks span a wide range. First lowered from 600 → 300 (600 made the
   silence-dwell counter reset only on the loudest syllables, tripping
@@ -731,7 +685,7 @@ real-mic real-room behavior at the workstation:
   snap test). The trade is more permissive: false-positive (noise
   crosses threshold) costs one wasted /converse upload; false-negative
   drops the user mid-conversation. Tilt toward catching speech.
-- **`VAD_SILENCE_DWELL_MS = 2500`** (jarvis.py uses 1500). When a
+- **`VAD_SILENCE_DWELL_MS = 2500`** (jarvis.py used 1500). When a
   user pauses to think mid-sentence — common when reading from a
   screen — 1.5 s isn't enough. 2.5 s is the trade-off floor: shorter
   cuts off mid-thought; longer feels sluggish at end-of-utterance.
@@ -914,7 +868,6 @@ Routes:
 - `POST /speak` — JSON `{text}` → synth + blocking play through default output
 - `POST /converse` — one-shot voice round-trip → STT → Gemini → TTS → JSON with `transcript`, `model`, `reply_text`, `audio_base64` (WAV), per-stage `timings`, `llm_tokens`, `estimated_cost_usd`, plus non-blocking local playback. Accepts three upload shapes by `Content-Type`: `multipart/form-data` (params in form fields), `audio/l16; rate=N; channels=N` (raw int16 LE, params in query string — used by the ESP-32 firmware), or `audio/wav`. Add `?omit_audio_base64=1` to drop the WAV from the JSON (saves 100–200 KB per turn for firmware clients).
 - `POST /converse/stream` — SSE-streamed voice round-trip; the client plays the audio as PCM chunks arrive. Event types: `ready`, `transcript`, `model`, `text`, `tool_call`, `tool_result`, `audio`, `final`, `error`. Accepts the same three Content-Types as `/converse`. The web client uses this for sentence-by-sentence playback.
-- `POST /listen` — chunked-transfer raw int16 LE @ 16 kHz body; server runs openWakeWord and returns `{"wake": true, ...}` on detection (or `{"wake": false, "reason": "idle_timeout"|"client_closed"|"busy"}`). Long-lived, full-duplex pattern — see "M4 / wake-word gotchas" below. Used by `tests/jarvis.py` and by the ESP-32 firmware in IDLE state. Requires `pip install openwakeword` + `openwakeword.utils.download_models()` on the server.
 
 `CONVERSE_MAX_TOKENS=96` caps voice replies so they don't turn into 30s monologues. Tune via env.
 
@@ -960,4 +913,4 @@ For testing the ESP-32-style flow from anywhere (e.g., phone on different WiFi):
 
 The `cloudflared` quick-mode URL changes every time you restart it. For a stable URL, register a free Cloudflare account, attach a domain, and create a named tunnel — see Cloudflare docs.
 
-**Auth model:** when `API_KEY` is set, all of `/converse`, `/converse/stream`, `/chat`, `/transcribe`, `/speak`, `/listen` require the matching `X-API-Key` header. `GET /` and `GET /health` stay public. The authoritative list is `PROTECTED_PATHS` in [server/app.py](server/app.py). When `API_KEY` is empty, no auth is enforced (LAN-only mode).
+**Auth model:** when `API_KEY` is set, all of `/converse`, `/converse/stream`, `/chat`, `/transcribe`, `/speak` require the matching `X-API-Key` header. `GET /` and `GET /health` stay public. The authoritative list is `PROTECTED_PATHS` in [server/app.py](server/app.py). When `API_KEY` is empty, no auth is enforced (LAN-only mode).

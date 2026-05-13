@@ -13,8 +13,6 @@
 #     the default af_bella.
 #   * Piper voice models (rollback path) — drop the .onnx + .json files under
 #     models/piper/ and set PIPER_VOICE in .env.
-#   * openwakeword's bundled models — `python -c "import openwakeword;
-#     openwakeword.utils.download_models()"` once per machine.
 
 flask
 python-dotenv
@@ -35,10 +33,6 @@ faster-whisper
 # own espeak-ng so no system install is needed.
 kokoro-onnx
 piper-tts
-
-# Wake-word detection (server-side, used by /listen for the ESP-32 firmware
-# and tests/jarvis.py).
-openwakeword
 
 # Local audio playback (server speaks the reply when play_locally=true).
 sounddevice

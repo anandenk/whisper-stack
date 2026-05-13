@@ -22,7 +22,7 @@ from typing import Iterator
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from server import audio, audio_out, config, markdown, modes, titler, usage, wakeword
+from server import audio, audio_out, config, markdown, modes, titler, usage
 from server.sessions import Session, SessionStore
 from server.streaming import SentenceChunker
 from server.tools.time import get_current_time
@@ -118,7 +118,7 @@ app = Flask(__name__)
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Endpoints that mutate or cost money/credits. /, /health, /static stay public.
-PROTECTED_PATHS = frozenset({"/converse", "/converse/stream", "/chat", "/transcribe", "/speak", "/listen"})
+PROTECTED_PATHS = frozenset({"/converse", "/converse/stream", "/chat", "/transcribe", "/speak"})
 
 
 def _sse_event(event: str, data: dict) -> str:
@@ -898,66 +898,6 @@ def converse_stream():
     )
 
 
-@app.post("/listen")
-def listen():
-    """Server-side openWakeWord over a chunked-transfer raw PCM body.
-
-    Spec (see notes/esp32-firmware-plan.md "Wake word"): the client (the
-    ESP-WROOM-32 firmware in IDLE state, or tests/stage11_listen.py)
-    holds an open chunked-transfer POST while streaming int16 LE mono
-    @ 16 kHz from its mic. The server frames to 1280-sample windows
-    and runs openWakeWord.Model.predict() per frame. On detection:
-    respond 200 with {"wake": true, "score": ..., "model": ...} and
-    close. After IDLE_TIMEOUT_S (10 min) of bytes-but-no-detection:
-    respond {"wake": false, "reason": "idle_timeout"}. Client EOF
-    (TCP close from device side) is graceful: {"wake": false,
-    "reason": "client_closed"}.
-
-    Content-Type must be audio/l16; rate=16000; channels=1. Anything
-    else returns 415 — there's no point trying to handle other formats
-    here since the device emits exactly this shape.
-    """
-    if not wakeword.is_available():
-        return jsonify({
-            "error": "openwakeword not installed on the server; install via "
-                     "`pip install openwakeword` and openwakeword.utils."
-                     "download_models()",
-        }), 503
-
-    media, params = _parse_content_type(request.content_type)
-    if media not in ("audio/l16", "audio/x-l16"):
-        return jsonify({
-            "error": f"Content-Type must be audio/l16; got {request.content_type!r}",
-        }), 415
-    try:
-        rate = int(params.get("rate", "16000"))
-        channels = int(params.get("channels", "1"))
-    except ValueError:
-        return jsonify({
-            "error": "Content-Type must include integer rate; "
-                     "e.g. 'audio/l16; rate=16000; channels=1'",
-        }), 400
-    if rate != 16000 or channels != 1:
-        # openWakeWord's bundled models are trained at 16 kHz mono; any
-        # other rate/channel combo would need resampling which is out of
-        # scope for v1. The firmware contract is explicit (16 kHz mono),
-        # so reject anything else with a clear error.
-        return jsonify({
-            "error": f"unsupported PCM format: rate={rate} channels={channels}; "
-                     f"need rate=16000 channels=1",
-        }), 415
-
-    try:
-        result = wakeword.stream_predict(request.stream.read)
-    except Exception as exc:
-        traceback.print_exc()
-        return jsonify({"error": f"listen failed: {exc!r}"}), 500
-
-    if result.get("wake"):
-        usage.record_wake_detection()
-    return jsonify(result)
-
-
 def main():
     print(f"LLM={config.GEMINI_MODEL}", flush=True)
     # One-shot session prune at boot when SESSION_TTL_DAYS is configured.
@@ -980,50 +920,12 @@ def main():
         modes.get_llm().warmup()
         print("Warming up TTS...", flush=True)
         modes.get_tts().warmup()
-        # Pre-load the openwakeword model so the first /listen request
-        # doesn't pay a ~1.2 s lazy-load cost while the firmware is already
-        # streaming chunks at it. Without this pre-warm, the firmware's
-        # send buffer fills before the server starts draining, send()
-        # times out under SO_SNDTIMEO, and the device enters a runaway
-        # reconnect loop. Best-effort: if openwakeword isn't installed,
-        # /listen returns 503 anyway, so silently skip.
-        try:
-            import server.wakeword as _ww
-            if _ww.is_available():
-                print("Warming up wake-word model...", flush=True)
-                _ww._ensure_model()
-        except Exception as exc:
-            print(f"WARNING: wakeword warmup skipped: {exc!r}", flush=True)
         print("Warmup complete.", flush=True)
     print(f"Listening on http://{config.HOST}:{config.PORT}", flush=True)
-    # threaded=True so a slow /listen (which holds wakeword._LOCK for the
-    # life of the request) doesn't queue all other handlers behind it.
-    # The Werkzeug dev server is single-threaded by default — without
-    # this flag, one stuck firmware /listen request can wedge /converse,
-    # /health, and every other endpoint indefinitely. (Discovered during
-    # M4 firmware bench-up: a TCP-backpressure deadlock left a /listen
-    # request hung in request.stream.read forever, locking out new
-    # connections from the firmware's reconnect loop.)
-    #
-    # Custom request handler with a 30 s socket timeout. Werkzeug's default
-    # is 60 s, which is too long for /listen (when the firmware RSTs an
-    # idle connection, the server-side recv blocks for the full 60 s,
-    # holding wakeword._LOCK and starving subsequent requests). 5 s was
-    # the original setting but turned out too aggressive for /converse —
-    # long VAD recordings (10-30 s of chunked audio) plus normal WiFi
-    # WiFi jitter caused TimeoutError during request.get_data()
-    # on the chunked stream, surfacing as 500s mid-turn. 30 s is well
-    # above the firmware's per-frame cadence (~80 ms between chunks),
-    # accommodates several seconds of WiFi backoff, and is still fast
-    # enough that dead /listen clients recycle the wakeword lock without
-    # piling up — the wakeword module's own 2 s lock-acquire timeout
-    # handles short-term contention.
-    from werkzeug.serving import WSGIRequestHandler
-    class FastFailHandler(WSGIRequestHandler):
-        timeout = 30
+    # threaded=True so concurrent requests don't queue behind a slow one
+    # (e.g. a long /converse streaming response blocking /health).
     app.run(host=config.HOST, port=config.PORT, debug=False,
-            use_reloader=False, threaded=True,
-            request_handler=FastFailHandler)
+            use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
