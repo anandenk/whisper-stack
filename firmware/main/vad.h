@@ -1,14 +1,18 @@
-// Peak-threshold VAD — drains the I²S ring buffer frame-by-frame and
-// invokes a callback with each frame, deciding when to stop based on:
-//   * peak amplitude crossing a threshold ("voice detected"),
+// v2-M6 VAD — pulls AFE-processed frames from wake_listen_next() and
+// uses AFE's vadnet1_medium per-chunk verdict to decide stop, with a
+// callback per frame so audio can go anywhere (today /converse).
+//
+// Stop conditions:
 //   * a continuous silence dwell after voice ("user stopped talking"),
 //   * an initial timeout if no voice ever shows up,
 //   * a max-record cap as a safety net,
 //   * an external cancel hook (button long-press).
 //
-// The callback approach decouples VAD from where the audio goes —
-// M3 streams it to /converse via HTTP chunked-transfer, but the same
-// VAD will feed M4's chunked /listen post just as well.
+// Pre-v2-M6 used a peak-threshold detector (VAD_PEAK_THRESHOLD = 200)
+// that fired on any 200+ sample peak — typing clicks at ~3000 peak
+// easily triggered it. The new ML VAD discriminates speech from
+// transients by acoustic shape, not energy. Recoverable from git tag
+// `pre-esp32-s3-port` if ever needed.
 
 #pragma once
 
@@ -17,17 +21,6 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-// 200 against the >>16 mic conversion. INMP441 has no AGC, and at
-// typical reading distance (~12+ in.) conversational-speech peaks
-// span a wide range — 280-680 in M5 bench data. 200 stays ~2× the
-// idle-ambient peak (~100) so room noise still won't false-trigger,
-// but a tired-voice follow-up at the back end of a long chat still
-// clears. Failure asymmetry: a false-positive (noise crosses threshold)
-// costs one wasted /converse round-trip; a false-negative drops the
-// user out of continuous mode. Tilt toward catching speech.
-// (Server-side peak-normalization handles audible quietness; VAD only
-// cares about presence-of-voice, which works fine at the raw mic level.)
-#define VAD_PEAK_THRESHOLD       200
 // 2500 ms instead of jarvis.py's 1500 ms because users naturally pause
 // >1.5 s mid-sentence when reading from a screen or thinking. The cost
 // is 1 s of extra wait at end-of-utterance before upload starts; the

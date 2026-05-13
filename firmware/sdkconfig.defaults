@@ -46,10 +46,16 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 # to Hey Kira on 2026-05-12 — see notes/esp32-v2-plan.md for the
 # trade-off discussion and FP-rate fallback options.)
 CONFIG_SR_WN_WN9_HEYKIRA_TTS3=y
-# Use WebRTC noise suppression + VAD for the AFE pipeline; the deep-learning
-# variants (nsnet2 / vadnet1) are heavier and not needed until we tune.
+# WebRTC noise suppression — the deep-learning nsnet2 is heavier and
+# not needed until we tune.
 CONFIG_SR_NSN_WEBRTC=y
-CONFIG_SR_VADN_WEBRTC=y
+# v2-M6: switched VAD to vadnet1_medium (ML-based) to discriminate
+# real speech from typing/clicks/dishes. The plan considered WebRTC
+# VAD first (no extra model, free) but locked in vadnet1 upfront to
+# avoid a possible swap cycle later. The model gets packed into the
+# existing 2 MB model partition alongside wn9_heykira_tts3.
+# CONFIG_SR_VADN_WEBRTC is not set
+CONFIG_SR_VADN_VADNET1_MEDIUM=y
 
 # --- v2-M2 on-device wake-word ------------------------------------------
 # listen_stream.c (the v1 server-side /listen client) was deleted in

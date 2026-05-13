@@ -359,8 +359,16 @@ static esp_err_t do_one_turn(const char *ip,
     }
 
     s_state = APP_STATE_SPEAKING;
-    int speak_s = (int)(resp.audio_duration_s + 0.5f);
-    if (speak_s < 1) speak_s = 1;
+    // v2-M6-d: overshoot audio_duration_s by ~1 s so TTS playback fully
+    // decays before LISTENING begins. Without this, the tail of TTS
+    // bleeds into LISTENING, AFE re-classifies it as SPEECH, and the
+    // follow-up turn captures the echo (perpetual-loop bug from M6
+    // bench testing). Combined with wake.c's AFE reset on LISTENING
+    // entry, this gives the speaker time to silence and AFE a clean
+    // start. Until on-device speaker + AEC (M3 + M5) land, this is
+    // the best we can do without dropping continuous mode.
+    int speak_s = (int)(resp.audio_duration_s + 1.5f);   // ceil + ~1 s buffer
+    if (speak_s < 2) speak_s = 2;
 
 #if ENABLE_OLED
     for (int rem = speak_s; rem > 0; --rem) {

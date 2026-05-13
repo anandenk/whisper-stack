@@ -1,16 +1,25 @@
-// Peak-threshold VAD — see header.
+// v2-M6 VAD — driven by AFE's vadnet1_medium output instead of the
+// pre-v2-M6 peak-threshold detector. See vad.h.
 //
-// Algorithm matches tests/jarvis.py's defaults:
-//   * Compute frame peak = max |sample|.
-//   * If peak ≥ threshold, mark "voice has started" and reset the
-//     silence-dwell timer; otherwise increment it.
-//   * Stop when silence dwell ≥ 1500 ms AFTER voice has been heard.
-//   * If no voice ever crosses threshold within the initial timeout
-//     (15 s), stop with NO_SPEECH so we don't upload an empty record.
-//   * Hard cap at MAX_RECORD_MS as a runaway-protection safety net.
+// Algorithm:
+//   * Pull each ~32 ms AFE-processed frame from wake_listen_next.
+//     The frame includes the vadnet1 VAD verdict for that chunk.
+//   * If vad_state == VAD_SPEECH, mark "voice has started" and reset
+//     the silence-dwell timer.
+//   * Stop when silence dwell ≥ VAD_SILENCE_DWELL_MS AFTER voice has
+//     been heard.
+//   * If no SPEECH frame ever appears within `initial_timeout_ms`,
+//     stop with NO_SPEECH so we don't upload an empty record.
+//   * Hard cap at VAD_MAX_RECORD_MS as runaway protection.
+//
+// The pre-v2-M6 peak-threshold path (VAD_PEAK_THRESHOLD constant +
+// frame_peak() helper) is gone — vadnet1 discriminates speech from
+// transients (typing, clicks, dishes) far better than energy thresholds.
+// Recoverable from git tag `pre-esp32-s3-port` if ever needed.
 
 #include "vad.h"
 #include "i2s_mic.h"
+#include "wake.h"
 
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
@@ -20,33 +29,16 @@
 
 static const char *TAG = "vad";
 
-// 1280 samples = 80 ms @ 16 kHz, the size audio_in_task pushes.
-#define VAD_FRAME_SAMPLES 1280
-
-static inline uint32_t frame_peak(const int16_t *p, size_t n)
-{
-    uint32_t pk = 0;
-    for (size_t i = 0; i < n; ++i) {
-        int32_t a = p[i] < 0 ? -p[i] : p[i];
-        if ((uint32_t)a > pk) pk = (uint32_t)a;
-    }
-    return pk;
-}
-
 esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
                      void *user, int initial_timeout_ms, vad_result_t *out)
 {
     if (!on_frame || !out) return ESP_ERR_INVALID_ARG;
 
-    static int16_t frame[VAD_FRAME_SAMPLES];
-
     *out = (vad_result_t){ .reason = VAD_STOP_MIC_ERROR };
 
-    // Note: ring drain at entry is the CALLER's responsibility. For first
-    // turns (post-wake) we WANT the ring contents — they're the audio
-    // captured in the wake-to-vad-start gap, which would otherwise cut off
-    // the user mid-question. For follow-up turns the caller drains TTS-echo
-    // before invoking us. See do_one_turn in main.c.
+    // i2s_mic STATS (recycled=N etc) are still useful for end-of-turn
+    // diagnostics — feed_task (wake.c) drives the producer side now,
+    // and we want to see if it falls behind during a turn.
     i2s_mic_reset_stats();
 
     const int initial_ms = initial_timeout_ms > 0 ? initial_timeout_ms : VAD_INITIAL_TIMEOUT_MS;
@@ -56,8 +48,10 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
 
     bool     voice_started      = false;
     int64_t  last_voice_us      = 0;
-    uint32_t peak_seen          = 0;
+    uint32_t peak_seen          = 0;   // retained as a diagnostic; not load-bearing
     size_t   total_samples      = 0;
+    uint32_t speech_chunks      = 0;   // how many AFE_VAD_SPEECH chunks we saw
+    uint32_t silence_chunks     = 0;   // how many AFE_VAD_SILENCE chunks
 
     while (1) {
         if (on_cancel && on_cancel(user)) {
@@ -65,10 +59,16 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
             break;
         }
 
-        size_t got = 0;
-        esp_err_t err = i2s_mic_capture_frame(frame, VAD_FRAME_SAMPLES, &got, 200);
-        if (err != ESP_OK || got == 0) {
-            // Mic timeout for one wait window is fine; just check our deadlines.
+        // Wait up to 200 ms for an AFE frame. Short enough that
+        // deadline checks below stay responsive; long enough that we
+        // don't spin during the AFE ringbuffer warmup window.
+        int16_t    *frame_data   = NULL;
+        size_t      frame_n      = 0;
+        vad_state_t frame_vad    = VAD_SILENCE;
+        esp_err_t err = wake_listen_next(&frame_data, &frame_n, &frame_vad, 200);
+
+        if (err != ESP_OK || frame_n == 0) {
+            // No frame yet — check our deadlines and continue.
             int64_t now_us = esp_timer_get_time();
             if (!voice_started && now_us >= initial_deadline_us) {
                 out->reason = VAD_STOP_NO_SPEECH;
@@ -81,28 +81,36 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
             continue;
         }
 
-        uint32_t pk = frame_peak(frame, got);
-        if (pk > peak_seen) peak_seen = pk;
-
         const int64_t now_us = esp_timer_get_time();
-        if (pk >= VAD_PEAK_THRESHOLD) {
+
+        if (frame_vad == VAD_SPEECH) {
+            speech_chunks++;
             voice_started = true;
             last_voice_us = now_us;
+        } else {
+            silence_chunks++;
         }
 
-        // Always forward frames once recording starts. Frames before voice
-        // are still forwarded so the server gets a small lead-in (helps
-        // STT pick up the first phoneme even if it's slightly below the
-        // peak threshold).
-        esp_err_t cb_err = on_frame(frame, got, user);
+        // Diagnostic peak — same calculation as the pre-v2-M6 path,
+        // useful for spotting clipping / level issues even though it
+        // no longer drives the state machine.
+        for (size_t i = 0; i < frame_n; ++i) {
+            int32_t a = frame_data[i] < 0 ? -frame_data[i] : frame_data[i];
+            if ((uint32_t)a > peak_seen) peak_seen = (uint32_t)a;
+        }
+
+        // Forward to /converse. on_frame is synchronous — frame_data
+        // is safe to free as soon as it returns.
+        esp_err_t cb_err = on_frame(frame_data, frame_n, user);
+        total_samples += frame_n;
+        free(frame_data);
+
         if (cb_err != ESP_OK) {
             ESP_LOGW(TAG, "frame_cb returned %s; aborting", esp_err_to_name(cb_err));
             out->reason   = VAD_STOP_FRAME_CB_ERROR;
             out->cb_error = cb_err;
-            total_samples += got;
             break;
         }
-        total_samples += got;
 
         // Stop conditions checked AFTER forwarding.
         if (voice_started) {
@@ -127,9 +135,12 @@ esp_err_t vad_record(vad_frame_cb_t on_frame, vad_cancel_cb_t on_cancel,
     out->peak_seen     = peak_seen;
     out->duration_ms   = (uint32_t)((esp_timer_get_time() - start_us) / 1000);
 
-    ESP_LOGI(TAG, "vad stop reason=%d samples=%u peak=%lu dur=%lums",
+    uint32_t drops = wake_listen_drops_take_and_reset();
+    ESP_LOGI(TAG, "vad stop reason=%d samples=%u peak=%lu dur=%lums "
+                  "speech_chunks=%u silence_chunks=%u afe_drops=%u",
              (int)out->reason, (unsigned)out->total_samples,
-             (unsigned long)out->peak_seen, (unsigned long)out->duration_ms);
+             (unsigned long)out->peak_seen, (unsigned long)out->duration_ms,
+             (unsigned)speech_chunks, (unsigned)silence_chunks, (unsigned)drops);
     i2s_mic_dump_stats("vad");
 
     bool ok = (out->reason == VAD_STOP_OK_SILENCE || out->reason == VAD_STOP_OK_MAX_DURATION);

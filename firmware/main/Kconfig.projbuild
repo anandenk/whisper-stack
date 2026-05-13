@@ -190,6 +190,23 @@ menu "Whisper Stack Device"
             LISTEN_GAIN=6× was needed because openWakeWord has no
             AGC; that justification does not transfer here.
 
+    config WAKE_VAD_MIN_SPEECH_MS
+        int "AFE VAD: minimum sustained speech duration (ms)"
+        depends on VOICE_ENABLED
+        default 128
+        range 32 500
+        help
+            v2-M6: AFE's VAD requires speech-like frames to be
+            sustained for this many milliseconds before flipping
+            to AFE_VAD_SPEECH. Default 128 ms — below the typical
+            150-250 ms duration of single-syllable English words
+            ("yes" / "no" / "stop"), so real speech crosses it,
+            and well above typing clicks (5-30 ms) which never do.
+
+            Drop to 80 ms if M6-d smoke shows real speech being
+            clipped at start. Raise toward 250 ms if rapid speech
+            isn't aggregating well.
+
     menu "M7 — HC-SR04 ultrasonic gesture wake"
 
         config WAKE_GESTURE_ENABLED

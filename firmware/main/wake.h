@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "esp_vad.h"   // for vad_state_t (VAD_SILENCE / VAD_SPEECH)
 
 // Spawn the AFE feed + fetch tasks. Idempotent.
 //
@@ -36,3 +37,30 @@
 // Returns ESP_OK on success; ESP_FAIL if model/AFE init fails (out
 // of memory, model partition missing, no WakeNet model packed, etc).
 esp_err_t wake_init(const char *ip);
+
+// v2-M6: pull one AFE-processed audio frame from the LISTENING output
+// queue. Each frame is the AFE pipeline's output (post-NS / post-AGC /
+// 30 ms chunk) plus the vadnet1_medium VAD verdict for that chunk.
+//
+// Consumed by vad_record during LISTENING. The wake module's
+// wake_fetch_task pushes frames into this queue while s_state ==
+// APP_STATE_LISTENING; in other states frames are dropped (and counted
+// via wake_listen_drops_take_and_reset).
+//
+// On success, sets:
+//   *data       — heap-allocated int16 samples (caller MUST `free` it)
+//   *n_samples  — number of int16 samples in `*data`
+//   *vad_state  — VAD_SILENCE or VAD_SPEECH for this chunk
+//
+// Returns:
+//   ESP_OK              — frame returned, ownership transferred
+//   ESP_ERR_TIMEOUT     — no frame within timeout_ms
+//   ESP_ERR_INVALID_STATE — wake module not initialized
+esp_err_t wake_listen_next(int16_t **data, size_t *n_samples,
+                           vad_state_t *vad_state, uint32_t timeout_ms);
+
+// Read + clear the drop counter for the LISTENING output queue.
+// Frames are dropped (newest-drop policy) when the queue fills up
+// because vad_record fell behind. Logged at end of each vad_record
+// call alongside i2s_mic's recycled=N (gotcha #9 pattern).
+uint32_t wake_listen_drops_take_and_reset(void);
