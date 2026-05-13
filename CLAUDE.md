@@ -72,7 +72,7 @@ one set of dependencies, one way the system runs.
 |---|---|---|
 | STT | faster-whisper (local GPU) | `WhisperLocalSTT` in `server/backends/stt_whisper.py` |
 | LLM | Gemini 2.5 Flash (cloud) | `GeminiLLM` in `server/backends/llm_gemini.py` via the `google-genai` SDK |
-| TTS | Piper (local) | `PiperTTS` in `server/backends/tts_piper.py` |
+| TTS | Kokoro 82M, ONNX runtime (local) | `KokoroTTS` in `server/backends/tts_kokoro.py` (voice `af_bella` @ 24 kHz). Piper backend stays in tree as fallback — edit `server/modes.py:get_tts()` to revert. |
 | Tools | `get_current_time` (custom) + `google_search` (built-in) | Mutually exclusive per Gemini call; picked by `_select_tools()` in `server/app.py` |
 | Audio playback | sounddevice → system default output | `play_locally=true` on `/converse` |
 
@@ -346,14 +346,15 @@ been caught at the source.
 ```
 .venv/                       Python 3.13 virtualenv
 samples/jfk.wav              11s public-domain STT fixture
-models/piper/                Piper voice .onnx + .json
+models/kokoro/               Kokoro 82M ONNX + voices .bin (active TTS)
+models/piper/                Piper voice .onnx + .json (rollback path)
 tests/stageN_*.py            per-feature smoke tests
 tests/stage_gemini.py        Gemini SDK smoke (chat, tools, search, streaming)
 tests/talk.py                push-to-talk client
 tests/jarvis.py              wake-word client
 server/
 ├── app.py                   Flask routes; main() warms each backend via modes
-├── config.py                env loading (Gemini key, Whisper, Piper, sessions)
+├── config.py                env loading (Gemini key, Whisper, Kokoro/Piper, sessions)
 ├── modes.py                 factory: get_stt / get_llm / get_tts
 ├── protocols.py             STT / LLM / TTS Protocols
 ├── markdown.py              to_speakable_text (markdown/LaTeX stripper)
@@ -376,7 +377,8 @@ server/
 └── backends/
     ├── stt_whisper.py       WhisperLocalSTT (+ NVIDIA DLL bootstrap)
     ├── llm_gemini.py        GeminiLLM (chat + chat_stream + tool dispatch)
-    └── tts_piper.py         PiperTTS
+    ├── tts_kokoro.py        KokoroTTS (active; kokoro-onnx + af_bella)
+    └── tts_piper.py         PiperTTS (rollback path; not wired by default)
 plan.md                      original 7-stage build plan (historical)
 notes/sessions-plan.md       multi-turn session memory (A–E shipped)
 notes/voice-agent-plan.md    streaming TTS / VAD / continuous / wake (1–6 shipped)

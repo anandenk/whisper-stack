@@ -32,5 +32,5 @@ def get_llm() -> LLM:
 
 @functools.lru_cache(maxsize=1)
 def get_tts() -> TTS:
-    from server.backends.tts_piper import PiperTTS
-    return PiperTTS()
+    from server.backends.tts_kokoro import KokoroTTS
+    return KokoroTTS()

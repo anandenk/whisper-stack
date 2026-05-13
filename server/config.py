@@ -30,13 +30,28 @@ WHISPER_LANGUAGE: str | None = _whisper_lang_raw if _whisper_lang_raw else None
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
-# ---- TTS (Piper, local) -----------------------------------------------------
+# ---- TTS (Kokoro, local; ONNX-runtime via kokoro-onnx) ----------------------
+# Kokoro 82M, Apache-2.0, sounds noticeably more natural than Piper. Model
+# + voices files are downloaded once (see README) into models/kokoro/.
+# Stock voices include af_bella (warm female, default), af_sarah, af_sky,
+# af_nicole, am_adam, am_michael, bf_*/bm_* British, etc. Full list comes
+# back from Kokoro.get_voices() at runtime.
+KOKORO_MODELS_DIR = REPO_ROOT / "models" / "kokoro"
+KOKORO_MODEL_PATH = KOKORO_MODELS_DIR / "kokoro-v1.0.onnx"
+KOKORO_VOICES_PATH = KOKORO_MODELS_DIR / "voices-v1.0.bin"
+KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "af_bella")
+KOKORO_LANG = os.environ.get("KOKORO_LANG", "en-us")
+# Speed knob, Kokoro-native (1.0 = natural). Piper used length_scale where
+# lower=faster; Kokoro inverts that — higher=faster. 1.0 sounds fine; bump
+# to 1.1-1.15 if voice-agent UX wants the same brevity boost Piper got
+# from length_scale=0.85.
+KOKORO_SPEED = float(os.environ.get("KOKORO_SPEED", "1.0"))
+
+# ---- TTS (Piper, local; kept as rollback path) ------------------------------
+# To revert to Piper, change server/modes.py:get_tts() back to PiperTTS.
 PIPER_MODELS_DIR = REPO_ROOT / "models" / "piper"
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-amy-medium")
 PIPER_MODEL_PATH = PIPER_MODELS_DIR / f"{PIPER_VOICE}.onnx"
-# Speech rate. Lower = faster. Default 0.85 is ~15% faster than 1.0; still
-# natural. Voice-agent UX feels noticeably snappier with this set.
-# Below ~0.75 starts to sound rushed; above ~1.1 starts to sound sleepy.
 PIPER_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.85"))
 # Optional substring matched against output device names. When set, overrides
 # the system default output for /speak and /converse playback so a Bluetooth

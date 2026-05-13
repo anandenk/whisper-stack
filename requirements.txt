@@ -6,8 +6,13 @@
 #   * NVIDIA CUDA / cuBLAS / cuDNN wheels — needed at faster-whisper import.
 #     On Windows the per-process `os.add_dll_directory` shim in
 #     server/backends/stt_whisper.py points at site-packages/nvidia/*/bin.
-#   * Piper voice models — drop the .onnx + .json files under models/piper/
-#     and set PIPER_VOICE in .env.
+#   * Kokoro ONNX model + voices — drop kokoro-v1.0.onnx and voices-v1.0.bin
+#     under models/kokoro/. Both are downloadable from
+#     https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0
+#     (model ~310 MB, voices ~27 MB). Set KOKORO_VOICE in .env to override
+#     the default af_bella.
+#   * Piper voice models (rollback path) — drop the .onnx + .json files under
+#     models/piper/ and set PIPER_VOICE in .env.
 #   * openwakeword's bundled models — `python -c "import openwakeword;
 #     openwakeword.utils.download_models()"` once per machine.
 
@@ -22,7 +27,13 @@ google-genai
 # STT (local, GPU)
 faster-whisper
 
-# TTS (local)
+# TTS (local). Kokoro 82M ONNX path is the active default; Piper stays as
+# the rollback (switch by editing server/modes.py:get_tts() back to
+# PiperTTS). kokoro-onnx is preferred over the official `kokoro` package
+# because `kokoro` hard-pins numpy==1.26.4 which has no Python 3.13
+# wheel; this ONNX path is pure-Python over onnxruntime and bundles its
+# own espeak-ng so no system install is needed.
+kokoro-onnx
 piper-tts
 
 # Wake-word detection (server-side, used by /listen for the ESP-32 firmware
