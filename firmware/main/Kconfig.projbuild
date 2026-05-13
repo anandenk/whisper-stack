@@ -171,6 +171,29 @@ menu "Whisper Stack Device"
             hammering the CPU and network. See notes/build-modes.md
             for the full menuconfig flow.
 
+    config WS_CONTINUOUS_MODE_ENABLED
+        bool "Continuous-mode follow-ups after wake (M5 behavior)"
+        depends on VOICE_ENABLED
+        default n
+        help
+            When set, the device stays in LISTENING for
+            WS_CONVERSATION_TIMEOUT_MS (30 s) after each reply so the
+            user can ask a follow-up without re-saying "Hey Kira."
+            When unset, every turn requires a fresh wake — same shape
+            as Alexa / Siri default behavior. Most assistants make
+            this opt-in for a reason: in a shared room, continuous
+            mode picks up every nearby voice as input, costing money
+            (Gemini credits) and producing weird replies. Without
+            speaker recognition (we have none), the only audio filter
+            we have is "is this speech?" — and other people ARE
+            speech, so vadnet1 correctly classifies them as such.
+
+            Default n shipped in the post-M6 audit. The M5 code path
+            stays compiled-conditional in main.c
+            (do_round_trip_streaming_with_preroll's while loop) so
+            flipping this back on later is one menuconfig toggle —
+            no code change.
+
     config WAKE_INPUT_GAIN_X10
         int "Pre-AFE input gain (×10, so 10 = 1.0×)"
         depends on VOICE_ENABLED

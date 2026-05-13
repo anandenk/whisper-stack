@@ -451,6 +451,15 @@ void do_round_trip_streaming_with_preroll(const char *ip,
                                 preroll_seg2, preroll_seg2_n,
                                 /*initial_timeout_ms=*/0, /*is_followup=*/false, &vr);
 
+    (void)err;   // unused when continuous mode is gated out
+
+#if CONFIG_WS_CONTINUOUS_MODE_ENABLED
+    // M5: continuous follow-ups for up to WS_CONVERSATION_TIMEOUT_MS so
+    // the user can ask "and what about Chicago?" without re-waking. Off
+    // by default since the post-M6 audit — in a shared room with other
+    // people, every voice in earshot would trigger turns and burn Gemini
+    // credit. Flip this back on via menuconfig if you're in a solo-use
+    // scenario where the fast-follow-up UX outweighs the privacy cost.
     while (err == ESP_OK) {
         // Last turn returned a real reply. Stay open for a follow-up.
         err = do_one_turn(ip, NULL, 0, NULL, 0,
@@ -468,6 +477,7 @@ void do_round_trip_streaming_with_preroll(const char *ip,
             break;
         }
     }
+#endif
 
     s_state = APP_STATE_IDLE;
     oled_status("idle", "say 'hey kira'", ip);
