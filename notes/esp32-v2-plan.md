@@ -18,6 +18,27 @@ The v2 hardware delivery added four components beyond v1:
    recognition that was hardware-impossible on the WROOM-32.
 
 M1 absorbed the chip swap. M2–M5 each absorb one new capability.
+**M6 was added 2026-05-12** to fix a software-only bug surfaced
+during M2 bench testing: keyboard/mouse clicks during continuous-
+mode LISTENING were triggering false turns and wasting Gemini
+credit. M6 promotes AFE from "wake-only" (M2) to "all audio always"
+and replaces the peak-threshold VAD with AFE's duration-aware VAD
+that filters transients by design.
+
+## Milestone order
+
+Implementation order differs from numbering because **M6 is
+software-only and addresses an active bug, while M3/M4/M5 need
+hardware that isn't soldered yet:**
+
+| # | Milestone | Status | Reason for ordering |
+|---|---|---|---|
+| M1 | Chip port | Shipped (`bc0e544`) | Foundation |
+| M2 | On-device wake | Code complete, test pending | Foundation for everything else |
+| **M6** | **Mic-quality pipeline** | **Next — implement after M2 ships** | Software-only, fixes active typing-hallucination bug |
+| M3 | MAX98357A audio out | Hardware-blocked (soldering) | Needs DAC wired |
+| M4 | LiPo + charging | Hardware-blocked | Needs charging board wired |
+| M5 | AEC | Hardware-blocked on M3 | Needs speaker output as ref signal |
 
 ## Decisions at a glance
 
@@ -256,6 +277,294 @@ Can land in either order.
 
 **Deferred dependencies:** M3 must land first (need actual speaker
 output to capture as the reference signal).
+
+---
+
+## M6 — Mic-quality pipeline via always-on AFE
+
+> **Motivation:** keyboard / mouse clicks during continuous-mode
+> LISTENING fire today's peak-threshold VAD (`VAD_PEAK_THRESHOLD = 200`
+> in `firmware/main/vad.h`), get captured as "speech," uploaded to
+> /converse, hallucinated into a fake transcript by Whisper, and
+> answered by Gemini — wasting real cents per false trigger.
+> This is the next priority because it's an active bug that costs
+> money, and it's pure-software (no v2 hardware required).
+>
+> **Priority slot:** **promote ahead of M3 / M4 / M5.** M3 needs the
+> MAX98357A soldered, M4 needs the LiPo wired, M5 depends on M3.
+> M6 can ship today and the win is immediate.
+
+### Why this fixes the typing problem
+
+The current VAD in `vad.c` is a peak detector: any single 16-bit
+sample whose absolute value crosses 200 gets counted as "speech."
+A typing click is a sharp transient with a 5-30 ms duration and
+peak values in the thousands — exactly the failure mode.
+
+AFE's vadnet1_medium VAD helps via **two complementary mechanisms**:
+
+1. **Learned speech features.** vadnet1 is a small neural net
+   trained to classify 30 ms audio chunks as voiced speech vs.
+   anything else. The training data includes typing, clicking,
+   keyboard taps, dishes, and other transient noise as negative
+   examples. Each click is classified on its acoustic shape — not
+   energy — so even repeated rapid typing doesn't fool it.
+2. **Duration aggregation.** `vad_min_speech_ms = 128 ms` requires
+   sustained "speech" classification before flipping to
+   `AFE_VAD_SPEECH`. A single 30 ms click can't cross that floor
+   even if vadnet1 momentarily misclassifies it.
+
+Both together address the failure mode. The duration filter is
+the safety net; vadnet1's spectral discrimination is the primary
+defense against sustained typing (~5 clicks/sec at 60 WPM, which
+would fool a duration-only filter).
+
+Two secondary wins come along for free:
+
+1. **NS (noise suppression)** — WebRTC's spectral subtraction
+   removes stationary background noise (fans, HVAC). Whisper hears
+   cleaner audio → fewer hallucinations on real captures too.
+2. **AGC (automatic gain control)** — INMP441 quiet conversational
+   levels get normalized on-device, making server-side
+   `_peak_normalize_wav` redundant. Keep the server-side fallback
+   for now — easy to remove in a follow-up once we trust AFE's AGC.
+
+### Decisions at a glance
+
+| Decision | Pick | Why |
+|---|---|---|
+| VAD backend | **vadnet1_medium** | ML-based neural-net VAD trained specifically to discriminate speech from non-speech transients. Strictly stronger than WebRTC at rejecting clicks/keystrokes/dishes — the exact failure mode that motivated M6. Locked in upfront (2026-05-12) to avoid a possible swap cycle after WebRTC underperforms. Cost: ~100-150 KB PSRAM + the vadnet1_medium model gets packed into the existing `model` partition alongside `wn9_heykira_tts3` (well under the 2 MB partition budget). Selected via `CONFIG_SR_VADN_VADNET1_MEDIUM=y` in `sdkconfig.defaults`. |
+| Mic-frame ownership | **AFE owns the mic stream end-to-end** | The option (a) refactor deferred from M2. AFE feed runs in all states (not just IDLE). The `i2s_mic` ring stays as the producer; `wake.c` is the only consumer; AFE's fetch output becomes the new single source of truth for both wake detection AND LISTENING audio. |
+| LISTENING audio source | **AFE output queue (denoised)** | `/converse` upload pulls from a new queue that `wake.c`'s fetch task fills with AFE's processed audio chunks. Whisper sees post-NS, post-AGC audio. |
+| VAD state machine | **Thin wrapper over `afe_fetch_result_t.vad_state`** | `vad.c` keeps the same external API (`vad_record()`) but its internals replace peak-threshold + dwell counter with AFE's per-chunk `AFE_VAD_SPEECH` / `AFE_VAD_SILENCE` events. Timing logic (has-speech-been-heard, dwell-since-speech-end, total-window-timeout) stays the same shape — just driven by AFE events instead of raw peaks. |
+| Preroll mechanism | **Keep wake.c's preroll ring** | AFE's `vad_cache` is "audio captured before VAD flipped to SPEECH" — semantics are tied to **VAD onset**, not **wake-word onset**. With M6's always-on VAD, if the user says "Hey Kira what's the weather" with no pause, VAD has been in SPEECH state continuously since "Hey" and `vad_cache` is whatever the cache was *128 ms before VAD onset* — possibly silence, definitely not 1 second of "hey kira what's the weath...". The wake.c hand-rolled ring (1 s before wake-fire instant) preserves the right semantics. Use `vad_cache` as a SECONDARY signal only for catching speech that started just before VAD's duration filter flipped. |
+| Task structure | **Three tasks, not two: `wake_feed`, `wake_detect`, `listen_forward`** | `wake_detect`'s call to `do_round_trip_streaming_with_preroll` blocks for the entire LISTENING → THINKING → SPEAKING cycle (many seconds). If the same task also had to forward AFE-fetch output to the LISTENING queue, that wouldn't happen. So: `wake_feed` runs always (mic → AFE feed); `wake_detect` reads fetches and dispatches based on state — on WAKEUP_DETECTED in IDLE it triggers do_round_trip on a SEPARATE driver; `listen_forward` reads AFE fetches in parallel and pushes to `afe_out_queue` when state is LISTENING. **Or** simpler-but-equivalent: one fetch task always, but the wake event posts to a `wake_event_queue` consumed by a `round_trip_driver` task — fetch task continues running, listening forward path stays in fetch task. Pick this latter shape; it's one task less. |
+| LISTENING queue policy | **Drop-newest with counter** | When the queue is full (consumer behind), drop the newest incoming frame and increment a counter. Matches the `recycled=N` diagnostic pattern from gotcha #9. Logged at the end of each `vad_record` so we can spot consumer lag. |
+| `_peak_normalize_wav` on server | **Keep for now, evaluate removal post-M6** | Server-side gain compensation was the gotcha-#7 fix. AFE's AGC should obviate it, but until we measure that Whisper recall is fine without the server-side normalize, keep both. Remove in a v2-M6.x follow-up once trust is built. |
+
+### Architecture diff (M2 → M6)
+
+**After M2 (current):**
+```
+mic → i2s_mic ring (single consumer) → state-machine routing:
+    IDLE      → wake.c → AFE → wakeup_state
+    LISTENING → vad.c (peak threshold) → /converse upload
+```
+
+**After M6:**
+```
+mic → i2s_mic ring → wake_feed_task (always running)
+                         │
+                         ▼
+                       AFE (WakeNet + VAD + NS + AGC, all on)
+                       SE task pinned to core 1 (WiFi owns core 0)
+                         │
+                         ▼
+                    wake_fetch_task → afe_fetch_result_t:
+                                       ├─ wakeup_state
+                                       ├─ vad_state
+                                       ├─ data (denoised audio)
+                                       └─ vad_cache (post-VAD onset)
+                         │
+                         ├─ wakeup_state == WAKENET_DETECTED
+                         │    → push to wake_event_queue
+                         │       (with preroll ring snapshot)
+                         │
+                         └─ APP_STATE == LISTENING
+                              → push (data, vad_state) into afe_out_queue
+                                drop-newest if full, bump counter
+
+  wake_event_queue ─► round_trip_driver_task ─► do_round_trip_streaming...
+                                                  (consumes preroll +
+                                                   afe_out_queue via vad.c)
+
+  afe_out_queue ─► vad_record (refactored) reads frames:
+                     - count consecutive VAD_SPEECH frames
+                     - count consecutive VAD_SILENCE frames
+                     - hand audio chunks to http_converse stream
+                     - stop on silence-dwell or timeout
+```
+
+Key task decoupling: `wake_fetch_task` NEVER blocks on `do_round_trip` —
+it just posts wake events to a queue and continues processing fetches.
+The `round_trip_driver_task` is what blocks for the multi-second
+LISTENING → THINKING → SPEAKING cycle. Without this split, the LISTENING
+audio queue would starve the moment a wake fired.
+
+### Sub-phases
+
+**M6 fallback knob (added throughout, not a sub-phase):**
+`CONFIG_VAD_BACKEND` choice in Kconfig — `PEAK` (today's vad.c) or
+`AFE` (M6). Default `AFE` post-merge. Lets a single build A/B between
+the two backends without code changes. If a regression surfaces post-
+ship, one menuconfig flip is enough to revert without re-flashing
+from a tag. The PEAK code path stays compiled in; `--gc-sections`
+drops whichever isn't selected.
+
+**M6-a — Enable AFE VAD with vadnet1_medium + pin SE task to core 1**
+- Enable `CONFIG_SR_VADN_VADNET1_MEDIUM=y` in `sdkconfig.defaults`
+  (replaces / coexists with `CONFIG_SR_VADN_WEBRTC=y` — esp-sr picks
+  whichever is selected). The vadnet1 model gets packed into the
+  existing `model` partition by `movemodel.py` at build time.
+- Flip `cfg->vad_init = true` (currently false in M2).
+- Resolve the vadnet1 model name at init via
+  `esp_srmodel_filter(s_models, ESP_VADNET_PREFIX, NULL)` (or the
+  equivalent constant — check esp_vadn_models.h) and assign to
+  `cfg->vad_model_name`. Log the resolved name at boot like we do
+  for the wakenet.
+- Set `cfg->afe_perferred_core = 1` (WiFi pins to core 0; AFE's
+  SE task fighting WiFi on the same core is a known latency cliff
+  in other esp-sr projects).
+- Set `cfg->afe_perferred_priority = 5` to match our other tasks.
+- Kconfig knob `WAKE_VAD_MIN_SPEECH_MS` (default 128) — exposes the
+  duration filter for tuning if 128 ms cuts off short utterances.
+- **Smoke gate before M6-b:** boot log shows
+  `wake: resolved vad model: vadnet1_medium` (or similar). Fetch
+  task log shows VAD transitions IDLE → SPEECH → SILENCE on real
+  voice. Boot-time `recycled=N` STATS still 0. Free heap ≥ 7.8 MB
+  (allow ~300 KB drop from M2 baseline to absorb vadnet1 PSRAM
+  allocations).
+
+**M6-b — Split fetch into wake_fetch + round_trip_driver tasks**
+- `wake_fetch_task` (the existing one, renamed for clarity) NEVER
+  calls `do_round_trip_streaming_with_preroll` directly. On
+  WAKENET_DETECTED it: (1) snapshots the preroll ring, (2) posts a
+  `wake_event_t {seg1, seg1_n, seg2, seg2_n, score, source}` to a
+  new `wake_event_queue` (length 1, drop if full), (3) calls
+  `s_afe_handle->reset_buffer()`, (4) continues fetching.
+- New `round_trip_driver_task`: blocks on `wake_event_queue`,
+  pops events, calls `do_round_trip_streaming_with_preroll`,
+  loops. This is the task that owns the multi-second blocking
+  cycle.
+- Remove the `s_state != APP_STATE_IDLE` gate in feed_task. AFE
+  feeds always.
+- Keep `s_preroll` (1 s ring) — its semantics (last 1 s before
+  wake fires) aren't substitutable by AFE's `vad_cache`.
+- **Smoke gate before M6-c:** wake still fires reliably on "hey
+  kira", round_trip_driver picks up the event, /converse round-trip
+  works end-to-end. recycled=0.
+
+**M6-c — AFE output queue + LISTENING audio path**
+- New `afe_out_queue` (FreeRTOS queue) holds
+  `afe_frame_t { int16_t *data; size_t n_samples; vad_state_t vad_state; }`
+  tuples. Note: AFE owns the `data` pointer's lifetime (the buffer
+  is reused on the next fetch), so the consumer MUST copy or
+  process before yielding.
+- Sized for ~2 s of audio (~67 chunks @ 30 ms each). Drop-newest
+  policy when full; counter `afe_out_drops` exposed via a getter
+  for diagnostics (logged at end of vad_record same as
+  `recycled=N`).
+- `wake_fetch_task`: on every fetch result, if
+  `s_state == APP_STATE_LISTENING`, push to queue. Otherwise drop.
+- New `wake.h` API:
+  ```c
+  esp_err_t wake_listen_next(int16_t **data, size_t *n_samples,
+                             vad_state_t *vad_state, uint32_t timeout_ms);
+  uint32_t  wake_listen_drops_take_and_reset(void);
+  ```
+- **Smoke gate before M6-d:** wake + manual VAD test (just use
+  existing `vad.c` for now, but log the AFE vad_state in parallel
+  to compare). Confirm `afe_out_drops` stays at 0 during a normal
+  conversation.
+
+**M6-d — Refactor `vad.c` to consume from AFE queue (with PEAK fallback)**
+- Behind `CONFIG_VAD_BACKEND_AFE` (the new fallback knob): replace
+  the inner `i2s_mic_capture_frame` + peak-threshold loop with
+  `wake_listen_next` + AFE's `vad_state`. Behind
+  `CONFIG_VAD_BACKEND_PEAK`: existing code unchanged.
+- Same external signature: `vad_record(..., stop_reason_t *out)`
+  so `do_round_trip` doesn't touch.
+- State machine: same shape (has-spoken yet, silence-dwell counter,
+  hard timeout) but counters increment per-chunk based on
+  `vad_state == AFE_VAD_SPEECH` / `AFE_VAD_SILENCE`.
+- Audio writes to http stream come from AFE's denoised data, not raw
+  mic.
+- **Button-wake path explicit AFE flush:** when wake source is
+  BUTTON, the user pressed the button after AFE has potentially
+  been in VAD_SPEECH from background noise. On entry to
+  `vad_record`, call `s_afe_handle->reset()` (or equivalent state
+  flush) so the button press doesn't get a stale "already speaking"
+  signal from AFE.
+- Delete `i2s_mic.h`'s `i2s_mic_capture` / `i2s_mic_capture_frame` /
+  `i2s_mic_drain` ONLY if nothing else references them after both
+  backends compile. The PEAK backend still uses them.
+
+**M6-e — Smoke test typing rejection + STT quality + regression**
+
+**Test prep:** server-side `_peak_normalize_wav` MUST be temporarily
+disabled (in `server/app.py`) before this smoke. AFE's AGC runs
+on-device now; double-normalization at the server distorts levels
+and would mask whether AFE's on-device AGC is sufficient. Re-enable
+after the test, or remove permanently if the AGC proves good enough.
+
+1. **Typing test:** wake the device, ask one short follow-up to enter
+   continuous mode, then type at normal cadence near the mic for
+   30 seconds. Expected: **zero `/converse` triggers, zero `[xxx]
+   transcript:` log lines.** Before M6 this would have triggered
+   several false turns.
+2. **Clicking test:** same, but mouse-click rapidly. Same target.
+3. **Quiet-speech recall:** speak a short follow-up at conversational
+   volume from typical reading distance. Should still trigger a turn.
+4. **STT quality A/B:** ask "what's the weather in Mongolia like right
+   now?" twice — once with `CONFIG_VAD_BACKEND_PEAK` (raw mic,
+   pre-M6 behavior), once with `CONFIG_VAD_BACKEND_AFE` (M6).
+   Compare transcripts qualitatively. Note any difference in proper-noun
+   accuracy in the commit body. **Don't re-enable the server-side
+   normalize between runs** — that's the variable we're testing.
+5. **5-turn regression:** standard `recycled=N` + `afe_out_drops`
+   smoke test. Both target 0 across all turns.
+
+### Memory + resource budget (estimates — confirm after build)
+
+- AFE always-on adds ~50–80 KB PSRAM for the VAD pipeline core.
+- vadnet1_medium model: +100–150 KB PSRAM at runtime + ~50–100 KB
+  in the `model` partition (the existing 2 MB partition has ~1.7 MB
+  free after wn9_heykira_tts3's 284 KB; vadnet1 fits comfortably).
+- The `s_preroll` ring stays — 32 KB heap. (Earlier draft proposed
+  retiring it; the advisor's preroll-semantics catch reverted that.)
+- Net delta from M2 baseline: ~+150–230 KB PSRAM used. Free heap
+  expected to drop from ~8.13 MB → ~7.9 MB after AFE init.
+
+### Risks + open questions
+
+1. **vadnet1 false negatives on quiet speech.** ML models can
+   under-predict when input is far from training distribution.
+   If real speech is missed, we have escape hatches:
+   `WAKE_VAD_MIN_SPEECH_MS` can be dropped from 128 → 80 to
+   accept shorter sustained intervals, and `vad_mode` can be
+   tuned via the existing `vad_mode_t` field. Worst case: fall
+   back to WebRTC VAD by flipping `CONFIG_SR_VADN_WEBRTC=y`
+   (the existing model partition still has room for both).
+2. **`vad_min_speech_ms = 128 ms` could clip "yes" / "no" / "stop".**
+   Single-syllable English words are ~150-250 ms. 128 ms is below
+   that, so the floor should be safe — but worth measuring.
+3. **AFE-output audio is single-channel post-NS.** Whisper expects
+   16 kHz mono int16 — same as today. No format change for the
+   server. But the audio is no longer the literal raw mic samples,
+   so any server-side debugging that assumes "this is what the mic
+   heard" needs an update. The `samples/_last_received.wav` debug
+   dump still captures whatever the server received — still useful,
+   just denoised now.
+4. **AEC interaction in M5.** When M5 lands and adds AEC to the same
+   AFE config, the same audio pipeline carries through — no rework.
+   M6 is exactly the foundation M5 needs.
+5. **What if AFE is busy and `fetch` times out?** Today the fetch
+   default timeout is 2000 ms. During LISTENING, queue contention
+   shouldn't be an issue (no other consumer). Worst case: an
+   `AFE_FETCH_TIMEOUT` event triggers a state recovery — log + move on.
+6. **AFE-frame data ownership.** AFE's fetch returns a `data` pointer
+   into its internal buffer that's reused on the next fetch. The
+   `afe_out_queue` consumer (`vad_record`) must either copy each
+   frame before the next fetch overwrites it, OR maintain the
+   invariant that fetches don't outpace consumption. The latter is
+   fragile — copy on consume. ~960 B per copy (480 samples × 2),
+   ~32 copies/s @ 30 ms cadence ≈ 30 KB/s memcpy, trivial.
+
+### Decisions resolved 2026-05-12
+
+**vadnet1 upfront** (user decision). Skips the possible WebRTC →
+vadnet1 swap cycle; locks in the stronger ML-based VAD from the
+start. Memory cost is comfortable (under +250 KB PSRAM total).
 
 ---
 
