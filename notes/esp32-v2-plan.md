@@ -1,10 +1,16 @@
 # ESP32 v2 hardware — plan
 
-> v2-M1 (chip port to ESP32-S3-DevKitC-1 N8R8) shipped 2026-05-12 as
-> `bc0e544` + face-OLED pin fix `6466d70`. This doc lays out the
-> remaining v2 milestones in dependency order, with detail
-> concentrated on **M2** (the next milestone) and shorter sketches
-> for M3 / M4 / M5.
+> **Status as of 2026-05-13:** M1, M2, M6 all shipped. M3 / M4 / M5
+> still pending the MAX98357A DAC being soldered up. Original drafting
+> dates of this plan kept below for context.
+>
+> Shipped commits:
+> - v2-M1 chip port: `bc0e544` + face-OLED pin fix `6466d70`
+> - v2-M2 on-device wake: `8013a5f`
+> - v2-M6 AFE-driven VAD: `1283445`
+> - Post-M6 UX tuning (TTS pacing, thinking-face mood, drop continuous
+>   mode default-on, drop SPEAKING post-TTS buffer): `a94f025`,
+>   `7fb436a`, `fcfc1ea`
 
 ## Context
 
@@ -33,12 +39,39 @@ hardware that isn't soldered yet:**
 
 | # | Milestone | Status | Reason for ordering |
 |---|---|---|---|
-| M1 | Chip port | Shipped (`bc0e544`) | Foundation |
-| M2 | On-device wake | Code complete, test pending | Foundation for everything else |
-| **M6** | **Mic-quality pipeline** | **Next — implement after M2 ships** | Software-only, fixes active typing-hallucination bug |
+| M1 | Chip port | **Shipped** (`bc0e544`) | Foundation |
+| M2 | On-device wake | **Shipped** (`8013a5f`) | Foundation for everything else |
+| M6 | Mic-quality pipeline | **Shipped** (`1283445` + tuning `a94f025` / `7fb436a` / `fcfc1ea`) | Software-only, fixed the typing-hallucination bug. Switched from `wn9_jarvis_tts` to `wn9_heykira_tts3` model during M2 since "Hi Jarvis" two-word variant doesn't exist upstream and single-word "Jarvis" has higher FP rate. |
 | M3 | MAX98357A audio out | Hardware-blocked (soldering) | Needs DAC wired |
 | M4 | LiPo + charging | Hardware-blocked | Needs charging board wired |
 | M5 | AEC | Hardware-blocked on M3 | Needs speaker output as ref signal |
+
+## What actually shipped vs the plan below
+
+The plan below was written before M2/M6 were implemented; some of
+its details diverged in practice:
+
+- **Wake model:** plan said `wn9_jarvis_tts` (single word). Switched
+  to `wn9_heykira_tts3` (two-word "Hey Kira") during M2 implementation
+  for a lower false-positive rate.
+- **Continuous mode:** plan assumed it would stay on. Post-M6 testing
+  showed it picks up every voice in shared rooms; ended up gating it
+  behind `CONFIG_WS_CONTINUOUS_MODE_ENABLED` (default OFF). M5's
+  loop is preserved in main.c behind that flag.
+- **VAD silence dwell:** plan didn't specify a final value. Settled
+  at `VAD_SILENCE_DWELL_MS = 1200` after iterating (2500 pre-M6 →
+  800 too aggressive → 1200 balanced).
+- **SPEAKING countdown:** plan didn't address the post-TTS feedback
+  loop. Initially used a 1.2 s buffer to let AFE settle, then with
+  continuous mode gated off the buffer became unneeded — final
+  countdown is exactly `audio_duration_s`, no overshoot.
+- **Default face mood for THINKING:** plan didn't specify. Started
+  as `ROBO_EYES_MOOD_TIRED` (droopy/sad), changed to
+  `ROBO_EYES_MOOD_DEFAULT` + subtle horizontal flicker after user
+  feedback ("looks sad when thinking").
+
+Plan-as-written stays below as a historical artifact of the
+implementation work; treat divergences as documentation, not bugs.
 
 ## Decisions at a glance
 

@@ -480,17 +480,29 @@ State of the device:
   chronic /listen network exposure that drove gotcha #9. BOOT button
   is preserved as a manual-wake fallback.
 - VAD-bounded recording (M3) streams over **HTTP chunked-transfer**
-  as it's captured — no heap cap on length. VAD stops on 2.5 s of
-  silence (`vad.h`) after voice has been heard, or returns NO_SPEECH
-  after 15 s of initial silence, or BUTTON_CANCEL on a ≥1 s long-press.
+  as it's captured — no heap cap on length. v2-M6 moved VAD from
+  the old peak-threshold detector to AFE's `vadnet1_medium` ML VAD;
+  `vad_record` now consumes denoised AFE-output frames + AFE's
+  per-chunk `vad_state` instead of raw mic samples + frame peaks.
+  Stop conditions: `VAD_SILENCE_DWELL_MS = 1200` after speech has
+  been confirmed (vadnet1's own 992 ms min_noise_ms + our 1200 ms
+  ≈ ~2.2 s end-of-utterance latency), or NO_SPEECH after 15 s
+  initial silence, or BUTTON_CANCEL on a ≥1 s long-press.
 - Server replies (`/converse?omit_audio_base64=1`) come back as
   small JSON; workstation Realtek output speaks the answer; OLED
   shows transcript + speaking countdown.
-- **Continuous mode after wake** (M5): once a turn finishes SPEAKING,
-  the device stays open for a follow-up question — no re-wake needed —
-  for `WS_CONVERSATION_TIMEOUT_MS` (30 s, in `main.c`). 30 s of silence
-  → drop back to /listen wake mode. Mirrors `tests/jarvis.py` Phase 6B.
-  Session memory carries across turns via `session_id=esp32`.
+- **Continuous mode after wake** (M5): the legacy auto-follow-up
+  behavior — once a turn finishes SPEAKING, stay open for a follow-up
+  for `WS_CONVERSATION_TIMEOUT_MS` (30 s) — is **gated off by default
+  in v2** (Kconfig `CONFIG_WS_CONTINUOUS_MODE_ENABLED`, default `n`).
+  Reason: in a shared room the device picks up every nearby voice as
+  input, costing Gemini credit and producing confused replies. Matches
+  Alexa / Siri's opt-in stance. The code path stays in `main.c`
+  wrapped in `#if`; flip the Kconfig flag to re-enable for solo-use
+  scenarios. When enabled the SPEAKING countdown's post-TTS buffer
+  also kicks in to prevent TTS-echo feedback loops; without it (default)
+  the countdown is exactly `audio_duration_s`. Session memory carries
+  across explicit-wake turns via `session_id=esp32`.
 - **OLED polish** (M6): boot card (~2 s) shows IP / server / wake
   model / session id; brief "WAKE / score N.NN" splash on each wake
   event (200 ms hold); SPEAKING screen shows model name + per-call
@@ -526,17 +538,38 @@ State of the device:
 
 **v1 firmware is feature-complete.** All planned milestones (M1–M8 +
 cat-face panel) shipped on real hardware. The audio-corruption
-root-cause fix (gotcha #9 below) is in place; the device runs
-arbitrarily long continuous-chat sessions cleanly.
+root-cause fix (gotcha #9 below) is in place. v1 build preserved
+at git tag `pre-esp32-s3-port`.
 
-**v2 hardware is arriving 2026-05-12** (today, as of the most recent
-CLAUDE.md edit): MAX98357A I²S DAC + 3W speaker (so the device speaks
-its own replies without routing through the workstation), plus a
-LiPo + USB-C charging board for multi-day runtime. Once the hardware
-is on hand, v2 firmware work begins — at minimum: an I²S audio-out
-task, PCM playback queue, mid-stream interrupt detection. The
-existing v1 code path stays as the fallback (`play_locally=true` on
-`/converse` still works through Realtek).
+**v2 hardware arrived and partially shipped (2026-05-12 / 13):**
+
+- **v2-M1 (chip port to ESP32-S3-DevKitC-1 N8R8) — shipped** as
+  `bc0e544` + face-OLED pin fix `6466d70`. Full GPIO remap, octal
+  PSRAM at 80 MHz, custom partition table.
+- **v2-M2 (on-device wake word) — shipped** as `8013a5f`. esp-sr
+  2.4.4 WakeNet running `wn9_heykira_tts3` model on-chip. The
+  ~600 lines of v1 `listen_stream.c` (raw-socket `/listen` client)
+  are gone; the chronic exposure window that drove gotcha #9 is
+  permanently closed.
+- **v2-M6 (AFE-driven mic pipeline) — shipped** as `1283445`,
+  with follow-up tuning at `a94f025` / `7fb436a` / `fcfc1ea`.
+  AFE always-on with vadnet1_medium ML VAD; three-task structure
+  (wake_feed / wake_fetch / rt_driver). Replaces the peak-threshold
+  VAD; typing/clicks no longer trigger false /converse uploads.
+
+**Pending milestones (still hardware-blocked):**
+
+- **v2-M3 — MAX98357A on-device audio out** (DAC + speaker on
+  reserved GPIO 9/10/11). Includes I²S1 driver task, PCM playback
+  queue, switch from buffered `/converse` to streaming
+  `/converse/stream`.
+- **v2-M4 — LiPo + USB-C charging board.** Battery monitor on a
+  reserved ADC pin, light-sleep when idle.
+- **v2-M5 — AEC** (depends on M3 for the speaker reference signal).
+  Enables interrupt-during-SPEAKING.
+
+Existing v1 audio path still works via `play_locally=true` on
+`/converse` until M3 lands.
 
 **v3 prototyping has begun on the v1 device** — see the next
 subsection. v3 hardware (custom round display, 3D-printed enclosure)
