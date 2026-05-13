@@ -21,11 +21,16 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-// 2500 ms instead of jarvis.py's 1500 ms because users naturally pause
-// >1.5 s mid-sentence when reading from a screen or thinking. The cost
-// is 1 s of extra wait at end-of-utterance before upload starts; the
-// alternative — being cut off mid-sentence — is the worse failure mode.
-#define VAD_SILENCE_DWELL_MS     2500
+// v2-M6 dropped this from 2500 to 800 (too aggressive — brief echo
+// snuck past, see SPEAKING-overshoot fix in main.c), then settled
+// at 1200 ms. Math: vadnet1's internal min_noise_ms=992 already
+// filters mid-sentence pauses < 1 s. Our explicit dwell only kicks
+// in AFTER vadnet1 has confirmed silence. Total wait at
+// end-of-utterance: vadnet1's 992 ms + our 1200 ms ≈ 2.2 s
+// (was 3.5 s briefly post-M6, 2.5 s pre-M6). Snappier than pre-M6
+// because vadnet1 carries the mid-sentence-pause tolerance — our
+// dwell is just the "final confirmation" period.
+#define VAD_SILENCE_DWELL_MS     1200
 #define VAD_INITIAL_TIMEOUT_MS   15000
 #define VAD_MAX_RECORD_MS        30000   // safety cap; streaming means heap doesn't constrain this
 

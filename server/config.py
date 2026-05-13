@@ -45,7 +45,7 @@ KOKORO_LANG = os.environ.get("KOKORO_LANG", "en-us")
 # lower=faster; Kokoro inverts that — higher=faster. 1.0 sounds fine; bump
 # to 1.1-1.15 if voice-agent UX wants the same brevity boost Piper got
 # from length_scale=0.85.
-KOKORO_SPEED = float(os.environ.get("KOKORO_SPEED", "1.0"))
+KOKORO_SPEED = float(os.environ.get("KOKORO_SPEED", "1.15"))
 
 # ---- TTS (Piper, local; kept as rollback path) ------------------------------
 # To revert to Piper, change server/modes.py:get_tts() back to PiperTTS.

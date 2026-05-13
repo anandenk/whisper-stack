@@ -28,6 +28,7 @@
 // on M2_BUFFERED_FALLBACK if the streaming path needs to be reverted.
 
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
@@ -359,39 +360,52 @@ static esp_err_t do_one_turn(const char *ip,
     }
 
     s_state = APP_STATE_SPEAKING;
-    // v2-M6-d: overshoot audio_duration_s by ~1 s so TTS playback fully
-    // decays before LISTENING begins. Without this, the tail of TTS
-    // bleeds into LISTENING, AFE re-classifies it as SPEECH, and the
-    // follow-up turn captures the echo (perpetual-loop bug from M6
-    // bench testing). Combined with wake.c's AFE reset on LISTENING
-    // entry, this gives the speaker time to silence and AFE a clean
-    // start. Until on-device speaker + AEC (M3 + M5) land, this is
-    // the best we can do without dropping continuous mode.
-    int speak_s = (int)(resp.audio_duration_s + 1.5f);   // ceil + ~1 s buffer
-    if (speak_s < 2) speak_s = 2;
+    // v2-M6-d: overshoot audio_duration_s so TTS playback (and room
+    // echo decay) fully ends before LISTENING begins. Math:
+    //   - vadnet1's min_noise_ms = 992 ms — AFE needs ~1 s of confirmed
+    //     silence before flipping its VAD state to SILENCE.
+    //   - Room/speaker echo decay: ~200 ms after audio actually stops.
+    //   - Combined: ~1.2 s of post-TTS silence is the minimum to
+    //     guarantee LISTENING starts with AFE in SILENCE state.
+    //
+    // Earlier formulas had problems:
+    //   (int)(x + 1.5f)         → integer-truncated; 1.43 s reply got
+    //                              only 570 ms post-TTS silence → loop
+    //                              came back.
+    //   ceilf(x) + 2            → safe but WAY too much dead air for
+    //                              short replies (a 0.81 s reply would
+    //                              wait 3 s = 2.2 s of silence).
+    //
+    // Final: millisecond resolution. `total_ms = audio_ms + 1200 ms`
+    // gives exactly 1.2 s post-TTS silence at every reply length.
+    // OLED countdown updates once per second (rounded up); cancel
+    // checks every 250 ms.
+    const int POST_TTS_BUFFER_MS = 1200;
+    int total_ms = (int)(resp.audio_duration_s * 1000.0f) + POST_TTS_BUFFER_MS;
+    if (total_ms < 1500) total_ms = 1500;   // floor for safety on near-zero replies
 
-#if ENABLE_OLED
-    for (int rem = speak_s; rem > 0; --rem) {
-        // M8 — cancel during SPEAKING breaks the countdown early so
-        // continuous-mode follow-ups don't auto-engage.
+    const int TICK_MS = 250;
+    int elapsed_ms = 0;
+    int last_oled_rem = -1;
+    while (elapsed_ms < total_ms) {
         if (control_check_and_clear_cancel()) {
             ESP_LOGI(TAG, "cancel during SPEAKING — exiting turn early");
+#if ENABLE_OLED
             oled_status("cancelled", "(playback cont.)", ip);
-            vr_out->reason = VAD_STOP_BUTTON_CANCEL;
-            return ESP_FAIL;
-        }
-        oled_show_reply(&resp, rem, ip);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-#else
-    for (int rem = speak_s; rem > 0; --rem) {
-        if (control_check_and_clear_cancel()) {
-            vr_out->reason = VAD_STOP_BUTTON_CANCEL;
-            return ESP_FAIL;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
 #endif
+            vr_out->reason = VAD_STOP_BUTTON_CANCEL;
+            return ESP_FAIL;
+        }
+#if ENABLE_OLED
+        int rem_s = (total_ms - elapsed_ms + 999) / 1000;   // ceiling-divide
+        if (rem_s != last_oled_rem) {
+            oled_show_reply(&resp, rem_s, ip);
+            last_oled_rem = rem_s;
+        }
+#endif
+        vTaskDelay(pdMS_TO_TICKS(TICK_MS));
+        elapsed_ms += TICK_MS;
+    }
 
     return ESP_OK;
 }
@@ -536,6 +550,7 @@ static void face_task(void *arg)
             case APP_STATE_IDLE:
                 robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
                 robo_eyes_set_idle_mode(true, 2, 3);
+                robo_eyes_set_hflicker(false, 0);
                 break;
             case APP_STATE_LISTENING:
                 robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
@@ -543,14 +558,22 @@ static void face_task(void *arg)
                 // by setPosition / setPositionContinuous from the wake/
                 // servo coupling (tomorrow's S3 work).
                 robo_eyes_set_idle_mode(false, 0, 0);
+                robo_eyes_set_hflicker(false, 0);
                 break;
             case APP_STATE_THINKING:
-                robo_eyes_set_mood(ROBO_EYES_MOOD_TIRED);
+                // Was MOOD_TIRED (droopy/sad) — user feedback said the
+                // sad eyes felt wrong for "the device is processing
+                // your question." Switched to DEFAULT (neutral wide-
+                // open) + subtle horizontal flicker (amplitude 2 px)
+                // to read as "scanning / processing" instead of sad.
+                robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
                 robo_eyes_set_idle_mode(false, 0, 0);
+                robo_eyes_set_hflicker(true, 2);
                 break;
             case APP_STATE_SPEAKING:
                 robo_eyes_set_mood(ROBO_EYES_MOOD_HAPPY);
                 robo_eyes_set_idle_mode(false, 0, 0);
+                robo_eyes_set_hflicker(false, 0);
                 break;
             default:
                 robo_eyes_set_mood(ROBO_EYES_MOOD_DEFAULT);
