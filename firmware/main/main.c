@@ -146,7 +146,7 @@ static void oled_boot_screen(const char *ip)
     oled_draw_text(2, line);
     snprintf(line, sizeof line, "srv:   %s:%d", CONFIG_WS_SERVER_HOST, CONFIG_WS_SERVER_PORT);
     oled_draw_text(3, line);
-    oled_draw_text(4, "wake:  hey_jarvis");
+    oled_draw_text(4, "wake:  hey kira");
     snprintf(line, sizeof line, "ses:   %s", CONFIG_WS_SESSION_ID);
     oled_draw_text(5, line);
     oled_draw_text(7, "booting...");
@@ -456,7 +456,7 @@ void do_round_trip_streaming_with_preroll(const char *ip,
     }
 
     s_state = APP_STATE_IDLE;
-    oled_status("idle", "say 'hey jarvis'", ip);
+    oled_status("idle", "say 'hey kira'", ip);
 }
 
 #endif  // CONFIG_VOICE_ENABLED
@@ -744,7 +744,7 @@ void app_main(void)
     }
 
     s_state = APP_STATE_IDLE;
-    oled_status("idle", "say 'hey jarvis'", ip);
+    oled_status("idle", "say 'hey kira'", ip);
 
     ESP_LOGI(TAG, "free heap: %u B", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
