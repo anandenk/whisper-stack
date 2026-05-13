@@ -360,29 +360,30 @@ static esp_err_t do_one_turn(const char *ip,
     }
 
     s_state = APP_STATE_SPEAKING;
-    // v2-M6-d: overshoot audio_duration_s so TTS playback (and room
-    // echo decay) fully ends before LISTENING begins. Math:
-    //   - vadnet1's min_noise_ms = 992 ms — AFE needs ~1 s of confirmed
-    //     silence before flipping its VAD state to SILENCE.
-    //   - Room/speaker echo decay: ~200 ms after audio actually stops.
-    //   - Combined: ~1.2 s of post-TTS silence is the minimum to
-    //     guarantee LISTENING starts with AFE in SILENCE state.
+    // SPEAKING wait = exactly audio_duration_s, no buffer.
     //
-    // Earlier formulas had problems:
-    //   (int)(x + 1.5f)         → integer-truncated; 1.43 s reply got
-    //                              only 570 ms post-TTS silence → loop
-    //                              came back.
-    //   ceilf(x) + 2            → safe but WAY too much dead air for
-    //                              short replies (a 0.81 s reply would
-    //                              wait 3 s = 2.2 s of silence).
+    // History:
+    //   - Pre-M6: rough integer rounding, occasional dead-air mismatch.
+    //   - M6 / continuous-mode era: 1200 ms post-TTS buffer was needed
+    //     so AFE's vadnet1 had time to flip back to SILENCE before
+    //     the auto-engaged LISTENING phase started — otherwise TTS
+    //     echo perpetuated the conversation in a feedback loop.
+    //   - Continuous mode removed (CONFIG_WS_CONTINUOUS_MODE_ENABLED
+    //     defaults n): no LISTENING after SPEAKING; state goes to
+    //     IDLE. Wakenet (separate from vadnet1) is selective for
+    //     "Hey Kira" specifically, not generic speech — TTS echo
+    //     bleeding into IDLE doesn't false-trigger wake. So the
+    //     1200 ms safety buffer is no longer needed.
     //
-    // Final: millisecond resolution. `total_ms = audio_ms + 1200 ms`
-    // gives exactly 1.2 s post-TTS silence at every reply length.
-    // OLED countdown updates once per second (rounded up); cancel
-    // checks every 250 ms.
-    const int POST_TTS_BUFFER_MS = 1200;
-    int total_ms = (int)(resp.audio_duration_s * 1000.0f) + POST_TTS_BUFFER_MS;
-    if (total_ms < 1500) total_ms = 1500;   // floor for safety on near-zero replies
+    // Why we still wait audio_duration_s (not zero): the SPEAKING
+    // state keeps round_trip_driver_task busy. While it's busy, new
+    // wake events posted to wake_event_queue are dropped (depth=1).
+    // Removing the wait entirely would let a wake fire during TTS
+    // playback, with the mic capturing TTS-echo + user speech as one
+    // recording. So the countdown still gates wake processing during
+    // TTS — it just no longer overshoots.
+    int total_ms = (int)(resp.audio_duration_s * 1000.0f);
+    if (total_ms < 500) total_ms = 500;   // floor for near-zero replies
 
     const int TICK_MS = 250;
     int elapsed_ms = 0;
