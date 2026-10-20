@@ -1,5 +1,15 @@
 # whisper stack
 
+> **Revival workspace, October 2026:** Start with
+> [the current handoff](docs/STATUS.md) and
+> [the project decisions](docs/PROJECT.md). Coding agents should first read
+> [AGENTS.md](AGENTS.md).
+>
+> The current focus is workspace setup and continuity between sessions.
+> A fresh, cloud-connected implementation is intended; no rebuild application
+> code has been written. The existing code and the description below document
+> the May prototype and serve as historical reference.
+
 A self-hosted voice assistant backend. Whisper for STT, Gemini 2.5
 Flash for the LLM, Kokoro for streaming TTS — full mic-to-speaker
 loop on one machine. Speak into a phone, a terminal, or a custom
