@@ -37,7 +37,8 @@ distinguished from work the user has asked to implement.
 | D17 | Build a local browser push-to-talk tester; defer human microphone testing until the user is available (2026-10-25). | Use the existing backend and single-turn audio loop while the device cable is unavailable. Agent defaults: click Record/Stop, preview locally, explicit Send, 30-second cap, in-memory audio, manual reply playback, and per-exchange numeric diagnostics. Automated verification uses synthetic audio and mocked providers, with no additional live spend. |
 | D18 | Add streamed playback and generally shorter replies (user decision, 2026-10-25). | The user's first successful browser exchange took 6.18 s, of which 4.38 s was synthesis. Stream ElevenLabs PCM into browser playback after Haiku finishes, measure first audio separately, and preserve a final WAV replay. Default system instruction: one sentence and at most 30 words; explicit detail requests may use up to three sentences and 80 words. These are model instructions, not destructive word truncation. This supersedes D17's manual-only initial playback. |
 | D19 | Add general web search, without a weather-specific tool (user decision, 2026-10-25). | Use Anthropic's native web_search_20250305 with max_uses=1, selected by the model for current facts or explicit search requests. Haiku 5.5 capability support was verified by the Models API; the user's subsequent weather test verified one live search and a displayed citation (see STATUS.md). Keep cited links in the response/UI, not the numeric ledger, and exclude search preambles from spoken answers. Search is $0.01 per use plus tokens at the checked price; report token/search subtotals and combined estimates. Do not infer a location for local weather. |
-| D20 | Test Eleven Flash v2.5 against the current Multilingual v2 (user authorization, 2026-10-25). | One short live sample per model using the same voice/text/format and fresh connections. Flash reached the first PCM chunk in 221 ms versus 1676 ms for Multilingual in this sample; evidence and caveats are in STATUS.md. Flash is recommended for a subsequent default choice, but quality is pending user listening and the configured default remains unchanged. No Anthropic credits are used by this TTS-only comparison. |
+| D20 | Test Eleven Flash v2.5 against the current Multilingual v2 (user authorization, 2026-10-25). | One short live sample per model using the same voice/text/format and fresh connections. Flash reached the first PCM chunk in 221 ms versus 1676 ms for Multilingual in this sample; evidence and caveats are in STATUS.md. The initial pending quality/default choice was subsequently resolved by D21. No Anthropic credits were used by this TTS-only comparison. |
+| D21 | Adopt Eleven Flash v2.5 as the TTS default, then stop work (user decision, 2026-10-25). | The user listened and says Flash sounds perfect. Set eleven_flash_v2_5 in the application default, example configuration, and local ignored configuration. The user reports low credits and requests a complete pushed handoff before stopping. No further paid tests or automatic development; the local server is stopped. |
 
 ## Intended component responsibilities
 
@@ -89,8 +90,8 @@ uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
 
 ## Choices still open
 
-- ElevenLabs voice and final speech models,
-  hosting, and the final device/server transport and audio contract.
+- Final assistant voice, hosting, and the final device/server transport and audio
+  contract. Flash v2.5 is the accepted current TTS default (D21).
 - Exact hardware inventory, wiring, development/flash computer, and tooling.
 - Budget, response latency, audio quality, and reliability targets.
 - Enclosure dimensions, assembly method, and whether motion belongs in the first

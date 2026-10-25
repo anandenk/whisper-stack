@@ -43,7 +43,7 @@ AUDIO_TYPES = {
 class Settings:
     api_key: str = field(default="", repr=False)
     voice_id: str = ""
-    tts_model: str = "eleven_multilingual_v2"
+    tts_model: str = "eleven_flash_v2_5"
     stt_model: str = "scribe_v2"
     anthropic_api_key: str = field(default="", repr=False)
 

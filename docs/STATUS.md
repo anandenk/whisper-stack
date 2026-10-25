@@ -2,294 +2,161 @@
 
 Updated: 2026-10-25 (America/New_York).
 
-## Current phase and latest request
+## Current request: stop work
 
-The user accepted keeping the existing private anandenk/whisper-stack repository
-and publishing the rebuild on **rebuild/backend-tester** on October 25. The local
-push-to-talk tester is implemented and passes automated browser checks. The user
-subsequently confirmed one successful human microphone exchange, with correct
-recognition and a coherent spoken answer. Their latest concerns are the 6.18 s
-processing delay and lack of live weather/web access. They then authorized
-streamed playback, shorter default answers, and **general web search**, rejecting
-a separate weather-specific tool. This increment is implemented and verified
-with synthetic audio and mocked providers. The user subsequently exercised live
-search/streaming: one search returned a cited weather source, but first audio was
-still 6.77 s in the browser. Backend timestamps show only an 85 ms head start over
-completion. The user then authorized testing Flash v2.5 against Multilingual v2.
-Two short live TTS-only generations are complete: Flash's first PCM chunk was
-221.072 ms versus 1675.754 ms for Multilingual v2. Both audio files decode, but
-subjective quality is pending the user's listening comparison. The configured
-default is unchanged. No STT, Anthropic, search, or physical microphone/playback
-was used for this comparison. Audio delivery to the browser was not the main
-delay in the earlier search sample; most time preceded its first backend chunk.
-Main and the May reference
-implementation are preserved; no merge or new repository is requested.
+**Paused at the user's request.** The user listened to the comparison and says
+Flash v2.5 sounds perfect. They report low credits and asked to stop after all
+necessary work/docs are pushed. Flash is now the application and local configured
+TTS default: **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the George voice remain.
+The local server has been stopped. No further paid calls, microphone capture,
+background tests, or development are queued. Resume only when the user asks.
 
-The buffered STT → Haiku 5.5 → TTS backend now passes live checks with known
-synthesized speech, followed by the user's browser microphone test. Token/cost
-diagnostics work with real provider usage. ESP32 capture/playback and hardware
-behavior remain unverified; one browser test is not a broad quality benchmark.
+The latest remaining credit balance and provider are unspecified. The earlier
+Anthropic $3 balance was user-reported, not a current verified wallet. No purchase,
+auto-reload, or automatic retry is configured. The Anthropic key was generated on
+October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
+Console's exact timestamp takes precedence. No scheduled reminder was requested.
 
-The user generated a fresh Anthropic key on October 25 with a **30-day expiry**,
-expected around **November 24, 2026**. Exact expiry time is user-reported/unverified;
-use the Console timestamp. The configured key authenticated and inference
-succeeded. No scheduled reminder was requested or created. The user-reported
-$3 credit balance remains the working constraint: use mocks and minimal live
-checks; no purchases, auto-reload, or automatic retries.
-
-Read [PROJECT.md](PROJECT.md) for decisions and [AGENTS.md](../AGENTS.md) for the
-workflow. Reproducible setup/API commands are in [backend/README.md](../backend/README.md).
+Read [PROJECT.md](PROJECT.md) for accepted decisions, [AGENTS.md](../AGENTS.md) for
+working boundaries, and [backend/README.md](../backend/README.md) for setup/API commands.
 
 ## Implemented
 
-- backend/ is isolated from the May server/, firmware/, tests/, tools/, and root
-  configuration/dependencies. Legacy implementation remains unchanged.
-- Python 3.14.7 on this Mac; pinned FastAPI/HTTPX and ElevenLabs SDK 2.74.1.
-  Haiku uses the Messages API through existing HTTPX. Diagnostics use SQLite
-  from the Python standard library; no extra dependency added for them.
-- GET /health (configuration only), GET /voices, POST /speak (buffered 16 kHz
-  mono 16-bit WAV), and POST /transcribe (raw recorded file → text/language).
-  ElevenLabs defaults: multilingual v2 TTS, Scribe v2 STT, George test voice.
-- POST /chat: short Haiku reply plus numeric diagnostics. Optional client history
-  is at most six complete exchanges, 1000 characters per message. No persistent
-  server conversation memory.
-- POST /converse: single-turn recorded audio → STT → Haiku → TTS → WAV, with
-  X-Diagnostics-ID linking to usage/timings. Preflights local key/voice settings;
-  blank/overlong transcripts stop before Haiku. TTS failure retains known LLM cost.
-- Haiku: claude-haiku-5-5, low effort/adaptive thinking, max_tokens=1024, standard
-  service, global routing, API version 2026-10-21. **Omit speed**: a live 400
-  response established that Haiku rejects this parameter even at standard.
-  Native general web search is available with max_uses=1; no action tools or
-  automatic retries. Incomplete/overlong replies fail explicitly. The system
-  instruction defaults to one sentence/30 words, with up to three sentences/80
-  words when detail is explicitly requested; this is not arbitrary word cutting.
-- GET /diagnostics and /diagnostics/{id}: model, status, token counts (thinking
-  included in output), estimated Haiku cost, and timings. UTC-month/lifetime
-  totals persist in ignored backend/output/diagnostics.sqlite3. No prompt,
-  transcript, reply, reasoning text, search queries/pages/source URLs, or secrets
-  are stored in the ledger. Token and search fees have separate subtotals;
-  estimated_cost_usd now combines both. Older rows retain token-only estimates.
-- Prices checked October 25: $0.10 input / $0.50 output per million tokens through
-  100K prompt tokens, fivefold above 100K. Cache counters priced separately if
-  returned; no caching requested. Unknown usage/modifiers produce null costs
-  and explicit incomplete totals. Estimates exclude ElevenLabs, taxes, discounts,
-  other account use, and actual balance. Search pricing checked October 25 is
-  $0.01 per search plus token costs. Missing/malformed search counters after an
-  observed search produce unknown combined cost, not zero. No hard account-wide
-  budget configured; native tool max_uses=1 bounds searches in each exchange.
-- Limits: 10 MiB recorded input, 64 KiB chat JSON, 8 KiB speech JSON, 8 MiB generated
-  PCM, 256 KiB Haiku response. Loopback only, local Host validation, no CORS or
-  device authentication.
-- Hidden local key-entry helper: backend/configure_anthropic.py. Requires sk-ant-
-  format, preserves ElevenLabs settings, and saves mode 0600. Format is only a
-  preflight, not proof of access. Never print/open backend/.env to inspect keys.
-- GET /tester: a same-origin local browser tester, with explicit Record/Stop,
-  local recording preview, separate Send, streamed audio playback and final WAV
-  replay, and stage
-  timing/token/cost diagnostics. Capture stops at 30 seconds; input is capped at
-  10 MiB. Tracks stop after recording, cancellation, or leaving the tab. Pending
-  permission cancellation stops a late stream without recording. No provider
-  request on page load; Send is consumed once, with no automatic retry. Numeric
-  diagnostics remain available after TTS failure; diagnostic failure preserves
-  a successful audio reply. Single turn, in-memory browser audio, no local storage.
-  HTML/CSS/JS use explicit asset allowlisting, no-store and restrictive CSP. No
-  new Python/UI runtime dependency. Playwright is a separate pinned test-only
-  dependency in backend/ui-tests/; node_modules is ignored.
-- POST /converse/stream: recorded STT and Haiku finish first, then the ElevenLabs
-  SDK stream endpoint yields 16 kHz mono PCM as 1024-byte chunks. NDJSON start,
-  audio (base64 PCM), done/error frames; whole samples and 8 MiB decoded cap.
-  No automatic retry or continuation. Mid-stream failures emit error; EOF without
-  done is not success. Disconnect closes upstream and records disconnected status
-  while preserving known model/search cost. Original /converse still returns WAV.
-- Browser Web Audio schedules incoming PCM with an 80 ms initial buffer; Send
-  opens the context in its user gesture, before any paid request. Blocked audio
-  setup preserves the recording and sends no request. Mute silences live audio
-  while the response finishes; final replay is assembled in memory only on done.
-  First audio received (browser), estimated playback scheduling, backend first
-  audio, total completion, and buffer underruns are distinct measurements. This
-  is not realtime microphone upload or overlapping Haiku text/TTS generation.
-- General search uses native web_search_20250305; the model is instructed to use
-  it for changing/current facts or explicit searches. It must ask for a city for
-  local weather without one; no location is inferred. Search preambles are not
-  spoken. Validated cited HTTP(S) links appear in /chat sources or stream metadata
-  and the tester; they are not saved in the ledger. pause_turn fails explicitly
-  without automatic continuation/spend. No extra service/key or weather tool.
-- backend/compare_tts.py: explicit --live performs exactly one short SDK stream
-  request per model, same configured voice/text/format/chunk size and fresh
-  connection per model. Zero retries; bounded audio; WAVs and numeric results
-  remain in ignored output/. No application default/key edits or Anthropic calls.
+- New implementation is isolated in backend/. Legacy server/, firmware/, tests/,
+  tools/, root dependencies and root example configuration remain reference.
+- Python 3.14.7 / macOS arm64, FastAPI/HTTPX, ElevenLabs SDK 2.74.1, standard-library
+  SQLite. No production Node/UI runtime dependency. Browser checks use isolated
+  pinned Playwright 1.64.1 under backend/ui-tests/.
+- GET /health checks configuration without provider calls; GET /voices lists
+  available voice names/IDs. POST /transcribe accepts recorded audio; POST /speak
+  returns mono PCM16/16 kHz WAV. Flash v2.5 is now the TTS default in app.py,
+  .env.example and local ignored backend/.env; existing credentials are preserved.
+- POST /chat returns a short Haiku answer, numeric diagnostics, and cited sources.
+  Optional client history is at most six complete exchanges; no persistent text memory.
+- POST /converse returns a buffered WAV. POST /converse/stream runs recorded STT
+  and Haiku first, then streams ElevenLabs PCM as NDJSON start/audio/done/error
+  events. The client requires done; partial audio is not a complete replay.
+  Cancellation closes upstream and preserves known model/search cost.
+- GET /tester records only after Record, previews locally, and uploads only after
+  Send. Thirty-second recording cap, tracks released after capture/cancellation/
+  leaving the tab. Send starts Web Audio playback as PCM arrives; mute and final
+  in-memory WAV replay are available. Blocked playback initialization sends no
+  paid request. No microphone or provider call on page load.
+- First audio received (browser), estimated playback scheduling, backend first
+  audio, completion, stage timings, and buffer underruns are distinct metrics.
+  Current implementation does not overlap Haiku text generation with TTS or
+  stream microphone input in real time.
+- Haiku model claude-haiku-5-5: adaptive thinking, low effort, max_tokens=1024,
+  standard service/global routing, API version 2026-10-21. Omit speed: live API
+  rejected it. System instruction defaults to one sentence/30 words; explicit
+  detail requests allow three sentences/80 words. No arbitrary word truncation.
+- General web_search_20250305 with max_uses=1, model-selected for current facts
+  or explicit search requests. No weather-specific tool or inferred location.
+  Search preambles are not spoken; safe HTTP(S) citations are shown in the tester.
+  pause_turn fails without automatic continuation. No action tools or retries.
+- GET /diagnostics and /diagnostics/{id} persist numeric model/timing/token/search
+  records in ignored output/diagnostics.sqlite3. No prompts, transcripts, replies,
+  reasoning text, search queries/pages/source links, or keys in that ledger.
+  Token and search fees have separate subtotals and a combined estimate. Thinking
+  is included in output tokens, never double-charged. Unknown usage is not free.
+  Historical rows retain token-only estimates. Totals flag missing cost/search usage.
+- Checked prices: Haiku $0.10 input / $0.50 output per million tokens through 100K
+  prompt tokens, fivefold above; native search $0.01/use plus tokens. Estimates
+  exclude ElevenLabs, taxes, other account usage, discounts, and actual balance.
+- Bounds: 10 MiB audio input, 64 KiB chat JSON, 8 KiB speech JSON, 8 MiB generated
+  PCM, 256 KiB model response. Loopback/Host validation, no CORS or device auth.
+  Tester assets are allowlisted with restrictive CSP/no-store. No deployment.
+- configure_anthropic.py provides hidden local key entry. Never print/open .env
+  to inspect credentials. compare_tts.py requires explicit --live for two paid
+  TTS samples; importing or testing it does not generate speech.
 
-## Verification
+## Verification and durable evidence
 
-**Current local tests:**
-
-- `backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py -q --tb=line`:
-  **103 passed**, including regression assertion that Haiku requests omit speed
-  and tester asset privacy/headers.
-  Tests cover provider contracts, WAV and pipeline ordering, bounds, key handling,
-  no retries, errors, cost/cache/thinking accounting, privacy, and diagnostic
-  persistence/monthly totals. Providers are mocked in this suite.
-- Existing Starlette TestClient HTTPX-adapter deprecation warning remains; the
-  pinned combination passes. Current pip check passes; Python requirements unchanged.
-- `npm --prefix backend/ui-tests test`: **14 passed** with Chrome 155.0.8059.85,
-  Node 26.10.0 and Playwright 1.64.1. Real browser MediaRecorder uses a synthetic
-  oscillator; a separate ephemeral backend uses fake credentials and two HTTPX
-  MockTransport providers. Checks cover one complete mocked pipeline, no mic/spend
-  on load, preview before upload, duplicate-send prevention, denied/pending mic
-  permission, leaving the tab, duration cap, missing setup/unsupported browser,
-  provider/connection/diagnostic failures, and 320/375/414/768/1280 px layouts.
-  Added proof of scheduling audio before the delayed provider finishes, mute/replay,
-  missing-done interruption, safe sources/search costs, and blocked playback with
-  no POST. Python checks cover provider contracts, separate search billing,
-  final-answer/source privacy, search errors, pause_turn, PCM order, size limits,
-  timeouts, empty/odd audio, first chunk before provider completion, and upstream
-  closure/cost retention on disconnect. Desktop screenshot:
-  backend/output/tester-streaming-desktop.png (ignored).
-  No physical mic/speaker, live-provider calls, real ledger writes, or paid usage
-  occurred in the automated tester build. Safari and broad speech-quality testing
-  remain unverified; the user's subsequent browser test is recorded below.
-- `git diff --check` and local Markdown link checks pass. Credentials, virtual
-  environment, generated audio, and SQLite data are ignored/local-only.
-- `backend/.venv/bin/python -m pytest backend/test_compare_tts.py -q --tb=line`:
-  **3 passed**, mocked SDK contracts for both models, valid WAV wrapping, sanitized
-  error metadata and no retry on denied access. Existing application/browser
-  implementation is unchanged by the comparison helper.
-
-**Current live provider checks (October 25):**
-
-- **Authorized TTS comparison, two live calls:**
-  `backend/.venv/bin/python -m backend.compare_tts --live`. One sample per model,
-  Multilingual first then Flash, fresh connections. George voice
-  JBFqnCBsd6RMkjVDRZzb, same **123-character synthetic test sentence** about
-  Ulaanbaatar and -5/2 degree example temperatures, pcm_16000, SDK 1024-byte chunks.
-  **Multilingual v2:** HTTP 200, headers 1671.240 ms, first PCM 1675.754 ms,
-  complete 1754.509 ms. **Flash v2.5:** HTTP 200, headers 212.567 ms, first PCM
-  221.072 ms, complete 410.320 ms. First chunk is **7.58x faster / 86.8% lower**
-  in this sample. Both served from us-central1. Provider character-cost header
-  **54 versus 27**; this is provider metadata, not USD or a verified plan balance.
-  Each clip has 260,064 PCM bytes, 130,032 frames, mono PCM16/16 kHz, **8.127 s**.
-  Distinct SHA-256 hashes; full ffmpeg decode passes for both. Results and WAVs:
-  **backend/output/tts-comparison-20261025T214205Z/** (ignored, local-only).
-  One fixed-order sample is not a statistical benchmark, full voice-loop timing,
-  or subjective quality assessment. No automatic retries, STT, Anthropic/search,
-  physical mic/speaker test, or configured-default change.
-- **Latest user-run search/streaming test:** screenshot shows a cited Ulaanbaatar
-  weather source, one search, 0 playback underruns, 6.77 s first browser audio,
-  6.85 s scheduled playback, and about 10 s replay. Matching local ledger record
-  **af2d6de4-5539-4180-841b-ddfd5ff57fff** was read without another paid call:
-  STT **510.486 ms**, Haiku including search **4331.570 ms**, TTS **1962.117 ms**,
-  first backend audio **6739.958 ms**, completion **6824.833 ms**. First backend
-  audio precedes completion by **84.875 ms**, so this sample gets little latency
-  benefit from streamed playback. Provider usage: **15,292 input / 496 output**,
-  including **348 thinking** tokens, already included in output billing. One
-  search fee **$0.010000000**, tokens **$0.001777200**, combined estimate
-  **$0.011777200**, excluding ElevenLabs. Pipeline/search statuses are ok/used;
-  audio **332,882 PCM bytes** (10.403 s). Search execution and a displayed citation
-  are live evidence; factual weather accuracy, exact spoken word count, and
-  subjective voice quality are not independently verified. The 4.33 s model
-  measurement includes search, unlike earlier direct-answer timings.
-- During the preceding agent build, the only live provider request was a read-only Models API check:
-  HTTP 200 for claude-haiku-5-5 with server_tools.web_search.supported=true.
-  No paid inference, search, TTS, or physical mic/speaker check was run by the
-  agent. The user's later result above verifies search access and audio output,
-  but does not establish a broad quality or latency benchmark. Earlier live evidence
-  below concerns the earlier buffered path, before search/short-answer changes.
-- **Subsequent human browser test, user-reported success:** recognized speech
-  correctly and gave a coherent answer, but could not fetch current weather.
-  Screenshot shows about 3 s recorded input and a 19 s spoken reply. Existing
-  local ledger record **86178dfe-4386-488d-83ef-914015c78415** was read without
-  another provider call: STT **522.481 ms**, Haiku **1267.014 ms**, TTS
-  **4378.051 ms**, total **6180.061 ms**; 133 input / 113 output / 0 thinking
-  tokens, estimated Haiku cost **$0.000069800**, pipeline_status ok. Matching
-  screenshot metrics corroborate the timing; recognition/coherence are the user's
-  assessment, not independently scored. No transcript/audio is saved in the ledger.
-  Total measures backend receipt to complete WAV, excluding recording, preview,
-  client transfer, and playback. TTS accounts for about 71% of this sample.
-- Read-only Anthropic /v1/models returned 200; Haiku 5.5 was listed.
-- After removing unsupported speed, POST /chat returned **200** and a complete
-  short reply. Provider usage: **121 input, 35 output, 0 thinking tokens**;
-  estimated cost **$0.000029600**; Haiku request elapsed **776.221 ms**.
-  Local evidence: backend/output/haiku-chat-live-result.json.
-- POST /converse with backend/output/backend-hello.wav returned **200** through
-  all three live providers/stages. Provider Haiku usage: **132 input, 66 output,
-  0 thinking tokens**; estimated Haiku cost **$0.000046200**. Timing: STT
-  1175.573 ms, Haiku 1211.647 ms, TTS 1631.954 ms, total backend **4025.584 ms**
-  (client wall time 4.049 s). This is buffered, not time to first streamed audio.
-- Output backend/output/voice-loop-live.wav: **371,564 bytes**, mono 16-bit PCM,
-  16 kHz, 185,760 frames, **11.610 seconds**. Full ffmpeg decode passed. Evidence:
-  backend/output/voice-loop-live-result.json and diagnostics-after-live-checks.json.
-- The two successful Haiku calls total **253 input / 101 output tokens** and
-  estimated **$0.000075800**, excluding ElevenLabs. Actual remaining $3 balance
-  was not queried. Do not call this the provider's invoice or account balance.
-- The persistent ledger also retains four earlier failed attempts (two rejected
-  keys and two request-format failures). No generated output/usage was reported
-  for those; cost remains unknown rather than assumed zero. Therefore the known
-  cost subtotal is explicit and cost_estimate_complete remains false. No automatic
-  retries occurred. Live checks are now complete; stop paid testing for this slice.
-
-**Earlier live ElevenLabs evidence (October 24):**
-
-- CLI onboarding and approved TTS test succeeded; /voices listed 21 voices and
-  George was selected temporarily. backend/output/elevenlabs-onboarding.mp3 is
-  a valid 1.760 s MP3.
-- /speak generated backend/output/backend-hello.wav (3.994 s, mono PCM16/16 kHz),
-  taking 1.116 s. /transcribe recognized its spoken words with minor punctuation/
-  hyphenation differences in 0.567 s. Supporting JSON remains under output/.
-- These earlier inputs are synthesized speech and do not themselves establish
-  human microphone accuracy, physical device playback, or a broad quality benchmark.
-
-## Current server and remaining boundaries
-
-The updated backend was left running on 127.0.0.1:8765. Open
-http://127.0.0.1:8765/tester when ready for human testing. Check /health before
-relying on process state. Restart after key changes. Reproducible startup:
+**Local checks:** final Python suite **106 passed**, providers mocked:
 
 ```sh
-backend/.venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py backend/test_compare_tts.py -q --tb=line
 ```
 
-The fresh API key expires after 30 days (expected November 24); exact time is in
-PROJECT.md's user-reported credential note and should be verified in Console.
-ElevenLabs plan allowance/expiry and the reported $3 balance remain unverified.
-No key is recorded in project notes. No deployment, firmware build/flash, or GPU
-validation was performed. The agent has not captured the human microphone or
-independently listened; the user reports the browser loop works.
+The existing Starlette TestClient HTTPX deprecation warning remains; the pinned
+combination passes. Earlier pip check passed; dependencies are unchanged.
+The latest browser suite passed **14 checks** in Chrome 155.0.8059.85 / Node 26.10.0,
+including PCM scheduling before delayed provider completion, mute/replay, safe
+sources/search costs, interruptions, permissions, and 320–1280 px layouts.
+Browser code did not change for adoption; it was not rerun for the default change.
+Commands: npm --prefix backend/ui-tests ci --ignore-scripts, then
+npm --prefix backend/ui-tests test. No live provider calls in either test suite.
+Git whitespace/credential-ignore checks pass. macOS .DS_Store metadata is ignored.
 
-The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 boards and other checklist
-parts. Exact board/memory/connectors, speaker impedance, soldering, and wiring are
-unverified. Programming remains blocked by a missing micro-USB data cable.
+**Live TTS comparison, October 25:** one sample/model, fixed order, fresh connections,
+same George voice JBFqnCBsd6RMkjVDRZzb, 123-character synthetic sentence with
+Ulaanbaatar and -5/2 degree example temperatures, pcm_16000 / 1024-byte chunks.
 
-## Next action
+| Model | Headers | First PCM | Completion | Provider character-cost header |
+|---|---:|---:|---:|---:|
+| Multilingual v2 | 1671.240 ms | 1675.754 ms | 1754.509 ms | 54 |
+| Flash v2.5 | 212.567 ms | 221.072 ms | 410.320 ms | 27 |
 
-Present the two saved comparison clips for user listening, especially the place
-name and negative/positive temperatures. Flash is the recommended next test
-default based on first-chunk speed and lower reported character cost; adoption
-has not been confirmed and the configured default remains Multilingual v2.
-Do not run more paid samples automatically. Switching TTS cannot remove the
-separate 4.33 s search/model delay in the earlier exchange. Measure direct answers
-and search questions separately before promising full voice-loop latency.
-Hardware still needs the cable. Overlapping Haiku text/TTS, realtime input,
-deployment, firmware, and a main-branch merge are outside this increment.
+Both HTTP 200 from us-central1, valid distinct WAVs, 260,064 PCM bytes / 130,032
+frames / 8.127 s each; full ffmpeg decode passed. Flash first PCM was 7.58x faster
+in this sample. Character-cost headers are not USD or a verified balance.
+The user subsequently listened and approved Flash. This is one latency sample and
+user-reported quality acceptance, not a statistical benchmark or a full voice-loop
+check with Flash. No new paid call was made during adoption/stop preparation.
+Local evidence: **backend/output/tts-comparison-20261025T214205Z/results.json** and
+the two model-named WAVs. Reproduce only with explicit authorization:
+backend/.venv/bin/python -m backend.compare_tts --live.
 
-## Historical context and Git
+**Earlier live voice/search evidence:**
 
-Original baseline: c7d050d (May); continuity commit: ea1591b. Original context is
-[notes/archive/claude-context-2026-05.md](../notes/archive/claude-context-2026-05.md).
-October 19 audit parsed 36 Python files and passed mocked legacy Flask checks;
-historical hardware claims and legacy defects remain rebuild evidence, not a
-repair queue. Old /tmp audit probes are not durable evidence.
+- User browser search test: cited Ulaanbaatar weather source, one search, no buffer
+  underruns; browser first audio 6.77 s. Ledger ID
+  af2d6de4-5539-4180-841b-ddfd5ff57fff: STT 510.486 ms, Haiku including search
+  4331.570 ms, TTS 1962.117 ms, first backend PCM 6739.958 ms, completion
+  6824.833 ms. Only 84.875 ms streaming head start with Multilingual v2.
+  Usage 15,292 input / 496 output, including 348 thinking; tokens $0.001777200 +
+  search $0.010000000 = $0.011777200 estimate, excluding ElevenLabs.
+- User's first buffered microphone test: correct recognition/coherent answer by
+  user assessment. Ledger ID 86178dfe-4386-488d-83ef-914015c78415: STT 522.481 ms,
+  Haiku 1267.014 ms, TTS 4378.051 ms, total 6180.061 ms; 133/113 tokens,
+  estimated model cost $0.000069800. Screenshot showed a 19 s spoken reply.
+- Earlier agent /chat and synthesized-input /converse live checks passed with
+  combined 253 input / 101 output tokens, estimated $0.000075800. Voice-loop
+  output voice-loop-live.wav is 11.610 s; evidence JSON remains under output/.
+- ElevenLabs onboarding, /voices (21 voices), TTS and STT passed. The earlier
+  backend-hello.wav transcript matched its known synthesized words. Numeric
+  usage ledger retains earlier failed attempts with unknown cost, not zero.
 
-Implementation commit **38f5d00** is committed and pushed to the existing private
-repository's **rebuild/backend-tester** branch. Remote refs were verified after
-push; remote main remains c7d050d. The local continuity commit ea1591b is included
-in the rebuild branch. No merge or pull request was created. This status-only
-follow-up records the completed publication. The later documentation update
-records the user's microphone result and latency/tool discussion on the same branch.
-Streaming/search implementation commit **c4542b9** is published on this branch after local
-verification; no main merge or pull request is requested.
-The subsequent update records the user's live search/streaming result. This
-comparison increment adds the helper, mocked checks, and measured live evidence
-on the same branch; no production speech default changes.
-Credentials, virtual environments, audio, screenshots, usage ledger, and installed
-test dependencies stay local/ignored. Check `git status --short --branch`,
-`git log -3 --oneline`, and the upstream branch at the next session start.
+Recordings, screenshots, metrics JSON, SQLite data and secrets are ignored/local
+only. Their measured summaries are preserved here for other machines. Human
+assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unverified.
+
+## Blockers and next action on resume
+
+Work is stopped. Start by reading this handoff and checking Git/configuration;
+do not make paid calls automatically. The local server is **not running**.
+When the user resumes and wants to use credits, the next check is one short
+Flash-backed /tester exchange, comparing first audio against the previous results.
+TTS switching cannot remove the separate search/model delay. Overlapping Haiku
+text/TTS generation, realtime input, firmware, deployment, and main merge remain
+outside this increment. Hardware programming still needs a micro-USB data cable.
+
+The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 plus other checklist parts;
+exact variants/specifications/wiring are unverified. No firmware build/flash,
+ESP32 capture/playback, or GPU validation was performed. Eventual remote hosting,
+final voice, memory/retention, provisioning, and hardware contract remain open.
+
+## Git and historical context
+
+Publication branch: **rebuild/backend-tester** in the existing private
+https://github.com/anandenk/whisper-stack repository. Main is not merged or changed
+by this work. Earlier published commits include c4542b9 (stream/search) and
+73c3463 (TTS comparison). This final increment adopts Flash and records the stop;
+its code/docs are committed and pushed to the same branch. No PR or new repo.
+Credentials, environments, generated audio/data and installed test dependencies
+stay local/ignored; next session must check git status --short --branch and
+recent commits before assuming remote state.
+
+Original baseline c7d050d and continuity commit ea1591b are preserved. Historical
+May context: [notes/archive/claude-context-2026-05.md](../notes/archive/claude-context-2026-05.md).
+Historical builds/hardware claims are reference, not evidence for this rebuild.

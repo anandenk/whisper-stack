@@ -59,7 +59,7 @@ def test_speech_request_and_lossless_wav_wrapping(client_factory):
         assert request.url.path == "/v1/text-to-speech/test_voice"
         assert request.url.params["output_format"] == "pcm_16000"
         assert request.headers["xi-api-key"] == "test-key"
-        assert json.loads(request.content) == {"text": "Hello", "model_id": "eleven_multilingual_v2"}
+        assert json.loads(request.content) == {"text": "Hello", "model_id": "eleven_flash_v2_5"}
         return httpx.Response(200, content=pcm, headers={"Content-Type": "audio/pcm"})
 
     with client_factory(provider) as client:

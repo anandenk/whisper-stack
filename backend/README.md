@@ -86,8 +86,10 @@ and configure `ELEVENLABS_VOICE_ID` locally without displaying the key file.
 Restart after any configuration change. Interactive API docs are at
 <http://127.0.0.1:8765/docs>.
 
-Initial models are `scribe_v2` for STT and `eleven_multilingual_v2` for TTS.
-These are test defaults, not a settled quality or latency choice.
+Current models are `scribe_v2` for STT and `eleven_flash_v2_5` for TTS. The user
+approved Flash v2.5 after the October 25 comparison and listening check. George
+remains the initial test voice. Work is paused at the user's request because
+credits are low; start the server or paid tests only when the user resumes.
 
 ## Local push-to-talk tester
 
@@ -199,7 +201,8 @@ provider cost/region headers. Character-cost headers are not dollar amounts.
 The authorized October 25 comparison measured **1675.754 ms** first PCM for
 Multilingual v2 versus **221.072 ms** for Flash v2.5. See STATUS.md for evidence.
 One sample per model does not establish statistical latency or voice quality;
-listen to both before adopting a new default. The default remains unchanged.
+the user subsequently listened and approved Flash as the new default. The local
+server is stopped for the requested pause; no further paid comparisons are queued.
 
 The helper's free mocked checks are:
 
