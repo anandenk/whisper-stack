@@ -83,8 +83,7 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   persistence/monthly totals. Providers are mocked in this suite.
 - Existing Starlette TestClient HTTPX-adapter deprecation warning remains; the
   pinned combination passes. Current pip check passes; Python requirements unchanged.
-- `npm --prefix backend/ui-tests ci --ignore-scripts`, then
-  `npm --prefix backend/ui-tests test`: **10 passed** with Chrome 155.0.8059.85,
+- `npm --prefix backend/ui-tests test`: **10 passed** with Chrome 155.0.8059.85,
   Node 26.10.0 and Playwright 1.64.1. Real browser MediaRecorder uses a synthetic
   oscillator; a separate ephemeral backend uses fake credentials and two HTTPX
   MockTransport providers. Checks cover one complete mocked pipeline, no mic/spend
@@ -169,11 +168,11 @@ October 19 audit parsed 36 Python files and passed mocked legacy Flask checks;
 historical hardware claims and legacy defects remain rebuild evidence, not a
 repair queue. Old /tmp audit probes are not durable evidence.
 
-Publication target is the existing private repository's **rebuild/backend-tester**
-branch. Origin was fetched before branching; origin/main had no new commits and
-the local continuity commit ea1591b was preserved. This increment versions the
-previously uncommitted backend, tester, automated checks, and current records.
-Credentials, virtual environments, audio, screenshots, usage ledger, and test
-dependencies stay local/ignored. Check `git status --short --branch`,
-`git log -3 --oneline`, and the upstream branch before relying on publication
-state; the final session response reports the actual commit/push outcome.
+Implementation commit **38f5d00** is committed and pushed to the existing private
+repository's **rebuild/backend-tester** branch. Remote refs were verified after
+push; remote main remains c7d050d. The local continuity commit ea1591b is included
+in the rebuild branch. No merge or pull request was created. This status-only
+follow-up records the completed publication; it is published on the same branch.
+Credentials, virtual environments, audio, screenshots, usage ledger, and installed
+test dependencies stay local/ignored. Check `git status --short --branch`,
+`git log -3 --oneline`, and the upstream branch at the next session start.
