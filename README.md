@@ -8,7 +8,8 @@
 > The rebuild backend is in [backend/](backend/README.md): ElevenLabs STT/TTS,
 > Claude Haiku 5.5 replies, and local token/cost diagnostics. Live STT, TTS, Haiku,
 > and the complete buffered voice loop have passed checks using known synthesized
-> speech. Microphone/hardware checks remain pending.
+> speech. The user also reports one successful browser microphone exchange;
+> ESP32 hardware checks remain pending.
 > A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
 > available at `/tester`, with recording preview, reply playback, and diagnostics.
 > Automated browser checks use synthetic audio and mocked providers.

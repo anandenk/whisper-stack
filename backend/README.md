@@ -128,8 +128,11 @@ Provider-side retention still follows your account settings.
 The automated browser suite uses real Chrome MediaRecorder with a **synthetic**
 audio source and a separate backend whose two provider transports are mocked.
 It does not access the physical microphone, play sound through speakers, use
-your credentials, or write to your real usage ledger. Actual human microphone
-quality, Safari behavior, and physical playback remain unverified.
+your credentials, or write to your real usage ledger. The user subsequently
+reported one successful browser microphone exchange: correct recognition and a
+coherent answer, with 6.18 s total backend processing. See STATUS.md for the
+measured stages. Broad microphone/voice quality, Safari behavior, and ESP32
+capture/playback remain unverified.
 
 Implementation references: [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder)
 and [microphone permission/capture](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).

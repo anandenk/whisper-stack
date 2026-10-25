@@ -6,13 +6,18 @@ Updated: 2026-10-25 (America/New_York).
 
 The user accepted keeping the existing private anandenk/whisper-stack repository
 and publishing the rebuild on **rebuild/backend-tester** on October 25. The local
-push-to-talk tester is implemented and passes automated browser checks. Human
-testing is deferred because the user is unavailable. Main and the May reference
+push-to-talk tester is implemented and passes automated browser checks. The user
+subsequently confirmed one successful human microphone exchange, with correct
+recognition and a coherent spoken answer. Their latest concerns are the 6.18 s
+processing delay and lack of live weather/web access; they asked about streaming.
+Streaming and live-data tools are recommendations under discussion, not implemented
+or newly authorized work. Main and the May reference
 implementation are preserved; no merge or new repository is requested.
 
 The buffered STT → Haiku 5.5 → TTS backend now passes live checks with known
-synthesized speech. Token/cost diagnostics work with real provider usage. Human
-microphone capture, physical playback, and hardware behavior remain unverified.
+synthesized speech, followed by the user's browser microphone test. Token/cost
+diagnostics work with real provider usage. ESP32 capture/playback and hardware
+behavior remain unverified; one browser test is not a broad quality benchmark.
 
 The user generated a fresh Anthropic key on October 25 with a **30-day expiry**,
 expected around **November 24, 2026**. Exact expiry time is user-reported/unverified;
@@ -92,12 +97,24 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   provider/connection/diagnostic failures, and 320/375/414/768/1280 px layouts.
   Desktop screenshot visually reviewed: backend/output/tester-desktop.png (ignored).
   No physical mic/speaker, live-provider calls, real ledger writes, or paid usage
-  occurred in this tester increment. Safari and human listening remain unverified.
+  occurred in the automated tester build. Safari and broad speech-quality testing
+  remain unverified; the user's subsequent browser test is recorded below.
 - `git diff --check` and local Markdown link checks pass. Credentials, virtual
   environment, generated audio, and SQLite data are ignored/local-only.
 
 **Current live provider checks (October 25):**
 
+- **Subsequent human browser test, user-reported success:** recognized speech
+  correctly and gave a coherent answer, but could not fetch current weather.
+  Screenshot shows about 3 s recorded input and a 19 s spoken reply. Existing
+  local ledger record **86178dfe-4386-488d-83ef-914015c78415** was read without
+  another provider call: STT **522.481 ms**, Haiku **1267.014 ms**, TTS
+  **4378.051 ms**, total **6180.061 ms**; 133 input / 113 output / 0 thinking
+  tokens, estimated Haiku cost **$0.000069800**, pipeline_status ok. Matching
+  screenshot metrics corroborate the timing; recognition/coherence are the user's
+  assessment, not independently scored. No transcript/audio is saved in the ledger.
+  Total measures backend receipt to complete WAV, excluding recording, preview,
+  client transfer, and playback. TTS accounts for about 71% of this sample.
 - Read-only Anthropic /v1/models returned 200; Haiku 5.5 was listed.
 - After removing unsupported speed, POST /chat returned **200** and a complete
   short reply. Provider usage: **121 input, 35 output, 0 thinking tokens**;
@@ -128,8 +145,8 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
 - /speak generated backend/output/backend-hello.wav (3.994 s, mono PCM16/16 kHz),
   taking 1.116 s. /transcribe recognized its spoken words with minor punctuation/
   hyphenation differences in 0.567 s. Supporting JSON remains under output/.
-- These inputs are synthesized speech. No human microphone test, physical device
-  playback, or broad STT/LLM quality benchmark is established.
+- These earlier inputs are synthesized speech and do not themselves establish
+  human microphone accuracy, physical device playback, or a broad quality benchmark.
 
 ## Current server and remaining boundaries
 
@@ -144,8 +161,9 @@ backend/.venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
 The fresh API key expires after 30 days (expected November 24); exact time is in
 PROJECT.md's user-reported credential note and should be verified in Console.
 ElevenLabs plan allowance/expiry and the reported $3 balance remain unverified.
-No key is recorded in project notes. No deployment, firmware build/flash, GPU
-validation, human mic capture, or physical playback was performed.
+No key is recorded in project notes. No deployment, firmware build/flash, or GPU
+validation was performed. The agent has not captured the human microphone or
+independently listened; the user reports the browser loop works.
 
 The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 boards and other checklist
 parts. Exact board/memory/connectors, speaker impedance, soldering, and wiring are
@@ -153,12 +171,14 @@ unverified. Programming remains blocked by a missing micro-USB data cable.
 
 ## Next action
 
-When the user is available, open /tester and run one short human microphone
-exchange to assess recognition, audible reply quality, and latency. The user
-explicitly deferred that test; do not start capture or more paid checks now.
-Hardware flashing still needs the micro-USB data cable. Keep final voice and
-conversation retention choices open; no automatic realtime streaming, deployment,
-firmware work, or main-branch merge.
+Discuss the next increment using the measured bottleneck: stream TTS audio to
+playback as it arrives, shorten routine spoken replies, and measure time to first
+audible audio separately from completion. Then consider overlapping Haiku text
+generation with sentence-based TTS and a bounded weather lookup tool. These are
+proposals pending the user's direction, not new implementation authorization.
+No promised end-to-end latency or live model comparison is established. Current
+code intentionally has no tools/search. Hardware flashing still needs the cable;
+no automatic paid checks, deployment, firmware work, or main-branch merge.
 
 ## Historical context and Git
 
@@ -172,7 +192,8 @@ Implementation commit **38f5d00** is committed and pushed to the existing privat
 repository's **rebuild/backend-tester** branch. Remote refs were verified after
 push; remote main remains c7d050d. The local continuity commit ea1591b is included
 in the rebuild branch. No merge or pull request was created. This status-only
-follow-up records the completed publication; it is published on the same branch.
+follow-up records the completed publication. The later documentation update
+records the user's microphone result and latency/tool discussion on the same branch.
 Credentials, virtual environments, audio, screenshots, usage ledger, and installed
 test dependencies stay local/ignored. Check `git status --short --branch`,
 `git log -3 --oneline`, and the upstream branch at the next session start.
