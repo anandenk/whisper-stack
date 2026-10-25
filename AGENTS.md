@@ -14,11 +14,18 @@ authorize new work. A proposed next milestone is not permission to implement it.
 
 ## Current boundary
 
-The user stopped implementation to build the workspace first, with continuity
-between sessions as the priority. Until the user resumes implementation, work on
-workspace organization and continuity only. Do not scaffold a backend, select a
-framework, install project dependencies, flash hardware, or deploy services.
-When the user resumes implementation, update this boundary and STATUS.md together.
+The user authorized the audio backend, then selected Claude Haiku 5.5 and
+per-exchange cost diagnostics on 2026-10-24. Build the text-response and buffered
+STT → Haiku → TTS interaction in backend/, isolated from the legacy implementation.
+Local dependencies and tests are within scope; live model checks need locally
+configured credentials. Keep provider-reported token usage separate from cost
+estimates and distinguish mocked, live-provider, and hardware evidence. Device
+programming remains blocked by a missing cable. On 2026-10-25 the user also
+authorized the local push-to-talk tester, with human testing deferred, and
+publishing the rebuild/backend-tester branch to the existing private repository.
+Do not expand into realtime streaming, deployment, or firmware work automatically.
+Follow STATUS.md for
+the current handoff.
 
 ## Keep one coherent project
 
@@ -66,3 +73,7 @@ Firmware v2/v3 names in those files are historical, not names for the new rebuil
 - Check the diff for accidental edits and stale documentation. State whether
   changes are committed and pushed; never imply another machine has local work.
 - Finish the current request without automatically starting the next milestone.
+- End progress reports with the next concrete step and any real blocker. The
+  user requested more independence on 2026-10-24: carry routine authorized work
+  forward and choose sensible defaults; ask only for necessary information,
+  consequential decisions, or actions outside the authorized scope.

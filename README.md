@@ -5,10 +5,16 @@
 > [the project decisions](docs/PROJECT.md). Coding agents should first read
 > [AGENTS.md](AGENTS.md).
 >
-> The current focus is workspace setup and continuity between sessions.
-> A fresh, cloud-connected implementation is intended; no rebuild application
-> code has been written. The existing code and the description below document
-> the May prototype and serve as historical reference.
+> The rebuild backend is in [backend/](backend/README.md): ElevenLabs STT/TTS,
+> Claude Haiku 5.5 replies, and local token/cost diagnostics. Live STT, TTS, Haiku,
+> and the complete buffered voice loop have passed checks using known synthesized
+> speech. Microphone/hardware checks remain pending.
+> A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
+> available at `/tester`, with recording preview, reply playback, and diagnostics.
+> Automated browser checks use synthetic audio and mocked providers.
+> See the handoff for
+> exact evidence and setup. The existing server/firmware and the description
+> below document the May prototype and serve as historical reference.
 
 A self-hosted voice assistant backend. Whisper for STT, Gemini 2.5
 Flash for the LLM, Kokoro for streaming TTS — full mic-to-speaker

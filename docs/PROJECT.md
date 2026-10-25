@@ -12,21 +12,34 @@ the workstation switched off. Fully offline AI processing is not a requirement.
 
 ## Decisions from the revival discussion
 
-Established with the user on 2026-10-19. These record direction, not a selected
-software stack or permission to start implementation.
+Initial decisions established with the user on 2026-10-19; updates are dated
+below. These record accepted direction. Proposed milestones still need to be
+distinguished from work the user has asked to implement.
 
 | ID | Decision | Reason |
 |---|---|---|
-| D01 | Make continuity between sessions the immediate priority. | Earlier AI sessions accumulated competing assumptions and complexity; the user stopped implementation to establish the workspace first. |
+| D01 | Keep continuity between sessions a priority. The workspace-first implementation pause was superseded by D07 on 2026-10-24. | Earlier AI sessions accumulated competing assumptions and complexity; the user stopped implementation to establish the workspace first. |
 | D02 | Pursue a fresh implementation informed by the May prototype. Preserve the old implementation as reference. | The user does not trust the accumulated code enough to use it wholesale. Hardware findings remain useful. |
 | D03 | Target a cloud-connected device physically independent of the workstation. | The deliverable is a complete physical device; internet connectivity is acceptable. |
 | D04 | Use USB power for the first enclosed prototype. Battery work is deferred. | The user chose a USB desk device with its own speaker and no longer has the LiPo battery. |
 | D05 | The workstation may host the new backend during early development. Keep eventual remote hosting in the design. | Avoid initial hosting expense while testing the intended device/server boundary. AI service usage may still cost money. |
 | D06 | Develop firmware and backend together through small end-to-end interaction slices. | Building the whole backend first caused repeated integration work in May. |
+| D07 | Resume project work, beginning with a current-state walkthrough and next-step discussion (2026-10-24). The initial review-only scope was subsequently superseded by D09. | The user wants to begin work and recover context from the separate groundwork session. |
+| D08 | Use ElevenLabs for text-to-speech synthesis (2026-10-24). | The user reports redeeming the ElevenLabs API student plan and explicitly selects it for speech output. Access and working synthesis were initially unverified; subsequent CLI onboarding/test evidence is in STATUS.md. Plan allowance and expiry remain unverified. |
+| D09 | Start a bounded backend increment with ElevenLabs for both recorded-audio STT and TTS (2026-10-24). | The user accepted the proposed audio tests while flashing is blocked. This adapts D06: verify backend boundaries now, then device interaction when cable access returns. LLM and realtime streaming remain outside this increment. |
+| D10 | Use Python with FastAPI, HTTPX, and a dedicated backend/ virtual environment for this increment (agent implementation choice, 2026-10-24). Direct HTTPX speech calls were subsequently superseded by D11. | A small HTTP service provides validation and interactive API docs without the legacy GPU/audio dependencies. Pin the installed environment and test provider requests with a mock transport. |
+| D11 | Follow the user-requested ElevenLabs CLI onboarding and use the official Python SDK for STT/TTS (2026-10-24). | Browser authorization creates the local project key without copying it through chat. The SDK uses python-dotenv-loaded configuration and the existing bounded HTTPX transport; public local endpoints and audio contract are preserved. |
+| D12 | Use George (JBFqnCBsd6RMkjVDRZzb) as the initial backend test voice (agent test choice, 2026-10-24). | The account's voice listing confirmed availability, and the user authorized beginning voice selection and the backend TTS test. This is a replaceable test setting, not the user's final assistant-voice choice. |
+| D13 | Use Claude Haiku 5.5 and add per-exchange token/cost diagnostics (user decision, 2026-10-24). | The user accepted the cost/intelligence recommendation and wants to measure actual use. This supersedes the open LLM choice and D09's initial exclusion of LLM work. Estimates must use provider-reported usage, include reasoning in billed output, and remain distinct from actual account balance and ElevenLabs charges. |
+| D14 | Use low effort/adaptive thinking, a 1024-token output cap, bounded client-supplied text history, and a local SQLite diagnostic ledger (agent implementation choices, 2026-10-24). | Keep voice replies short, avoid unbounded repeated context, and retain usage across restarts without storing conversation text. Existing HTTPX calls the Messages API; SQLite uses Python's standard library. The first audio loop is single-turn; server conversation memory is deferred. |
+| D15 | Use the existing account's user-reported $3 credit balance sparingly (2026-10-25). | The earlier $10 discussion was hypothetical. Prefer mocked checks; limit live verification to one short chat and one compact voice loop after authentication succeeds. Avoid automatic retries, purchases, and auto-reload. Exact provider balance is unverified; diagnostics are estimates, not an account wallet. |
+| D16 | Keep the existing private anandenk/whisper-stack repository and publish this increment on rebuild/backend-tester (user acceptance, 2026-10-25). | Preserve the project's history and May reference code while developing the isolated rebuild. No new repository or main-branch merge is needed for this increment. |
+| D17 | Build a local browser push-to-talk tester; defer human microphone testing until the user is available (2026-10-25). | Use the existing backend and single-turn audio loop while the device cable is unavailable. Agent defaults: click Record/Stop, preview locally, explicit Send, 30-second cap, in-memory audio, manual reply playback, and per-exchange numeric diagnostics. Automated verification uses synthetic audio and mocked providers, with no additional live spend. |
 
 ## Intended component responsibilities
 
-This is a conceptual boundary. Transport, providers, and frameworks remain open.
+ElevenLabs is selected for speech recognition and synthesis. The first backend
+uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
 
 - **Device:** microphone capture, wake/button interaction, speaker playback,
   display, controls, and connection/error behavior.
@@ -34,14 +47,34 @@ This is a conceptual boundary. Transport, providers, and frameworks remain open.
   and AI service integration. Initially runs on a development computer; eventually
   runs remotely. Normal device operation must not require that computer's
   microphone, speakers, or GUI.
+  backend/ implements local health, voice listing, recorded-file transcription,
+  buffered synthesis, Haiku chat, a single-turn voice loop, and numeric usage
+  diagnostics. Device authentication and server conversation sessions are future work. It runs on
+  loopback and returns 16 kHz mono 16-bit PCM in WAV for initial audio testing;
+  that is not a hardware-verified audio contract.
+- **Development tester:** a local browser page at /tester records short questions
+  only after an explicit action and uploads only after Send. It exercises the
+  same buffered backend; it is not device firmware or a deployed client.
 - **AI services:** speech recognition, language processing, and speech synthesis.
-  Separate services versus a combined speech service is undecided.
+  Use ElevenLabs for speech recognition/synthesis and Claude Haiku 5.5 for replies.
 
 ## Hardware and environment facts
 
+- On 2026-10-25 the user generated a fresh Anthropic API key with a 30-day
+  expiry, expected around **2026-11-24**. Exact expiry time is unverified and
+  should be checked in the Claude Console. The configured key subsequently
+  passed a read-only authentication check. No key value is recorded here and
+  no scheduled reminder was requested or created. The user-reported $3 balance
+  remains the working constraint (D15).
 - The user reports that the original Windows/NVIDIA laptop is still available.
-- The user reports having the previous parts except the LiPo battery. An itemized
-  inventory and current wiring have not been physically verified.
+- On 2026-10-24 the user reports having an ESP32-S3-WROOM-1 board, an ESP32
+  DevKit V1, and the other checklist items (amplifier, speaker, microphone,
+  displays, breadboard, and wires). The S3 development-board variant, N8R8
+  marking, component specifications, assembly, and wiring remain unverified.
+- The user lacks a micro-USB data cable and reports this blocks programming the
+  boards for now. Exact board connectors and flashing access are unverified.
+  The user subsequently authorized a bounded backend increment during this
+  hardware blocker (D09).
 - Checked-in firmware targets ESP32-S3-DevKitC-1 N8R8 with an INMP441 mic,
   SSD1306 displays, and MAX98357A pins reserved for future speaker output.
   These are repository facts, not confirmation of the physical assembly.
@@ -50,17 +83,26 @@ This is a conceptual boundary. Transport, providers, and frameworks remain open.
 
 ## Choices still open
 
-- New implementation layout and separation from legacy code.
-- Backend language/framework, dependency tooling, AI providers/models, hosting,
-  and device/server transport and audio contract.
+- ElevenLabs voice and final speech models,
+  hosting, and the final device/server transport and audio contract.
 - Exact hardware inventory, wiring, development/flash computer, and tooling.
 - Budget, response latency, audio quality, and reliability targets.
 - Enclosure dimensions, assembly method, and whether motion belongs in the first
   deliverable. Old servo experiments are not a committed requirement.
 - Memory behavior, retention, privacy, and device provisioning.
 
-FastAPI and package versions were looked up before the user stopped implementation.
-No framework or dependencies were selected or installed for the rebuild.
+Earlier FastAPI research did not select a framework. D10 supersedes that open
+choice for the first backend increment; it does not revive the old server stack.
+
+**Accepted LLM choice, 2026-10-24 (D13):** Claude Haiku 5.5
+(`claude-haiku-5-5`) for concise conversational replies. The earlier proposal is
+now accepted; GPT-6 Luna remains an unselected comparison. Official short-prompt
+standard rates checked today:
+both $0.10 input / $0.50 output per million tokens. Haiku's low rate applies up
+to 100K prompt tokens. Provider benchmarks do not establish our conversational
+quality or latency; test those on the actual loop. Sources:
+[Anthropic](https://www.anthropic.com/claude-haiku-5-5),
+[OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
 ## Maintaining decisions
 
