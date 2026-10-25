@@ -15,9 +15,13 @@ a separate weather-specific tool. This increment is implemented and verified
 with synthetic audio and mocked providers. The user subsequently exercised live
 search/streaming: one search returned a cited weather source, but first audio was
 still 6.77 s in the browser. Backend timestamps show only an 85 ms head start over
-completion. The latest request is to assess that result, not implement another
-milestone. Audio delivery to the browser is not the main delay in this sample;
-most time precedes the first backend audio chunk.
+completion. The user then authorized testing Flash v2.5 against Multilingual v2.
+Two short live TTS-only generations are complete: Flash's first PCM chunk was
+221.072 ms versus 1675.754 ms for Multilingual v2. Both audio files decode, but
+subjective quality is pending the user's listening comparison. The configured
+default is unchanged. No STT, Anthropic, search, or physical microphone/playback
+was used for this comparison. Audio delivery to the browser was not the main
+delay in the earlier search sample; most time preceded its first backend chunk.
 Main and the May reference
 implementation are preserved; no merge or new repository is requested.
 
@@ -110,6 +114,10 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   spoken. Validated cited HTTP(S) links appear in /chat sources or stream metadata
   and the tester; they are not saved in the ledger. pause_turn fails explicitly
   without automatic continuation/spend. No extra service/key or weather tool.
+- backend/compare_tts.py: explicit --live performs exactly one short SDK stream
+  request per model, same configured voice/text/format/chunk size and fresh
+  connection per model. Zero retries; bounded audio; WAVs and numeric results
+  remain in ignored output/. No application default/key edits or Anthropic calls.
 
 ## Verification
 
@@ -142,9 +150,29 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   remain unverified; the user's subsequent browser test is recorded below.
 - `git diff --check` and local Markdown link checks pass. Credentials, virtual
   environment, generated audio, and SQLite data are ignored/local-only.
+- `backend/.venv/bin/python -m pytest backend/test_compare_tts.py -q --tb=line`:
+  **3 passed**, mocked SDK contracts for both models, valid WAV wrapping, sanitized
+  error metadata and no retry on denied access. Existing application/browser
+  implementation is unchanged by the comparison helper.
 
 **Current live provider checks (October 25):**
 
+- **Authorized TTS comparison, two live calls:**
+  `backend/.venv/bin/python -m backend.compare_tts --live`. One sample per model,
+  Multilingual first then Flash, fresh connections. George voice
+  JBFqnCBsd6RMkjVDRZzb, same **123-character synthetic test sentence** about
+  Ulaanbaatar and -5/2 degree example temperatures, pcm_16000, SDK 1024-byte chunks.
+  **Multilingual v2:** HTTP 200, headers 1671.240 ms, first PCM 1675.754 ms,
+  complete 1754.509 ms. **Flash v2.5:** HTTP 200, headers 212.567 ms, first PCM
+  221.072 ms, complete 410.320 ms. First chunk is **7.58x faster / 86.8% lower**
+  in this sample. Both served from us-central1. Provider character-cost header
+  **54 versus 27**; this is provider metadata, not USD or a verified plan balance.
+  Each clip has 260,064 PCM bytes, 130,032 frames, mono PCM16/16 kHz, **8.127 s**.
+  Distinct SHA-256 hashes; full ffmpeg decode passes for both. Results and WAVs:
+  **backend/output/tts-comparison-20261025T214205Z/** (ignored, local-only).
+  One fixed-order sample is not a statistical benchmark, full voice-loop timing,
+  or subjective quality assessment. No automatic retries, STT, Anthropic/search,
+  physical mic/speaker test, or configured-default change.
 - **Latest user-run search/streaming test:** screenshot shows a cited Ulaanbaatar
   weather source, one search, 0 playback underruns, 6.77 s first browser audio,
   6.85 s scheduled playback, and about 10 s replay. Matching local ledger record
@@ -233,13 +261,13 @@ unverified. Programming remains blocked by a missing micro-USB data cable.
 
 ## Next action
 
-Report that search/citations work but the measured first-audio goal is unmet.
-Recommended follow-up, not yet authorized: compare a latency-focused ElevenLabs
-speech model with the current Multilingual v2 using the same voice/input, then
-consider feeding Haiku's final answer text into TTS incrementally. Measure direct
-answers separately from search questions; search itself adds time and fees. No
-weather-specific tool is wanted. Do not claim that a model switch alone will
-remove the 4.33 s search/model delay or promise a live latency target.
+Present the two saved comparison clips for user listening, especially the place
+name and negative/positive temperatures. Flash is the recommended next test
+default based on first-chunk speed and lower reported character cost; adoption
+has not been confirmed and the configured default remains Multilingual v2.
+Do not run more paid samples automatically. Switching TTS cannot remove the
+separate 4.33 s search/model delay in the earlier exchange. Measure direct answers
+and search questions separately before promising full voice-loop latency.
 Hardware still needs the cable. Overlapping Haiku text/TTS, realtime input,
 deployment, firmware, and a main-branch merge are outside this increment.
 
@@ -259,7 +287,9 @@ follow-up records the completed publication. The later documentation update
 records the user's microphone result and latency/tool discussion on the same branch.
 Streaming/search implementation commit **c4542b9** is published on this branch after local
 verification; no main merge or pull request is requested.
-The later status-only update records the user's live search/streaming result.
+The subsequent update records the user's live search/streaming result. This
+comparison increment adds the helper, mocked checks, and measured live evidence
+on the same branch; no production speech default changes.
 Credentials, virtual environments, audio, screenshots, usage ledger, and installed
 test dependencies stay local/ignored. Check `git status --short --branch`,
 `git log -3 --oneline`, and the upstream branch at the next session start.

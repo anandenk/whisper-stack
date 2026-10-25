@@ -179,6 +179,34 @@ TTS and does not implement realtime microphone upload.
 References: [ElevenLabs audio streaming](https://elevenlabs.io/docs/api-reference/text-to-speech/stream),
 [Web Audio scheduling](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start).
 
+## Compare speech models
+
+The comparison helper makes **two paid ElevenLabs generations**, one per model,
+only when explicitly run with --live. It does not change the configured model,
+call STT/Anthropic/search, open the microphone, or play audio through speakers:
+
+```sh
+backend/.venv/bin/python -m backend.compare_tts --live
+```
+
+Both requests use the configured voice, the same short synthetic sentence
+(including a place name and numeric temperatures), pcm_16000, 1024-byte SDK
+chunks, fresh connections and no retries. Results/WAV files go to a timestamped
+ignored backend/output/tts-comparison-*/ directory. Metadata reports HTTP headers,
+first playable PCM chunk, full generation time, audio duration, and selected
+provider cost/region headers. Character-cost headers are not dollar amounts.
+
+The authorized October 25 comparison measured **1675.754 ms** first PCM for
+Multilingual v2 versus **221.072 ms** for Flash v2.5. See STATUS.md for evidence.
+One sample per model does not establish statistical latency or voice quality;
+listen to both before adopting a new default. The default remains unchanged.
+
+The helper's free mocked checks are:
+
+```sh
+backend/.venv/bin/python -m pytest backend/test_compare_tts.py -q
+```
+
 ## General web search
 
 Haiku receives Anthropic's native web_search_20250305 tool with **max_uses=1**.
