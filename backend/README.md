@@ -98,9 +98,11 @@ origin for the page and API; do not open index.html directly from disk.
 1. Click **Record** and allow microphone access when the browser asks.
 2. Speak, then click **Stop recording**. Recording also stops after 30 seconds.
 3. Listen back using the preview. **Clear** discards it without uploading.
-4. Click **Send question** to run one buffered STT → Haiku → TTS exchange.
-5. Press Play on the reply. Review stage timings, token counts, and estimated
-   Haiku cost, with a link to the exchange's full numeric diagnostics.
+4. Click **Send question**. Speech recognition and Haiku finish first; then the
+   reply starts playing as ElevenLabs audio arrives. **Mute live reply** silences
+   playback while receipt continues. A complete WAV replay is available afterward.
+5. Compare **First audio received** with **Total processing**, and review tokens,
+   search count, estimated combined cost, source links, and exchange diagnostics.
 
 Record/Stop is a toggle, so you do not need to keep the button held down. Each
 question starts fresh: audio conversation history is not implemented. Microphone
@@ -115,8 +117,11 @@ once, controls are locked during processing, and failures are not retried. A
 lost connection or timeout may still incur charges: check Usage diagnostics
 before starting another exchange. If speech synthesis fails after Haiku finishes,
 the tester displays any available Haiku usage/cost and diagnostic link. Diagnostic
-failure does not discard an otherwise successful audio reply. No auto-play is
-requested; playback is manual.
+failure does not discard an otherwise successful audio reply. Sending explicitly
+starts a Web Audio context for streamed playback. If audio initialization fails,
+no provider request is sent and the recording remains available for another Send.
+An interrupted/failed stream stops playback and never presents partial audio as
+a complete replay. Starting a new recording or clearing the page stops old audio.
 
 Browser audio stays in memory and is cleared when replaced, cleared, or the page
 closes. The browser sends WebM/Opus, MP4, or OGG/Opus according to recording
@@ -136,6 +141,72 @@ capture/playback remain unverified.
 
 Implementation references: [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder)
 and [microphone permission/capture](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
+
+## Streamed audio and short answers
+
+The tester uses **POST /converse/stream** with the same raw recording body and
+10 MiB input cap as /converse. It returns application/x-ndjson, with X-Diagnostics-ID
+and no-store. Each line is one event:
+
+- `start`: diagnostic ID, pcm_s16le encoding, 16000 Hz mono, and cited source links.
+- `audio`: base64 PCM bytes, always whole 16-bit samples, capped at 8 MiB decoded.
+- `done`: successful completion. An `error` event instead marks incomplete audio.
+
+STT/Haiku failures before streaming are normal JSON HTTP errors with a diagnostic
+ID when available. TTS failures after HTTP 200 are explicit error events. Clients
+must require done, not treat EOF as success. The SDK's streaming endpoint uses
+1024-byte chunks, zero retries, bounded transport, and closes upstream on disconnect.
+The numeric ledger retains known token/search costs after TTS failure/disconnect.
+No audio, text, sources, queries, or retrieved pages are stored in that ledger.
+
+The browser schedules PCM chunks using Web Audio with a small initial buffer;
+it does not wait for a complete WAV. It builds the replay WAV locally after done.
+**First audio received** is browser elapsed time from Send to a playable chunk.
+**Playback scheduled** estimates its scheduled start; it is not a physical-speaker
+measurement. **Total processing** is backend time through synthesis/delivery
+completion and can include client backpressure. Buffer underruns count occasions
+when playback runs out of scheduled samples. These numbers are distinct from
+time spent recording, reviewing, or listening. A slower search can add latency.
+
+The system instruction now targets one sentence, at most 30 words by default,
+without introductions or offers of further help. Explicit requests for detail
+allow up to three sentences/80 words. This is a model instruction, not arbitrary
+word cutting or a claim that every live answer satisfies it. The existing 1024
+output-token safety cap and 1000-character validation remain. Recorded STT and
+Haiku are still buffered: this slice does not overlap model text generation with
+TTS and does not implement realtime microphone upload.
+
+References: [ElevenLabs audio streaming](https://elevenlabs.io/docs/api-reference/text-to-speech/stream),
+[Web Audio scheduling](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start).
+
+## General web search
+
+Haiku receives Anthropic's native web_search_20250305 tool with **max_uses=1**.
+The prompt asks it to search for current/changing facts or explicit search
+requests, and answer stable knowledge/greetings directly. Search selection is
+model-driven, not a guarantee every weather question triggers it. No local search
+service, weather-specific tool, code execution, or additional API key is added.
+For local weather without a city, the assistant should ask for the city rather
+than infer your location. Native search access may need enabling in your Claude
+organization; a Models API capability check succeeded, but this increment did not
+run paid search or inference to verify account entitlement or answer quality.
+
+Search is **$10 per 1000 uses ($0.01 each), plus token charges**, checked October
+25. Max uses prevents repeated searches in a request; pause_turn is rejected
+without automatic continuation. Provider-reported web_search_requests determines
+the fee estimate. Missing/malformed search usage after an observed search yields
+unknown combined cost, not zero. Diagnostics separate estimated_token_cost_usd,
+estimated_search_cost_usd and estimated_cost_usd (combined); older rows retain
+their historical token-only costs. These estimates exclude ElevenLabs and actual
+account balance. Failed searches with a reported count of zero add no search fee.
+
+Search preambles are excluded from the spoken answer. Cited HTTP(S) URLs/titles
+are returned in /chat's sources or the stream's start event and shown as safe
+links in the tester; source content remains untrusted data. Search queries and
+results are processed by Anthropic and its search infrastructure. Browser source
+links stay in page memory and are cleared with the exchange.
+
+Reference: [Anthropic web search configuration and pricing](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool).
 
 ## First live speech test
 
@@ -202,7 +273,8 @@ history is rejected rather than silently discarded; chat JSON is capped at
 1024 maximum billed output tokens, standard service, global inference,
 API version 2026-10-21. The prompt asks for short spoken replies. Partial,
 empty, or over-1000-character responses fail without an automatic retry; any
-reported token usage is still recorded. No tools or search are enabled.
+reported token usage is still recorded. General web search is enabled as described
+above; no action tools are enabled.
 The request omits `speed`: Haiku 5.5 rejects that parameter, even when set to
 standard. The backend uses Haiku's normal inference path.
 
@@ -233,8 +305,8 @@ GET /diagnostics returns lifetime and current UTC-month counts/totals plus the
 20 most recent Haiku records. GET /diagnostics/{id} retrieves one record.
 Storage is local ignored backend/output/diagnostics.sqlite3, using SQLite
 transactions to survive restarts. Records contain IDs, model, timings, status,
-provider-reported token counts, and estimated cost; no keys, prompts, transcripts,
-reply text, or reasoning text. Full voice-loop records also include STT/TTS and
+provider-reported token/search counts, and estimated costs; no keys, prompts, transcripts,
+reply text, reasoning text, or source/query text. Full voice-loop records also include STT/TTS and
 total elapsed milliseconds. No provider is contacted by diagnostics requests.
 
 Cost estimates use the standard/global Haiku prices checked 2026-10-24:
@@ -256,7 +328,7 @@ Sources: [Haiku specifications/pricing](https://platform.claude.com/docs/en/mode
 ## Local verification
 
 ```sh
-backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py -q
+backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py -q
 backend/.venv/bin/python -m pip check
 ```
 
@@ -295,7 +367,7 @@ not verify real recognition, synthesis, account access, or physical playback.
   retention follows your ElevenLabs account; no zero-retention claim is made.
 - Current live-provider evidence and key-expiry metadata are in STATUS.md and
   PROJECT.md; credentials must be valid for the configured account. Human microphone
-  testing, audio-session memory, realtime streaming, ESP32 firmware, and hardware
+  quality testing, audio-session memory, realtime microphone upload, ESP32 firmware, and hardware
   playback are not implemented in this increment.
 
 API contracts checked against the official [transcription reference](https://elevenlabs.io/docs/api-reference/speech-to-text/convert),

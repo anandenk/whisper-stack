@@ -34,7 +34,7 @@
           <label for="preview">Review your recording</label>
           <audio id="preview" controls preload="metadata"></audio>
           <button id="send" class="primary" disabled>Send question</button>
-          <p class="fine">Uses ElevenLabs STT + TTS and Haiku credits. One request, with no automatic retry.</p>
+          <p class="fine">The reply plays automatically as audio arrives. Uses speech, model, and any search credits ($0.01 per search, at most one). No automatic retry.</p>
         </div>
         <p id="error" role="alert" hidden></p>
       </section>
@@ -42,20 +42,26 @@
         <p class="eyebrow">THE RESPONSE</p>
         <h2 id="reply-heading">Listen to the reply.</h2>
         <p id="reply-status" role="status">Your reply will appear here after you send a recording.</p>
+        <button id="mute" hidden>Mute live reply</button>
         <audio id="reply" controls preload="metadata" hidden></audio>
         <dl id="metrics" hidden>
+          <div><dt>First audio received</dt><dd id="first-audio">—</dd></div>
+          <div><dt>Playback scheduled</dt><dd id="first-playback">—</dd></div>
           <div><dt>Total processing</dt><dd id="total-time">—</dd></div>
           <div><dt>Speech recognition</dt><dd id="stt-time">—</dd></div>
           <div><dt>Haiku response</dt><dd id="llm-time">—</dd></div>
           <div><dt>Speech synthesis</dt><dd id="tts-time">—</dd></div>
           <div><dt>Haiku tokens (in / out)</dt><dd id="tokens">—</dd></div>
-          <div><dt>Estimated Haiku cost</dt><dd id="cost">—</dd></div>
+          <div><dt>Web searches</dt><dd id="searches">—</dd></div>
+          <div><dt>Estimated model + search cost</dt><dd id="cost">—</dd></div>
+          <div><dt>Playback buffer underruns</dt><dd id="underruns">—</dd></div>
         </dl>
+        <div id="sources-section" hidden><h2>Sources</h2><ul id="sources"></ul></div>
         <p id="diagnostic-note" class="fine" hidden></p>
         <a id="diagnostic-link" hidden>View this exchange’s diagnostics ↗</a>
       </section>
     </div>
-    <p class="privacy">Recordings and replies stay in this page’s memory until cleared or closed. Sending shares your audio with ElevenLabs and recognized text with Anthropic. The backend retains numeric usage diagnostics, without conversation text or audio.</p>
+    <p class="privacy">Recordings and replies stay in this page’s memory until cleared or closed. Sending shares your audio with ElevenLabs and recognized text with Anthropic; search may share queries with its search providers. The backend retains numeric usage diagnostics, without conversation text or audio.</p>
   </main>
   <footer><span>Microphone off until you press Record.</span><a href="/diagnostics">Usage diagnostics ↗</a></footer>
   <noscript>This tester needs JavaScript. Enable it and reload to use the recording controls.</noscript>

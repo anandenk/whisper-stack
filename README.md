@@ -11,7 +11,8 @@
 > speech. The user also reports one successful browser microphone exchange;
 > ESP32 hardware checks remain pending.
 > A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
-> available at `/tester`, with recording preview, reply playback, and diagnostics.
+> available at `/tester`, with recording preview, streamed reply playback, short
+> default answers, bounded general web search, source links, and diagnostics.
 > Automated browser checks use synthetic audio and mocked providers.
 > See the handoff for
 > exact evidence and setup. The existing server/firmware and the description

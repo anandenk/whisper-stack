@@ -35,6 +35,8 @@ distinguished from work the user has asked to implement.
 | D15 | Use the existing account's user-reported $3 credit balance sparingly (2026-10-25). | The earlier $10 discussion was hypothetical. Prefer mocked checks; limit live verification to one short chat and one compact voice loop after authentication succeeds. Avoid automatic retries, purchases, and auto-reload. Exact provider balance is unverified; diagnostics are estimates, not an account wallet. |
 | D16 | Keep the existing private anandenk/whisper-stack repository and publish this increment on rebuild/backend-tester (user acceptance, 2026-10-25). | Preserve the project's history and May reference code while developing the isolated rebuild. No new repository or main-branch merge is needed for this increment. |
 | D17 | Build a local browser push-to-talk tester; defer human microphone testing until the user is available (2026-10-25). | Use the existing backend and single-turn audio loop while the device cable is unavailable. Agent defaults: click Record/Stop, preview locally, explicit Send, 30-second cap, in-memory audio, manual reply playback, and per-exchange numeric diagnostics. Automated verification uses synthetic audio and mocked providers, with no additional live spend. |
+| D18 | Add streamed playback and generally shorter replies (user decision, 2026-10-25). | The user's first successful browser exchange took 6.18 s, of which 4.38 s was synthesis. Stream ElevenLabs PCM into browser playback after Haiku finishes, measure first audio separately, and preserve a final WAV replay. Default system instruction: one sentence and at most 30 words; explicit detail requests may use up to three sentences and 80 words. These are model instructions, not destructive word truncation. This supersedes D17's manual-only initial playback. |
+| D19 | Add general web search, without a weather-specific tool (user decision, 2026-10-25). | Use Anthropic's native web_search_20250305 with max_uses=1, selected by the model for current facts or explicit search requests. Haiku 5.5 capability support was verified by the Models API; paid search execution remains unverified. Keep cited links in the response/UI, not the numeric ledger, and exclude search preambles from spoken answers. Search is $0.01 per use plus tokens at the checked price; report token/search subtotals and combined estimates. Do not infer a location for local weather. |
 
 ## Intended component responsibilities
 
@@ -48,13 +50,16 @@ uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
   runs remotely. Normal device operation must not require that computer's
   microphone, speakers, or GUI.
   backend/ implements local health, voice listing, recorded-file transcription,
-  buffered synthesis, Haiku chat, a single-turn voice loop, and numeric usage
+  buffered and streamed synthesis, Haiku chat with bounded general search,
+  a single-turn voice loop, and numeric usage
   diagnostics. Device authentication and server conversation sessions are future work. It runs on
   loopback and returns 16 kHz mono 16-bit PCM in WAV for initial audio testing;
   that is not a hardware-verified audio contract.
 - **Development tester:** a local browser page at /tester records short questions
-  only after an explicit action and uploads only after Send. It exercises the
-  same buffered backend; it is not device firmware or a deployed client.
+  only after an explicit action and uploads only after Send. It plays streamed
+  speech as it arrives, offers mute/replay, and shows source links and timings.
+  STT and Haiku still finish before TTS begins. It is not device firmware or a
+  deployed client.
 - **AI services:** speech recognition, language processing, and speech synthesis.
   Use ElevenLabs for speech recognition/synthesis and Claude Haiku 5.5 for replies.
 

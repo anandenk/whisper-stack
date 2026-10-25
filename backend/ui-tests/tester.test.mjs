@@ -182,7 +182,7 @@ test("missing configuration and unsupported browsers never request a microphone"
 test("provider failure retains linked diagnostics and never retries", async (t) => {
   const page = await pageFor(t);
   let calls = 0;
-  await page.route("**/converse", (route) => {
+  await page.route("**/converse/stream", (route) => {
     calls += 1;
     return route.fulfill({status: 502, json: {detail: "Speech synthesis failed."}, headers: {"X-Diagnostics-ID": "failed-test"}});
   });
@@ -200,7 +200,7 @@ test("provider failure retains linked diagnostics and never retries", async (t) 
 test("a lost connection warns about possible charges without retrying", async (t) => {
   const page = await pageFor(t);
   let calls = 0;
-  await page.route("**/converse", (route) => { calls += 1; return route.abort("failed"); });
+  await page.route("**/converse/stream", (route) => { calls += 1; return route.abort("failed"); });
   await ready(page);
   await record(page);
   await page.getByRole("button", {name: "Send question"}).click();
@@ -218,6 +218,83 @@ test("diagnostic failure does not discard a successful audio reply", async (t) =
   await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "done");
   assert.equal(await page.locator("#reply").isVisible(), true);
   assert.match(await page.locator("#diagnostic-note").innerText(), /diagnostics are unavailable/);
+});
+
+test("audio is scheduled before the delayed provider completes", async (t) => {
+  const page = await pageFor(t);
+  await ready(page);
+  await record(page);
+  await page.getByRole("button", {name: "Send question"}).click();
+  await page.waitForFunction(() => document.getElementById("first-audio").textContent !== "—");
+  assert.equal(await page.locator("#capture-state").getAttribute("data-phase"), "sending");
+  assert.equal(await page.locator("#reply").isVisible(), false, "Replay not yet fully buffered");
+  assert.notEqual(await page.locator("#first-playback").innerText(), "—");
+  assert.match(await page.locator("#reply-status").innerText(), /Playing the reply/);
+  await page.getByRole("button", {name: "Mute live reply"}).click();
+  await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "done");
+  assert.equal(await page.locator("#reply").isVisible(), true, "Muting still permits final replay");
+});
+
+test("an interrupted stream stops playback and never offers a complete replay", async (t) => {
+  const page = await pageFor(t);
+  await page.route("**/converse/stream", (route) => route.fulfill({
+    contentType: "application/x-ndjson", headers: {"X-Diagnostics-ID": "interrupted"},
+    body: JSON.stringify({type: "start", id: "interrupted", encoding: "pcm_s16le", sample_rate: 16000, channels: 1}) + "\n" +
+      JSON.stringify({type: "audio", pcm: Buffer.alloc(1024).toString("base64")}) + "\n",
+  }));
+  await page.route("**/diagnostics/interrupted", (route) => route.fulfill({json: {estimated_cost_usd: "0.000020000", web_search_requests: 0}}));
+  await ready(page);
+  await record(page);
+  await page.getByRole("button", {name: "Send question"}).click();
+  await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "error");
+  assert.match(await page.locator("#error").innerText(), /interrupted/);
+  assert.equal(await page.locator("#reply").isVisible(), false);
+  assert.equal(await page.locator("#send").isEnabled(), false);
+});
+
+test("search sources are safe links, and combined cost includes the search fee", async (t) => {
+  const page = await pageFor(t);
+  const id = "search-test";
+  const events = [
+    {type: "start", id, encoding: "pcm_s16le", sample_rate: 16000, channels: 1, sources: [
+      {url: "https://example.com/weather", title: "Weather source"},
+      {url: "javascript:alert(1)", title: "Unsafe link"},
+    ]},
+    {type: "audio", pcm: Buffer.alloc(3200).toString("base64")}, {type: "done", id},
+  ];
+  await page.route("**/converse/stream", (route) => route.fulfill({contentType: "application/x-ndjson",
+    headers: {"X-Diagnostics-ID": id}, body: events.map((event) => JSON.stringify(event) + "\n").join("")}));
+  await page.route(`**/diagnostics/${id}`, (route) => route.fulfill({json: {
+    estimated_cost_usd: "0.010020000", web_search_requests: 1, tokens: {input_tokens: 100, output_tokens: 20},
+  }}));
+  await ready(page);
+  await record(page);
+  await page.getByRole("button", {name: "Send question"}).click();
+  await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "done");
+  assert.equal(await page.locator("#sources a").count(), 1);
+  assert.equal(await page.locator("#sources a").getAttribute("href"), "https://example.com/weather");
+  assert.equal(await page.locator("#sources a").getAttribute("rel"), "noopener noreferrer");
+  assert.equal(await page.locator("#searches").innerText(), "1");
+  assert.equal(await page.locator("#cost").innerText(), "$0.010020000");
+});
+
+test("blocked audio initialization sends no paid request and preserves the recording", async (t) => {
+  const page = await pageFor(t);
+  await ready(page);
+  await record(page);
+  let posts = 0;
+  page.on("request", (request) => { if (request.method() === "POST") posts += 1; });
+  await page.evaluate(() => {
+    const RealContext = AudioContext;
+    window.AudioContext = class extends RealContext {
+      resume() { return Promise.reject(new Error("Playback permission denied")); }
+    };
+  });
+  await page.getByRole("button", {name: "Send question"}).click();
+  await page.waitForFunction(() => !document.getElementById("error").hidden);
+  assert.equal(posts, 0);
+  assert.equal(await page.locator("#send").isEnabled(), true);
+  assert.match(await page.locator("#reply-status").innerText(), /No provider/);
 });
 
 test("desktop and narrow layouts retain visible controls without horizontal overflow", async (t) => {

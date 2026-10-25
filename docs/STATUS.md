@@ -9,9 +9,11 @@ and publishing the rebuild on **rebuild/backend-tester** on October 25. The loca
 push-to-talk tester is implemented and passes automated browser checks. The user
 subsequently confirmed one successful human microphone exchange, with correct
 recognition and a coherent spoken answer. Their latest concerns are the 6.18 s
-processing delay and lack of live weather/web access; they asked about streaming.
-Streaming and live-data tools are recommendations under discussion, not implemented
-or newly authorized work. Main and the May reference
+processing delay and lack of live weather/web access. They then authorized
+streamed playback, shorter default answers, and **general web search**, rejecting
+a separate weather-specific tool. This increment is implemented and verified
+with synthetic audio and mocked providers; live streaming/search remain untested.
+Main and the May reference
 implementation are preserved; no merge or new repository is requested.
 
 The buffered STT → Haiku 5.5 → TTS backend now passes live checks with known
@@ -48,16 +50,24 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
 - Haiku: claude-haiku-5-5, low effort/adaptive thinking, max_tokens=1024, standard
   service, global routing, API version 2026-10-21. **Omit speed**: a live 400
   response established that Haiku rejects this parameter even at standard.
-  No tools/search or automatic retries. Incomplete/overlong replies fail explicitly.
+  Native general web search is available with max_uses=1; no action tools or
+  automatic retries. Incomplete/overlong replies fail explicitly. The system
+  instruction defaults to one sentence/30 words, with up to three sentences/80
+  words when detail is explicitly requested; this is not arbitrary word cutting.
 - GET /diagnostics and /diagnostics/{id}: model, status, token counts (thinking
   included in output), estimated Haiku cost, and timings. UTC-month/lifetime
   totals persist in ignored backend/output/diagnostics.sqlite3. No prompt,
-  transcript, reply, reasoning text, or secrets are stored in the ledger.
+  transcript, reply, reasoning text, search queries/pages/source URLs, or secrets
+  are stored in the ledger. Token and search fees have separate subtotals;
+  estimated_cost_usd now combines both. Older rows retain token-only estimates.
 - Prices checked October 25: $0.10 input / $0.50 output per million tokens through
   100K prompt tokens, fivefold above 100K. Cache counters priced separately if
   returned; no caching requested. Unknown usage/modifiers produce null costs
   and explicit incomplete totals. Estimates exclude ElevenLabs, taxes, discounts,
-  other account use, and actual balance. No hard account-wide budget configured.
+  other account use, and actual balance. Search pricing checked October 25 is
+  $0.01 per search plus token costs. Missing/malformed search counters after an
+  observed search produce unknown combined cost, not zero. No hard account-wide
+  budget configured; native tool max_uses=1 bounds searches in each exchange.
 - Limits: 10 MiB recorded input, 64 KiB chat JSON, 8 KiB speech JSON, 8 MiB generated
   PCM, 256 KiB Haiku response. Loopback only, local Host validation, no CORS or
   device authentication.
@@ -65,7 +75,8 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   format, preserves ElevenLabs settings, and saves mode 0600. Format is only a
   preflight, not proof of access. Never print/open backend/.env to inspect keys.
 - GET /tester: a same-origin local browser tester, with explicit Record/Stop,
-  local recording preview, separate Send, manual WAV reply playback, and stage
+  local recording preview, separate Send, streamed audio playback and final WAV
+  replay, and stage
   timing/token/cost diagnostics. Capture stops at 30 seconds; input is capped at
   10 MiB. Tracks stop after recording, cancellation, or leaving the tab. Pending
   permission cancellation stops a late stream without recording. No provider
@@ -75,27 +86,52 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
   HTML/CSS/JS use explicit asset allowlisting, no-store and restrictive CSP. No
   new Python/UI runtime dependency. Playwright is a separate pinned test-only
   dependency in backend/ui-tests/; node_modules is ignored.
+- POST /converse/stream: recorded STT and Haiku finish first, then the ElevenLabs
+  SDK stream endpoint yields 16 kHz mono PCM as 1024-byte chunks. NDJSON start,
+  audio (base64 PCM), done/error frames; whole samples and 8 MiB decoded cap.
+  No automatic retry or continuation. Mid-stream failures emit error; EOF without
+  done is not success. Disconnect closes upstream and records disconnected status
+  while preserving known model/search cost. Original /converse still returns WAV.
+- Browser Web Audio schedules incoming PCM with an 80 ms initial buffer; Send
+  opens the context in its user gesture, before any paid request. Blocked audio
+  setup preserves the recording and sends no request. Mute silences live audio
+  while the response finishes; final replay is assembled in memory only on done.
+  First audio received (browser), estimated playback scheduling, backend first
+  audio, total completion, and buffer underruns are distinct measurements. This
+  is not realtime microphone upload or overlapping Haiku text/TTS generation.
+- General search uses native web_search_20250305; the model is instructed to use
+  it for changing/current facts or explicit searches. It must ask for a city for
+  local weather without one; no location is inferred. Search preambles are not
+  spoken. Validated cited HTTP(S) links appear in /chat sources or stream metadata
+  and the tester; they are not saved in the ledger. pause_turn fails explicitly
+  without automatic continuation/spend. No extra service/key or weather tool.
 
 ## Verification
 
 **Current local tests:**
 
-- `backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py -q --tb=line`:
-  **89 passed**, including regression assertion that Haiku requests omit speed
+- `backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py -q --tb=line`:
+  **103 passed**, including regression assertion that Haiku requests omit speed
   and tester asset privacy/headers.
   Tests cover provider contracts, WAV and pipeline ordering, bounds, key handling,
   no retries, errors, cost/cache/thinking accounting, privacy, and diagnostic
   persistence/monthly totals. Providers are mocked in this suite.
 - Existing Starlette TestClient HTTPX-adapter deprecation warning remains; the
   pinned combination passes. Current pip check passes; Python requirements unchanged.
-- `npm --prefix backend/ui-tests test`: **10 passed** with Chrome 155.0.8059.85,
+- `npm --prefix backend/ui-tests test`: **14 passed** with Chrome 155.0.8059.85,
   Node 26.10.0 and Playwright 1.64.1. Real browser MediaRecorder uses a synthetic
   oscillator; a separate ephemeral backend uses fake credentials and two HTTPX
   MockTransport providers. Checks cover one complete mocked pipeline, no mic/spend
   on load, preview before upload, duplicate-send prevention, denied/pending mic
   permission, leaving the tab, duration cap, missing setup/unsupported browser,
   provider/connection/diagnostic failures, and 320/375/414/768/1280 px layouts.
-  Desktop screenshot visually reviewed: backend/output/tester-desktop.png (ignored).
+  Added proof of scheduling audio before the delayed provider finishes, mute/replay,
+  missing-done interruption, safe sources/search costs, and blocked playback with
+  no POST. Python checks cover provider contracts, separate search billing,
+  final-answer/source privacy, search errors, pause_turn, PCM order, size limits,
+  timeouts, empty/odd audio, first chunk before provider completion, and upstream
+  closure/cost retention on disconnect. Desktop screenshot:
+  backend/output/tester-streaming-desktop.png (ignored).
   No physical mic/speaker, live-provider calls, real ledger writes, or paid usage
   occurred in the automated tester build. Safari and broad speech-quality testing
   remain unverified; the user's subsequent browser test is recorded below.
@@ -104,6 +140,12 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
 
 **Current live provider checks (October 25):**
 
+- This increment's only live provider request was a read-only Models API check:
+  HTTP 200 for claude-haiku-5-5 with server_tools.web_search.supported=true.
+  No paid inference, search, TTS, or physical mic/speaker check was run. Search
+  account/organization enablement, live citation quality, default-answer brevity,
+  and actual first-audio improvement remain unverified. Existing live evidence
+  below concerns the earlier buffered path, before search/short-answer changes.
 - **Subsequent human browser test, user-reported success:** recognized speech
   correctly and gave a coherent answer, but could not fetch current weather.
   Screenshot shows about 3 s recorded input and a 19 s spoken reply. Existing
@@ -171,14 +213,14 @@ unverified. Programming remains blocked by a missing micro-USB data cable.
 
 ## Next action
 
-Discuss the next increment using the measured bottleneck: stream TTS audio to
-playback as it arrives, shorten routine spoken replies, and measure time to first
-audible audio separately from completion. Then consider overlapping Haiku text
-generation with sentence-based TTS and a bounded weather lookup tool. These are
-proposals pending the user's direction, not new implementation authorization.
-No promised end-to-end latency or live model comparison is established. Current
-code intentionally has no tools/search. Hardware flashing still needs the cable;
-no automatic paid checks, deployment, firmware work, or main-branch merge.
+Reload /tester and try one short question. Compare First audio received with
+Total processing; ask an explicitly located current-information question when
+ready to test search, and verify its source link, count, and fee. These human/live
+checks are outstanding, not evidence already obtained. If native search is
+denied, check Claude organization search settings; do not silently substitute a
+weather service or a different provider. No promised live latency is established.
+Hardware still needs the cable. Overlapping Haiku text/TTS, realtime input,
+deployment, firmware, and a main-branch merge are outside this increment.
 
 ## Historical context and Git
 
@@ -194,6 +236,8 @@ push; remote main remains c7d050d. The local continuity commit ea1591b is includ
 in the rebuild branch. No merge or pull request was created. This status-only
 follow-up records the completed publication. The later documentation update
 records the user's microphone result and latency/tool discussion on the same branch.
+The current streaming/search increment is published on this branch after local
+verification; no main merge or pull request is requested.
 Credentials, virtual environments, audio, screenshots, usage ledger, and installed
 test dependencies stay local/ignored. Check `git status --short --branch`,
 `git log -3 --oneline`, and the upstream branch at the next session start.

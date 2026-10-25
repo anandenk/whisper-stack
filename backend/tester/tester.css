@@ -65,6 +65,8 @@ dl > div { display: flex; justify-content: space-between; gap: 20px; border-bott
 dt { color: var(--color-muted); }
 dd { margin: 0; text-align: end; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #diagnostic-link { display: inline-block; margin-top: 16px; }
+#mute { margin-bottom: 16px; }
+#sources { padding-inline-start: 20px; overflow-wrap: anywhere; }
 .privacy { max-width: 90ch; margin: 24px 0 36px; font-size: 14px; }
 footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-block: 24px; color: var(--color-muted); font-size: 14px; }
 footer a { white-space: nowrap; min-height: 44px; }

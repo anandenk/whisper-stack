@@ -23,9 +23,12 @@ estimates and distinguish mocked, live-provider, and hardware evidence. Device
 programming remains blocked by a missing cable. On 2026-10-25 the user also
 authorized the local push-to-talk tester, with human testing deferred, and
 publishing the rebuild/backend-tester branch to the existing private repository.
-Do not expand into realtime streaming, deployment, or firmware work automatically.
-Follow STATUS.md for
-the current handoff.
+The user subsequently authorized streamed playback, shorter default answers, and
+general web search on 2026-10-25. This slice streams ElevenLabs audio after Haiku
+finishes, and caps native web search at one use per exchange. Keep search fees
+separate from token estimates. Realtime microphone upload, overlapping Haiku
+text/TTS generation, deployment, and firmware are not automatically in scope.
+Follow STATUS.md for the current handoff.
 
 ## Keep one coherent project
 

@@ -14,13 +14,14 @@ from dotenv import load_dotenv
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .diagnostics import Diagnostics
 from .llm import MODEL, generate_reply, key_format_valid
+from .streaming import audio_events
 
 
 API_BASE = "https://api.elevenlabs.io"
@@ -87,7 +88,7 @@ class BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] != "POST":
             return await self.app(scope, receive, send)
-        limit = MAX_AUDIO_BYTES if scope["path"] in {"/transcribe", "/converse"} else (65536 if scope["path"] == "/chat" else 8192)
+        limit = MAX_AUDIO_BYTES if scope["path"] in {"/transcribe", "/converse", "/converse/stream"} else (65536 if scope["path"] == "/chat" else 8192)
         body = bytearray()
         while True:
             message = await receive()
@@ -186,7 +187,7 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
     @app.get("/tester/{asset}", include_in_schema=False)
     async def tester(asset: str = "index.html"):
         # Explicit allowlist: never expose backend configuration or output files.
-        if asset not in {"index.html", "tester.css", "tester.js"}:
+        if asset not in {"index.html", "tester.css", "tester.js", "player.js"}:
             raise HTTPException(404, "Tester asset not found.")
         return FileResponse(Path(__file__).parent / "tester" / asset, headers={
             "Cache-Control": "no-store",
@@ -222,6 +223,8 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
             "anthropic_key_format_valid": key_format_valid(settings.anthropic_api_key),
             "llm_model": MODEL,
             "speech_format": "wav_pcm_s16le_16000_mono",
+            "streaming_speech_format": "ndjson_pcm_s16le_16000_mono",
+            "web_search_max_uses": 1,
         }
 
     @app.get("/voices")
@@ -302,8 +305,8 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
 
     @app.post("/chat")
     async def chat(body: ChatInput):
-        text, event = await reply(body.text, [item.model_dump() for item in body.history], "chat")
-        return JSONResponse({"reply": text, "diagnostics": event}, headers={"Cache-Control": "no-store"})
+        text, event, sources = await reply(body.text, [item.model_dump() for item in body.history], "chat")
+        return JSONResponse({"reply": text, "diagnostics": event, "sources": sources}, headers={"Cache-Control": "no-store"})
 
     @app.get("/diagnostics")
     async def diagnostics():
@@ -316,8 +319,7 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
             raise HTTPException(404, "Diagnostic record not found.")
         return JSONResponse(event, headers={"Cache-Control": "no-store"})
 
-    @app.post("/converse", response_class=Response, responses={200: {"content": {"audio/wav": {}}}})
-    async def converse(request: Request):
+    async def prepare_conversation(request, endpoint):
         # Check all local configuration before spending on any provider stage.
         if not key_format_valid(settings.anthropic_api_key) or not settings.api_key or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", settings.voice_id):
             raise HTTPException(503, "Configure Anthropic, ElevenLabs, and a voice before running the voice loop.")
@@ -328,7 +330,22 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
             raise HTTPException(422, "No speech was recognized; Haiku and TTS were not called.")
         if len(transcript["text"]) > 1000:
             raise HTTPException(422, "Transcript exceeds this increment's 1000-character limit; Haiku and TTS were not called.")
-        text, event = await reply(transcript["text"], [], "converse")
+        text, event, sources = await reply(transcript["text"], [], endpoint)
+        return started, stt_ms, text, event, sources
+
+    @app.post("/converse/stream")
+    async def converse_stream(request: Request):
+        started, stt_ms, text, event, sources = await prepare_conversation(request, "converse_stream")
+        return StreamingResponse(
+            audio_events(app.state.speech, settings, text, event, sources,
+                         app.state.diagnostics, started, stt_ms, MAX_SPEECH_BYTES),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Diagnostics-ID": event["id"]},
+        )
+
+    @app.post("/converse", response_class=Response, responses={200: {"content": {"audio/wav": {}}}})
+    async def converse(request: Request):
+        started, stt_ms, text, event, _sources = await prepare_conversation(request, "converse")
         tts_started = time.perf_counter()
         try:
             response = await speak(SpeechInput(text=text))

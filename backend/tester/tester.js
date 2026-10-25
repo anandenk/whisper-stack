@@ -1,4 +1,5 @@
 // All audio stays in memory. Only an explicit Send action calls a paid endpoint.
+import {PCMPlayer, consumeStream} from "/tester/player.js";
 const $ = (id) => document.getElementById(id);
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_SECONDS = 30;
@@ -10,6 +11,8 @@ let permissionVersion = 0;
 let recording = null;
 let previewURL = null;
 let replyURL = null;
+let player = null;
+let requestController = null;
 
 function render(message) {
   $("capture-state").dataset.phase = phase;
@@ -41,6 +44,13 @@ function releaseAudio(element, url) {
 }
 
 function clearReply() {
+  player?.close();
+  player = null;
+  $("mute").hidden = true;
+  $("mute").disabled = false;
+  $("mute").textContent = "Mute live reply";
+  $("sources").replaceChildren();
+  $("sources-section").hidden = true;
   releaseAudio($("reply"), replyURL);
   replyURL = null;
   $("reply").hidden = true;
@@ -49,6 +59,9 @@ function clearReply() {
   $("diagnostic-link").hidden = true;
   $("diagnostic-link").removeAttribute("href");
   $("reply-status").textContent = "Your reply will appear here after you send a recording.";
+  for (const id of ["first-audio", "first-playback", "underruns", "total-time", "stt-time", "llm-time", "tts-time", "tokens", "searches", "cost"]) {
+    $(id).textContent = "—";
+  }
 }
 
 function clearPreview() {
@@ -195,8 +208,9 @@ async function showDiagnostics(id) {
   $("tts-time").textContent = seconds(event.tts_elapsed_ms);
   $("tokens").textContent = `${event.tokens?.input_tokens ?? "—"} / ${event.tokens?.output_tokens ?? "—"}`;
   $("cost").textContent = event.estimated_cost_usd == null ? "Unknown" : `$${event.estimated_cost_usd}`;
+  $("searches").textContent = event.web_search_requests ?? "Unknown";
   $("metrics").hidden = false;
-  $("diagnostic-note").textContent = "Haiku cost is an estimate. It excludes ElevenLabs and is not your remaining balance. Processing time excludes recording and playback.";
+  $("diagnostic-note").textContent = "Estimated cost includes Haiku tokens and search ($0.01 per search), excluding ElevenLabs. First audio is measured in the browser; scheduled playback is an estimate, not a measurement at your speaker. Total processing excludes recording and playback.";
   $("diagnostic-note").hidden = false;
 }
 
@@ -209,13 +223,25 @@ async function sendRecording() {
   clearError();
   clearReply();
   phase = "sending";
-  render("Sent. Recognizing speech, thinking, then making the reply…");
-  $("reply-status").textContent = "Waiting for the complete voice reply…";
+  render("Recognizing speech and preparing a short reply…");
+  $("reply-status").textContent = "The reply will play as its audio arrives.";
+  const started = performance.now();
   let diagnosticID;
+  let submitted = false;
+  requestController = new AbortController();
+  const deadline = setTimeout(() => requestController?.abort(), 210000);
   try {
-    const response = await fetch("/converse", {
+    player = new PCMPlayer(started);
+    let audioDeadline;
+    try {
+      await Promise.race([player.ready, new Promise((_, reject) => {
+        audioDeadline = setTimeout(() => reject(new Error("Audio could not start. Allow audio playback, then press Send again. No request was sent.")), 5000);
+      })]);
+    } finally { clearTimeout(audioDeadline); }
+    submitted = true;
+    const response = await fetch("/converse/stream", {
       method: "POST", headers: {"Content-Type": blob.type.split(";")[0]}, body: blob,
-      signal: AbortSignal.timeout(210000),
+      signal: requestController.signal,
     });
     diagnosticID = response.headers.get("X-Diagnostics-ID");
     diagnosticLink(diagnosticID);
@@ -224,24 +250,44 @@ async function sendRecording() {
       try { detail = (await response.json()).detail; } catch { /* Use safe fallback. */ }
       throw new Error(typeof detail === "string" ? detail : `Voice request failed (HTTP ${response.status}).`);
     }
-    if (response.headers.get("Content-Type")?.split(";")[0] !== "audio/wav") {
-      throw new Error("The backend returned an unexpected reply format.");
-    }
-    const audio = await response.blob();
-    if (!audio.size) throw new Error("The backend returned an empty audio reply.");
+    await consumeStream(response, player, (event) => {
+      if (event.id !== diagnosticID) throw new Error("Streaming diagnostic ID mismatch.");
+      showSources(event.sources);
+    }, (audio) => {
+      $("reply-status").textContent = audio.muted ? "Live reply muted. Downloading the rest for replay…" : "Playing the reply as audio arrives…";
+      render(audio.muted ? "Live reply muted. Finishing the exchange…" : "Playing streamed audio…");
+      $("metrics").hidden = false;
+      $("mute").hidden = false;
+      $("first-audio").textContent = `${(audio.firstReceivedMs / 1000).toFixed(2)} s`;
+      $("first-playback").textContent = audio.firstScheduledMs == null ? "—" : `${(audio.firstScheduledMs / 1000).toFixed(2)} s`;
+      $("underruns").textContent = String(audio.underruns);
+    });
+    const audio = player.wav();
     replyURL = URL.createObjectURL(audio);
     $("reply").src = replyURL;
     $("reply").hidden = false;
-    $("reply-status").textContent = "Reply ready. Press Play to listen.";
+    $("reply-status").textContent = "All audio received. Replay is available below.";
     phase = "done";
     render("Exchange complete. Record another question when you’re ready.");
   } catch (cause) {
+    player?.close();
+    if (!submitted) {
+      recording = blob;
+      phase = "review";
+      render("No request sent. Review browser audio permissions before sending.");
+      $("reply-status").textContent = "No provider was contacted.";
+      error(cause.message);
+      return;
+    }
     phase = "error";
     render("Request stopped. No automatic retry was made.");
     $("reply-status").textContent = "No playable reply received.";
-    error(cause.name === "TimeoutError" || cause.name === "TypeError"
+    error(["TimeoutError", "AbortError", "TypeError"].includes(cause.name)
       ? "The request timed out or the connection was lost. It may still incur charges. Check usage diagnostics before sending another question."
       : cause.message);
+  } finally {
+    clearTimeout(deadline);
+    requestController = null;
   }
   // Keep controls locked until diagnostics settle, so stale results cannot overwrite a new exchange.
   const finishedPhase = phase;
@@ -257,15 +303,41 @@ async function sendRecording() {
   render($("status").textContent);
 }
 
+function showSources(sources) {
+  if (!Array.isArray(sources)) return;
+  for (const source of sources.slice(0, 10)) {
+    try {
+      const url = new URL(source.url);
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) continue;
+      const link = document.createElement("a");
+      link.href = url.href;
+      link.textContent = source.title || url.hostname;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      const item = document.createElement("li");
+      item.append(link);
+      $("sources").append(item);
+    } catch { /* Ignore malformed citation URLs. */ }
+  }
+  $("sources-section").hidden = !$("sources").children.length;
+}
+
 $("record").addEventListener("click", () => phase === "recording" ? stopRecording() : startRecording());
 $("clear").addEventListener("click", reset);
 $("send").addEventListener("click", sendRecording);
+$("mute").addEventListener("click", () => {
+  player?.mute();
+  $("mute").textContent = "Live reply muted";
+  $("mute").disabled = true;
+});
+$("reply").addEventListener("play", () => player?.mute());
 function leaveCapture() {
   if (phase === "permission") reset();
   if (session) stopRecording(true);
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) leaveCapture(); });
 window.addEventListener("pagehide", () => {
+  requestController?.abort();
   leaveCapture();
   clearPreview();
   clearReply();
@@ -273,7 +345,7 @@ window.addEventListener("pagehide", () => {
 
 async function initialize() {
   try {
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !MIME_TYPES.some((type) => MediaRecorder.isTypeSupported(type))) {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !window.AudioContext || !MIME_TYPES.some((type) => MediaRecorder.isTypeSupported(type))) {
       throw new Error("Recording is unavailable in this browser. Open this local page in a current Chrome or Safari browser.");
     }
     const response = await fetch("/health", {cache: "no-store", signal: AbortSignal.timeout(8000)});

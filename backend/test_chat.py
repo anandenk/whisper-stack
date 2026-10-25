@@ -54,7 +54,10 @@ def test_chat_contract_diagnostics_privacy_and_restart(factory, tmp_path):
         assert body["output_config"] == {"effort": "low"}
         assert body["thinking"] == {"type": "adaptive"}
         assert "speed" not in body and body["inference_geo"] == "global"
-        assert not {"temperature", "tools", "cache_control"} & body.keys()
+        assert not {"temperature", "cache_control"} & body.keys()
+        assert body["tools"] == [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
+        assert "ONE short sentence, at most 30 words" in body["system"]
+        assert "Current UTC date:" in body["system"]
         assert body["messages"] == [{"role": "user", "content": "Earlier"},
                                      {"role": "assistant", "content": "Previous reply"},
                                      {"role": "user", "content": PROMPT}]
