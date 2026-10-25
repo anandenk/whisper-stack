@@ -188,8 +188,9 @@ model-driven, not a guarantee every weather question triggers it. No local searc
 service, weather-specific tool, code execution, or additional API key is added.
 For local weather without a city, the assistant should ask for the city rather
 than infer your location. Native search access may need enabling in your Claude
-organization; a Models API capability check succeeded, but this increment did not
-run paid search or inference to verify account entitlement or answer quality.
+organization; a Models API capability check succeeded and the user's subsequent
+weather test returned one live search and a displayed citation. The agent did not
+run paid search or inference. Answer accuracy and broader quality remain unverified.
 
 Search is **$10 per 1000 uses ($0.01 each), plus token charges**, checked October
 25. Max uses prevents repeated searches in a request; pause_turn is rejected

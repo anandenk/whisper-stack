@@ -12,7 +12,12 @@ recognition and a coherent spoken answer. Their latest concerns are the 6.18 s
 processing delay and lack of live weather/web access. They then authorized
 streamed playback, shorter default answers, and **general web search**, rejecting
 a separate weather-specific tool. This increment is implemented and verified
-with synthetic audio and mocked providers; live streaming/search remain untested.
+with synthetic audio and mocked providers. The user subsequently exercised live
+search/streaming: one search returned a cited weather source, but first audio was
+still 6.77 s in the browser. Backend timestamps show only an 85 ms head start over
+completion. The latest request is to assess that result, not implement another
+milestone. Audio delivery to the browser is not the main delay in this sample;
+most time precedes the first backend audio chunk.
 Main and the May reference
 implementation are preserved; no merge or new repository is requested.
 
@@ -140,11 +145,26 @@ workflow. Reproducible setup/API commands are in [backend/README.md](../backend/
 
 **Current live provider checks (October 25):**
 
-- This increment's only live provider request was a read-only Models API check:
+- **Latest user-run search/streaming test:** screenshot shows a cited Ulaanbaatar
+  weather source, one search, 0 playback underruns, 6.77 s first browser audio,
+  6.85 s scheduled playback, and about 10 s replay. Matching local ledger record
+  **af2d6de4-5539-4180-841b-ddfd5ff57fff** was read without another paid call:
+  STT **510.486 ms**, Haiku including search **4331.570 ms**, TTS **1962.117 ms**,
+  first backend audio **6739.958 ms**, completion **6824.833 ms**. First backend
+  audio precedes completion by **84.875 ms**, so this sample gets little latency
+  benefit from streamed playback. Provider usage: **15,292 input / 496 output**,
+  including **348 thinking** tokens, already included in output billing. One
+  search fee **$0.010000000**, tokens **$0.001777200**, combined estimate
+  **$0.011777200**, excluding ElevenLabs. Pipeline/search statuses are ok/used;
+  audio **332,882 PCM bytes** (10.403 s). Search execution and a displayed citation
+  are live evidence; factual weather accuracy, exact spoken word count, and
+  subjective voice quality are not independently verified. The 4.33 s model
+  measurement includes search, unlike earlier direct-answer timings.
+- During the preceding agent build, the only live provider request was a read-only Models API check:
   HTTP 200 for claude-haiku-5-5 with server_tools.web_search.supported=true.
-  No paid inference, search, TTS, or physical mic/speaker check was run. Search
-  account/organization enablement, live citation quality, default-answer brevity,
-  and actual first-audio improvement remain unverified. Existing live evidence
+  No paid inference, search, TTS, or physical mic/speaker check was run by the
+  agent. The user's later result above verifies search access and audio output,
+  but does not establish a broad quality or latency benchmark. Earlier live evidence
   below concerns the earlier buffered path, before search/short-answer changes.
 - **Subsequent human browser test, user-reported success:** recognized speech
   correctly and gave a coherent answer, but could not fetch current weather.
@@ -213,12 +233,13 @@ unverified. Programming remains blocked by a missing micro-USB data cable.
 
 ## Next action
 
-Reload /tester and try one short question. Compare First audio received with
-Total processing; ask an explicitly located current-information question when
-ready to test search, and verify its source link, count, and fee. These human/live
-checks are outstanding, not evidence already obtained. If native search is
-denied, check Claude organization search settings; do not silently substitute a
-weather service or a different provider. No promised live latency is established.
+Report that search/citations work but the measured first-audio goal is unmet.
+Recommended follow-up, not yet authorized: compare a latency-focused ElevenLabs
+speech model with the current Multilingual v2 using the same voice/input, then
+consider feeding Haiku's final answer text into TTS incrementally. Measure direct
+answers separately from search questions; search itself adds time and fees. No
+weather-specific tool is wanted. Do not claim that a model switch alone will
+remove the 4.33 s search/model delay or promise a live latency target.
 Hardware still needs the cable. Overlapping Haiku text/TTS, realtime input,
 deployment, firmware, and a main-branch merge are outside this increment.
 
@@ -236,8 +257,9 @@ push; remote main remains c7d050d. The local continuity commit ea1591b is includ
 in the rebuild branch. No merge or pull request was created. This status-only
 follow-up records the completed publication. The later documentation update
 records the user's microphone result and latency/tool discussion on the same branch.
-The current streaming/search increment is published on this branch after local
+Streaming/search implementation commit **c4542b9** is published on this branch after local
 verification; no main merge or pull request is requested.
+The later status-only update records the user's live search/streaming result.
 Credentials, virtual environments, audio, screenshots, usage ledger, and installed
 test dependencies stay local/ignored. Check `git status --short --branch`,
 `git log -3 --oneline`, and the upstream branch at the next session start.
