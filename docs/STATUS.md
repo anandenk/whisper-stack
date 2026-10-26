@@ -27,6 +27,14 @@ successful browser use and user-accepted spoken quality after the correction.
 This is user-reported acceptance, not an independent quality/latency benchmark.
 The agent's correction checks used mocked providers without audible playback.
 
+The current request is research into runtime conversation context and memory,
+including alternatives to the first build's Markdown-based memory. See
+[Voice assistant memory approaches](<../reports/Voice assistant memory approaches.md>)
+for inspected voice-framework and DIY-project examples. The recommendation is
+bounded session dialogue followed by summaries and editable durable facts; it is
+not an accepted implementation decision. Research added no dependencies, paid
+calls or runtime retention, and did not benchmark the cited projects.
+
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
 Console's exact timestamp takes precedence. No scheduled reminder was requested.
@@ -215,6 +223,10 @@ only. Their measured summaries are preserved here for other machines. Human
 assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unverified.
 
 ## Blockers and next action
+
+Next: agree on session lifetime, restart persistence and explicit versus automatic
+fact retention before implementing memory. No memory implementation is authorized
+by the research request; PROJECT.md retains memory/retention as an open choice.
 
 The user accepted their own-voice browser test after the event-size correction.
 The overlapping backend and large-frame browser path also pass automated checks.
