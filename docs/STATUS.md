@@ -7,8 +7,11 @@ Updated: 2026-10-26 (America/New_York).
 The user listened to the comparison and approved Flash v2.5. The application and
 local configured TTS default is **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the
 George voice remain. Implementation and handoff are published on the rebuild
-branch. The local server is not running. The next verification is a full voice-loop
-exchange using Flash; the completed comparison tested TTS separately.
+branch. A complete live STT → Haiku → streamed Flash exchange now passes with a
+synthetic spoken question: first client audio 2.737 s, completion 3.311 s. Input
+speech was generated directly to a file; no physical mic or playback was used.
+The reply was saved for later review. The local server is running on
+127.0.0.1:8765; check /health before relying on process state.
 
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
@@ -106,6 +109,23 @@ backend/.venv/bin/python -m backend.compare_tts --live.
 
 **Earlier live voice/search evidence:**
 
+- **October 26 silent full Flash voice-loop check:** the user authorized the
+  agent to supply a question and required no sound playback. macOS say output-file
+  mode generated “What causes the seasons on Earth? Please answer in one short
+  sentence.” AIFF was converted to mono PCM16/16 kHz WAV using ffmpeg. One POST
+  /converse/stream returned HTTP 200 with start/audio/done; no retry or web search.
+  First client audio **2736.687 ms**, client completion **3310.728 ms**. Ledger ID
+  **2ba867fe-fae0-437a-b23b-a4b03f2cd154**: STT **839.398 ms**, Haiku **1418.254 ms**,
+  TTS **1039.333 ms**, first backend PCM **2732.581 ms**, total **3306.098 ms**.
+  Model usage **3140 input / 59 output / 0 thinking**, estimated token cost
+  **$0.000343500**, zero search fee; ElevenLabs usage is separate. Pipeline ok.
+  Reply **320,992 PCM bytes / 10.031 s**, valid WAV and full ffmpeg decode passed.
+  Evidence **backend/output/flash-voice-loop-20261026T180126Z/result.json**,
+  question.txt, question.aiff, question.wav, and reply.wav (ignored, local only).
+  No player/browser or physical audio output was opened. This verifies the live
+  backend stream, not browser scheduling, human mic accuracy, or independently
+  judged reply content. It is a direct-answer sample; the earlier 6.77 s sample
+  included a search, so it is not an isolated model-switch speed comparison.
 - User browser search test: cited Ulaanbaatar weather source, one search, no buffer
   underruns; browser first audio 6.77 s. Ledger ID
   af2d6de4-5539-4180-841b-ddfd5ff57fff: STT 510.486 ms, Haiku including search
@@ -130,9 +150,12 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-Start by reading this handoff and checking Git/configuration. The local server
-is **not running**. The next check is one short Flash-backed /tester exchange,
-comparing first audio against the previous results.
+The full Flash-backed backend exchange is verified. When convenient, review the
+saved reply and then confirm browser playback with Flash. Those listening/UI
+checks were not performed during the silent run. The local backend is running;
+check /health before reuse. Recommended next project milestone is a minimal
+device capture/playback interaction once the board/parts and data cable are
+available; no firmware work is authorized by this recommendation.
 TTS switching cannot remove the separate search/model delay. Overlapping Haiku
 text/TTS generation, realtime input, firmware, deployment, and main merge remain
 outside this increment. Hardware programming still needs a micro-USB data cable.
@@ -147,8 +170,9 @@ final voice, memory/retention, provisioning, and hardware contract remain open.
 Publication branch: **rebuild/backend-tester** in the existing private
 https://github.com/anandenk/whisper-stack repository. Main is not merged or changed
 by this work. Earlier published commits include c4542b9 (stream/search) and
-73c3463 (TTS comparison) and 9cdb93b (Flash adoption). Code/docs are committed and
-pushed to the same branch. No PR or new repo.
+73c3463 (TTS comparison) and 9cdb93b (Flash adoption). The subsequent documentation
+update records the silent full voice-loop check on the same branch. Code/docs
+are committed and pushed; no PR or new repo.
 Credentials, environments, generated audio/data and installed test dependencies
 stay local/ignored; next session must check git status --short --branch and
 recent commits before assuming remote state.
