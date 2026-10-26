@@ -63,15 +63,36 @@ def key_format_valid(key):
     return key.startswith("sk-ant-") and not any(character.isspace() for character in key)
 
 
+def reply_request(text, history, *, stream=False):
+    payload = {"model": MODEL, "max_tokens": 1024,
+               "system": SYSTEM_PROMPT + " Current UTC date: " + datetime.now(timezone.utc).date().isoformat(),
+               "messages": [*history, {"role": "user", "content": text}],
+               "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
+               "thinking": {"type": "adaptive"}, "output_config": {"effort": "low"},
+               "inference_geo": "global", "service_tier": "standard_only"}
+    if stream:
+        payload["stream"] = True
+        payload["system"] += (
+            " Streaming voice protocol: wrap ONLY the final spoken answer in <voice> and </voice>. "
+            "Never put search announcements, reasoning, or tool instructions inside these tags. "
+            "Do all tool calls before opening <voice>. Nothing may follow </voice>."
+        )
+    return payload
+
+
+def new_event(endpoint):
+    return {"id": str(uuid4()), "created_at": datetime.now(timezone.utc).isoformat(),
+             "endpoint": endpoint, "model": MODEL, "status": "pending", "tokens": None,
+             "estimated_token_cost_usd": None, "web_search_requests": None,
+             "estimated_search_cost_usd": None, "estimated_cost_usd": None, "pricing_checked": PRICING_DATE}
+
+
 async def generate_reply(client, api_key, text, history, diagnostics, endpoint):
     if not api_key:
         raise HTTPException(503, "Configure ANTHROPIC_API_KEY locally with python -m backend.configure_anthropic, then restart.")
     if not key_format_valid(api_key):
         raise HTTPException(503, "The configured key is not in Anthropic's sk-ant- format. Run the local key setup again.")
-    event = {"id": str(uuid4()), "created_at": datetime.now(timezone.utc).isoformat(),
-             "endpoint": endpoint, "model": MODEL, "status": "pending", "tokens": None,
-             "estimated_token_cost_usd": None, "web_search_requests": None,
-             "estimated_search_cost_usd": None, "estimated_cost_usd": None, "pricing_checked": PRICING_DATE}
+    event = new_event(endpoint)
     # Fail before any billable call if local diagnostic storage is unavailable.
     diagnostics.save(event)
     started = time.perf_counter()
@@ -83,12 +104,7 @@ async def generate_reply(client, api_key, text, history, diagnostics, endpoint):
         async with client.stream(
             "POST", "/v1/messages",
             headers={"x-api-key": api_key, "anthropic-version": "2026-10-21"},
-            json={"model": MODEL, "max_tokens": 1024,
-                  "system": SYSTEM_PROMPT + " Current UTC date: " + datetime.now(timezone.utc).date().isoformat(),
-                  "messages": [*history, {"role": "user", "content": text}],
-                  "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
-                  "thinking": {"type": "adaptive"}, "output_config": {"effort": "low"},
-                  "inference_geo": "global", "service_tier": "standard_only"},
+            json=reply_request(text, history),
         ) as response:
             event["http_status"] = response.status_code
             event["provider_request_id"] = response.headers.get("request-id", "")[:256]

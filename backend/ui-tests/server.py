@@ -11,6 +11,7 @@ import uvicorn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.app import Settings, create_app
 from backend.llm import MODEL
+from backend.test_overlap import FakeConnect, sse_payload
 
 
 def speech(request):
@@ -32,18 +33,22 @@ class DelayedAudio(httpx.AsyncByteStream):
 def haiku(request):
     assert request.url.path == "/v1/messages"
     assert json.loads(request.content)["messages"][-1]["content"] == "A simulated question"
-    return httpx.Response(200, json={
+    payload = {
         "model": MODEL, "content": [{"type": "text", "text": "A simulated reply."}],
         "stop_reason": "end_turn", "usage": {"input_tokens": 100, "output_tokens": 20,
                                               "server_tool_use": {"web_search_requests": 0}},
-    })
+    }
+    if json.loads(request.content).get("stream"):
+        return httpx.Response(200, content=b"".join(sse_payload(payload)), headers={"Content-Type": "text/event-stream"})
+    return httpx.Response(200, json=payload)
 
 
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="whisper-stack-ui-") as folder:
         app = create_app(
-            Settings(api_key="fake-speech-key", voice_id="test_voice", anthropic_api_key="sk-ant-fake-key"),
+            Settings(api_key="speech-test-key", voice_id="test_voice", anthropic_api_key="sk-ant-haiku-test-key"),
             transport=httpx.MockTransport(speech), anthropic_transport=httpx.MockTransport(haiku),
             diagnostics_path=Path(folder) / "diagnostics.sqlite3",
+            tts_connect=FakeConnect(final_delay=0.7),
         )
         uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]), log_level="warning")

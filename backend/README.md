@@ -97,8 +97,9 @@ origin for the page and API; do not open index.html directly from disk.
 1. Click **Record** and allow microphone access when the browser asks.
 2. Speak, then click **Stop recording**. Recording also stops after 30 seconds.
 3. Listen back using the preview. **Clear** discards it without uploading.
-4. Click **Send question**. Speech recognition and Haiku finish first; then the
-   reply starts playing as ElevenLabs audio arrives. **Mute live reply** silences
+4. Click **Send question**. Speech recognition finishes, then Haiku feeds its
+   answer text into ElevenLabs while still generating. The reply plays as audio
+   arrives. **Mute live reply** silences
    playback while receipt continues. A complete WAV replay is available afterward.
 5. Compare **First audio received** with **Total processing**, and review tokens,
    search count, estimated combined cost, source links, and exchange diagnostics.
@@ -129,8 +130,9 @@ scripts, UI runtime dependencies, local storage, or cookies are required. Assets
 are served through an explicit allowlist with no-store and restrictive CSP.
 Provider-side retention still follows your account settings.
 
-The automated browser suite uses real Chrome MediaRecorder with a **synthetic**
-audio source and a separate backend whose two provider transports are mocked.
+The automated browser suite uses a deterministic synthetic WAV recording fixture
+and a separate backend with mocked Messages SSE, STT HTTP, and TTS WebSocket.
+Playback scheduling uses real Web Audio in a muted headless Chrome profile.
 It does not access the physical microphone, play sound through speakers, use
 your credentials, or write to your real usage ledger. The user subsequently
 reported one successful browser microphone exchange: correct recognition and a
@@ -147,15 +149,25 @@ The tester uses **POST /converse/stream** with the same raw recording body and
 10 MiB input cap as /converse. It returns application/x-ndjson, with X-Diagnostics-ID
 and no-store. Each line is one event:
 
-- `start`: diagnostic ID, pcm_s16le encoding, 16000 Hz mono, and cited source links.
+- `start`: diagnostic ID, pcm_s16le encoding, 16000 Hz mono, and initially empty sources.
 - `audio`: base64 PCM bytes, always whole 16-bit samples, capped at 8 MiB decoded.
-- `done`: successful completion. An `error` event instead marks incomplete audio.
+- `done`: successful completion and cited source links. An `error` event instead
+  marks incomplete audio.
 
-STT/Haiku failures before streaming are normal JSON HTTP errors with a diagnostic
-ID when available. TTS failures after HTTP 200 are explicit error events. Clients
-must require done, not treat EOF as success. The SDK's streaming endpoint uses
-1024-byte chunks, zero retries, bounded transport, and closes upstream on disconnect.
-The numeric ledger retains known token/search costs after TTS failure/disconnect.
+Validation/STT failures before streaming are normal JSON HTTP errors. After STT,
+the endpoint returns HTTP 200 with a diagnostic ID, then model/speech failures are
+explicit error events. Clients must require done, not treat EOF as success.
+One Haiku Messages request streams SSE while one ElevenLabs text-input WebSocket
+accepts complete-word final-answer fragments and returns PCM. Eight-item queues,
+a 256 KiB SSE cap, 512 KiB socket frames and an 8 MiB decoded audio cap bound the
+exchange. Speech generation uses a 50-character schedule. WebSocket redirects
+are rejected and neither provider is retried automatically. The already pinned
+websockets dependency handles async input because the installed speech SDK only
+offers synchronous text-input streaming; HTTP STT/TTS retain the official SDK.
+Disconnect cancels both model and speech work. The numeric ledger retains known
+complete token/search costs after TTS failure; an interrupted model stream with
+incomplete usage has null final cost and usage_complete=false. SSE cumulative
+usage snapshots replace previous counts, not add to them.
 No audio, text, sources, queries, or retrieved pages are stored in that ledger.
 
 The browser schedules PCM chunks using Web Audio with a small initial buffer;
@@ -163,7 +175,10 @@ it does not wait for a complete WAV. It builds the replay WAV locally after done
 **First audio received** is browser elapsed time from Send to a playable chunk.
 **Playback scheduled** estimates its scheduled start; it is not a physical-speaker
 measurement. **Total processing** is backend time through synthesis/delivery
-completion and can include client backpressure. Buffer underruns count occasions
+completion and can include client backpressure. **First answer text** is the first
+final-answer word ready for speech; **First text sent to voice** records its send
+to ElevenLabs. Model/TTS windows overlap and do not sum to total processing.
+Buffer underruns count occasions
 when playback runs out of scheduled samples. These numbers are distinct from
 time spent recording, reviewing, or listening. A slower search can add latency.
 
@@ -171,11 +186,24 @@ The system instruction now targets one sentence, at most 30 words by default,
 without introductions or offers of further help. Explicit requests for detail
 allow up to three sentences/80 words. This is a model instruction, not arbitrary
 word cutting or a claim that every live answer satisfies it. The existing 1024
-output-token safety cap and 1000-character validation remain. Recorded STT and
-Haiku are still buffered: this slice does not overlap model text generation with
-TTS and does not implement realtime microphone upload.
+output-token safety cap and 1000-character validation remain. Streaming final
+answers use a `<voice>...</voice>` protocol; the markers, reasoning, tool JSON and
+unmarked search preambles are never sent to speech. Tool calls after speech has
+started, missing markers, malformed SSE, or incomplete turns fail explicitly.
+Words already heard cannot be retracted if a later model error occurs; partial
+audio is never presented as a completed replay. The buffered /chat and /converse
+contracts are preserved. Recorded STT still finishes before model work, and
+realtime microphone upload is not implemented.
+
+The October 26 silent live overlap check reached first audio at **2.539 s** versus
+**2.737 s** in the earlier sequential check using the same question file. Audio
+arrived before the model's terminal event, proving live overlap. Different-time
+single samples do not establish typical latency; the 1–1.5 s target is not reached.
+See STATUS.md for the measured stages and local evidence paths.
 
 References: [ElevenLabs audio streaming](https://elevenlabs.io/docs/api-reference/text-to-speech/stream),
+[text-input WebSocket](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-stream-input),
+[Messages SSE](https://platform.claude.com/docs/en/build-with-claude/streaming),
 [Web Audio scheduling](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start).
 
 ## Compare speech models
@@ -229,7 +257,7 @@ their historical token-only costs. These estimates exclude ElevenLabs and actual
 account balance. Failed searches with a reported count of zero add no search fee.
 
 Search preambles are excluded from the spoken answer. Cited HTTP(S) URLs/titles
-are returned in /chat's sources or the stream's start event and shown as safe
+are returned in /chat's sources or the stream's done event and shown as safe
 links in the tester; source content remains untrusted data. Search queries and
 results are processed by Anthropic and its search infrastructure. Browser source
 links stay in page memory and are cleared with the exchange.
@@ -356,7 +384,7 @@ Sources: [Haiku specifications/pricing](https://platform.claude.com/docs/en/mode
 ## Local verification
 
 ```sh
-backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py -q
+backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py backend/test_compare_tts.py backend/test_overlap.py -q
 backend/.venv/bin/python -m pip check
 ```
 

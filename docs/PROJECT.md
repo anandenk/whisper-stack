@@ -39,6 +39,7 @@ distinguished from work the user has asked to implement.
 | D19 | Add general web search, without a weather-specific tool (user decision, 2026-10-25). | Use Anthropic's native web_search_20250305 with max_uses=1, selected by the model for current facts or explicit search requests. Haiku 5.5 capability support was verified by the Models API; the user's subsequent weather test verified one live search and a displayed citation (see STATUS.md). Keep cited links in the response/UI, not the numeric ledger, and exclude search preambles from spoken answers. Search is $0.01 per use plus tokens at the checked price; report token/search subtotals and combined estimates. Do not infer a location for local weather. |
 | D20 | Test Eleven Flash v2.5 against the current Multilingual v2 (user authorization, 2026-10-25). | One short live sample per model using the same voice/text/format and fresh connections. Flash reached the first PCM chunk in 221 ms versus 1676 ms for Multilingual in this sample; evidence and caveats are in STATUS.md. The initial pending quality/default choice was subsequently resolved by D21. No Anthropic credits were used by this TTS-only comparison. |
 | D21 | Adopt Eleven Flash v2.5 as the TTS default (user decision, 2026-10-25). | The user listened and approved Flash. Set eleven_flash_v2_5 in the application default, example configuration, and local ignored configuration. The default is verified locally; an October 26 synthetic-input live voice exchange passed with first client audio at 2.737 s and completion at 3.311 s. Browser/human listening validation for that full Flash exchange remains separate; see STATUS.md. |
+| D22 | Overlap Haiku answer generation and TTS (user authorization, 2026-10-26). | Use Messages SSE and one ElevenLabs text-input WebSocket for /converse/stream. Send whole-word final-answer fragments before Haiku completes; exclude reasoning and unmarked search preambles through a voice-marker protocol. Bounded queues, capped responses, no retries/automatic continuation, and explicit partial-stream errors preserve usage evidence. The installed ElevenLabs SDK offers synchronous text-input streaming only, so this async adapter uses the already pinned websockets dependency; HTTP speech endpoints retain the SDK. Keep /chat and buffered /converse contracts. One silent live check reached first audio at 2.539 s versus the earlier 2.737 s sample, and audio preceded the model terminal event. These separate single samples are not a statistical speed benchmark. |
 
 ## Intended component responsibilities
 
@@ -60,8 +61,8 @@ uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
 - **Development tester:** a local browser page at /tester records short questions
   only after an explicit action and uploads only after Send. It plays streamed
   speech as it arrives, offers mute/replay, and shows source links and timings.
-  STT and Haiku still finish before TTS begins. It is not device firmware or a
-  deployed client.
+  Recorded STT finishes first, then Haiku text and TTS overlap. It is not device
+  firmware or a deployed client.
 - **AI services:** speech recognition, language processing, and speech synthesis.
   Use ElevenLabs for speech recognition/synthesis and Claude Haiku 5.5 for replies.
 

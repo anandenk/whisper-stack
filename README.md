@@ -11,7 +11,8 @@
 > speech. The user also reports one successful browser microphone exchange;
 > ESP32 hardware checks remain pending.
 > A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
-> available at `/tester`, with recording preview, streamed reply playback, short
+> available at `/tester`, with recording preview, overlapping answer/speech generation,
+> streamed reply playback, short
 > default answers, bounded general web search, source links, and diagnostics.
 > Flash v2.5 is the approved speech default. Read the handoff for the next
 > verification step and current server state.

@@ -7,10 +7,14 @@ Updated: 2026-10-26 (America/New_York).
 The user listened to the comparison and approved Flash v2.5. The application and
 local configured TTS default is **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the
 George voice remain. Implementation and handoff are published on the rebuild
-branch. A complete live STT → Haiku → streamed Flash exchange now passes with a
-synthetic spoken question: first client audio 2.737 s, completion 3.311 s. Input
-speech was generated directly to a file; no physical mic or playback was used.
-The reply was saved for later review. The local server is running on
+branch. The user then authorized overlapping Haiku text generation and speech.
+The streaming route now sends final-answer words to ElevenLabs before Haiku
+finishes. One silent live check reached first client audio at **2.539 s** and
+completion at **3.164 s**; audio arrived before the model terminal event. The
+earlier sequential sample was 2.737 s / 3.311 s. This is a modest single-sample
+improvement, not an achieved 1–1.5 s target or a statistical benchmark. Both
+checks use the same synthetic question file; no physical mic/playback was used.
+Replies are saved for later review. The local server is running on
 127.0.0.1:8765; check /health before relying on process state.
 
 The Anthropic key was generated on
@@ -33,10 +37,20 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
   .env.example and local ignored backend/.env; existing credentials are preserved.
 - POST /chat returns a short Haiku answer, numeric diagnostics, and cited sources.
   Optional client history is at most six complete exchanges; no persistent text memory.
-- POST /converse returns a buffered WAV. POST /converse/stream runs recorded STT
-  and Haiku first, then streams ElevenLabs PCM as NDJSON start/audio/done/error
-  events. The client requires done; partial audio is not a complete replay.
-  Cancellation closes upstream and preserves known model/search cost.
+- POST /converse returns a buffered WAV. POST /converse/stream runs recorded STT,
+  then overlaps Haiku Messages SSE with an ElevenLabs text-input WebSocket. Text
+  and audio queues are capped at eight items. One request/connection per provider,
+  no retries, 50-character TTS generation schedule, complete-word input fragments.
+  NDJSON start/audio/done/error is preserved; citations now arrive on done.
+  The client requires done; partial audio is not a complete replay. Cancellation
+  closes both upstreams; known complete model/search usage is preserved. Missing
+  model completion/usage yields unknown final cost with usage_complete=false.
+- Streaming voice protocol uses `<voice>...</voice>` only around final answer text.
+  Tags, reasoning/signatures, search queries/results and unmarked search preambles
+  are not sent to TTS. Tool calls after speech starts, missing tags, malformed or
+  truncated SSE, overlong speech, missing speech final frames, and pause_turn
+  produce explicit errors without retries. Speech already delivered cannot be
+  retracted if the model later fails; it is never offered as a complete replay.
 - GET /tester records only after Record, previews locally, and uploads only after
   Send. Thirty-second recording cap, tracks released after capture/cancellation/
   leaving the tab. Send starts Web Audio playback as PCM arrives; mute and final
@@ -44,8 +58,9 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
   paid request. No microphone or provider call on page load.
 - First audio received (browser), estimated playback scheduling, backend first
   audio, completion, stage timings, and buffer underruns are distinct metrics.
-  Current implementation does not overlap Haiku text generation with TTS or
-  stream microphone input in real time.
+  First answer text, first text sent to voice, and model terminal-event time are
+  also recorded. Model and TTS durations overlap and do not add to total time.
+  Current implementation does not stream microphone input in real time.
 - Haiku model claude-haiku-5-5: adaptive thinking, low effort, max_tokens=1024,
   standard service/global routing, API version 2026-10-21. Omit speed: live API
   rejected it. System instruction defaults to one sentence/30 words; explicit
@@ -64,7 +79,8 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
   prompt tokens, fivefold above; native search $0.01/use plus tokens. Estimates
   exclude ElevenLabs, taxes, other account usage, discounts, and actual balance.
 - Bounds: 10 MiB audio input, 64 KiB chat JSON, 8 KiB speech JSON, 8 MiB generated
-  PCM, 256 KiB model response. Loopback/Host validation, no CORS or device auth.
+  PCM, 256 KiB model response, 512 KiB speech WebSocket frames. WebSocket redirects
+  are rejected to protect key headers. Loopback/Host validation, no CORS or device auth.
   Tester assets are allowlisted with restrictive CSP/no-store. No deployment.
 - configure_anthropic.py provides hidden local key entry. Never print/open .env
   to inspect credentials. compare_tts.py requires explicit --live for two paid
@@ -72,18 +88,25 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
 
 ## Verification and durable evidence
 
-**Local checks:** final Python suite **106 passed**, providers mocked:
+**Local checks:** final Python suite **118 passed**, providers mocked:
 
 ```sh
-backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py backend/test_compare_tts.py -q --tb=line
+backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py backend/test_compare_tts.py backend/test_overlap.py -q --tb=line
 ```
 
 The existing Starlette TestClient HTTPX deprecation warning remains; the pinned
-combination passes. Earlier pip check passed; dependencies are unchanged.
+combination passes. Current pip check passes; no packages were added. Existing
+websockets/anyio pins are now direct dependencies of the async streaming adapter.
+New checks prove text/audio before a gated model tail, whole-word/tag handling,
+reasoning/search preamble exclusion, final citations, cumulative usage accounting,
+known/unknown costs, missing final events, bounds, redirects, and disconnect cleanup.
 The latest browser suite passed **14 checks** in Chrome 155.0.8059.85 / Node 26.10.0,
 including PCM scheduling before delayed provider completion, mute/replay, safe
 sources/search costs, interruptions, permissions, and 320–1280 px layouts.
-Browser code did not change for adoption; it was not rerun for the default change.
+Current browser capture is a deterministic synthetic WAV recorder fixture; the
+earlier suite exercised native MediaRecorder separately. Playback uses real Web
+Audio in a muted headless Chrome profile. No physical microphone or audible sound.
+The current suite verifies citations delivered on done and both new text timings.
 Commands: npm --prefix backend/ui-tests ci --ignore-scripts, then
 npm --prefix backend/ui-tests test. No live provider calls in either test suite.
 Git whitespace/credential-ignore checks pass. macOS .DS_Store metadata is ignored.
@@ -109,6 +132,21 @@ backend/.venv/bin/python -m backend.compare_tts --live.
 
 **Earlier live voice/search evidence:**
 
+- **October 26 silent overlapped voice-loop check:** same question.wav as the
+  prior seasons test. One POST /converse/stream, HTTP 200, valid start/audio/done.
+  First client PCM **2538.791 ms**, completion **3163.637 ms**. Ledger ID
+  **b1a0da51-65f8-4709-8a12-8b9b4414dd7d**: STT **1112.044 ms**, first final-answer
+  words **2311.581 ms**, first text sent to TTS **2312.604 ms**, first backend PCM
+  **2531.988 ms**, model terminal event **2574.806 ms**, total **3154.407 ms**.
+  Observed model duration **1453.180 ms** and overlapping TTS window **2035.496 ms**
+  do not add to total. text_sent_before_llm_complete and audio_before_llm_complete
+  are true. Usage **3228 input / 69 output / 0 thinking**, zero search, estimated
+  model cost **$0.000357300**; ElevenLabs is separate. Reply **334,368 PCM bytes /
+  10.449 s**, valid WAV, full ffmpeg decode passed. Evidence:
+  **backend/output/overlap-voice-loop-20261026T205324Z/result.json** and reply.wav.
+  No sound, browser player, or physical microphone was used for the live check.
+  Search/citation handling is mocked in the new overlapping path, not newly
+  live-tested. The previous search check below used the prior implementation.
 - **October 26 silent full Flash voice-loop check:** the user authorized the
   agent to supply a question and required no sound playback. macOS say output-file
   mode generated “What causes the seasons on Earth? Please answer in one short
@@ -150,15 +188,16 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-The full Flash-backed backend exchange is verified. When convenient, review the
-saved reply and then confirm browser playback with Flash. Those listening/UI
+The overlapped Flash-backed backend exchange is verified. When convenient, review
+the saved reply and confirm browser playback with the updated stream. Listening
 checks were not performed during the silent run. The local backend is running;
 check /health before reuse. Recommended next project milestone is a minimal
 device capture/playback interaction once the board/parts and data cable are
 available; no firmware work is authorized by this recommendation.
-TTS switching cannot remove the separate search/model delay. Overlapping Haiku
-text/TTS generation, realtime input, firmware, deployment, and main merge remain
-outside this increment. Hardware programming still needs a micro-USB data cable.
+The latest sample waited about 1.11 s for STT and another 1.20 s before final-answer
+text, so overlap alone has not reached the proposed 1–1.5 s target. Realtime input,
+firmware, deployment, and main merge remain outside this increment. Hardware
+programming still needs a micro-USB data cable.
 
 The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 plus other checklist parts;
 exact variants/specifications/wiring are unverified. No firmware build/flash,
@@ -171,7 +210,8 @@ Publication branch: **rebuild/backend-tester** in the existing private
 https://github.com/anandenk/whisper-stack repository. Main is not merged or changed
 by this work. Earlier published commits include c4542b9 (stream/search) and
 73c3463 (TTS comparison) and 9cdb93b (Flash adoption). The subsequent documentation
-update records the silent full voice-loop check on the same branch. Code/docs
+updates record silent full voice-loop checks and the authorized overlap increment
+on the same branch. Code/docs
 are committed and pushed; no PR or new repo.
 Credentials, environments, generated audio/data and installed test dependencies
 stay local/ignored; next session must check git status --short --branch and

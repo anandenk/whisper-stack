@@ -47,23 +47,36 @@ async function pageFor(t, mode = "synthetic") {
     window.micCalls = 0;
     window.testTracks = [];
     window.testContexts = [];
-    async function syntheticStream() {
-      const audio = new AudioContext();
-      const oscillator = audio.createOscillator();
-      const destination = audio.createMediaStreamDestination();
-      oscillator.connect(destination); // Never connected to a physical speaker.
-      oscillator.start();
-      const track = destination.stream.getTracks()[0];
-      const stop = track.stop.bind(track);
-      track.stop = () => {
-        if (track.readyState === "ended") return;
-        stop(); oscillator.stop(); audio.close();
-      };
+    function syntheticStream() {
+      const track = new EventTarget();
+      track.readyState = "live";
+      track.stop = () => { track.readyState = "ended"; };
       window.testTracks.push(track);
-      window.testContexts.push(audio);
-      await audio.resume();
-      return destination.stream;
+      return {getTracks: () => [track], getAudioTracks: () => [track]};
     }
+    // Deterministic file-shaped input: recording hardware is outside these UI checks.
+    class SyntheticRecorder extends EventTarget {
+      static isTypeSupported(type) { return type.startsWith("audio/webm"); }
+      constructor(stream) { super(); this.stream = stream; this.mimeType = "audio/wav"; this.state = "inactive"; }
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const header = new ArrayBuffer(44);
+        const view = new DataView(header);
+        const text = (offset, value) => [...value].forEach((character, i) => view.setUint8(offset + i, character.charCodeAt(0)));
+        text(0, "RIFF"); view.setUint32(4, 36 + 3200, true); text(8, "WAVEfmt ");
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, 16000, true); view.setUint32(28, 32000, true);
+        view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, "data"); view.setUint32(40, 3200, true);
+        queueMicrotask(() => {
+          const event = new Event("dataavailable");
+          event.data = new Blob([header, new Uint8Array(3200)], {type: this.mimeType});
+          this.dispatchEvent(event);
+          this.dispatchEvent(new Event("stop"));
+        });
+      }
+    }
+    window.MediaRecorder = SyntheticRecorder;
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {value: async () => {
       window.micCalls += 1;
       if (mode === "denied") throw new DOMException("Denied by test", "NotAllowedError");
@@ -88,7 +101,7 @@ async function ready(page) {
 async function record(page) {
   await page.getByRole("button", {name: "Record", exact: true}).click();
   await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "recording");
-  await page.waitForTimeout(700); // Allow real MediaRecorder to emit a synthetic chunk.
+  await page.waitForTimeout(50); // Exercise the visible recording state before stopping.
   await page.getByRole("button", {name: "Stop recording"}).click();
   try {
     await page.waitForFunction(() => !document.getElementById("send").disabled);
@@ -114,6 +127,8 @@ test("page load is free; synthetic recording traverses the mocked provider pipel
   assert.equal(await page.locator("#tokens").innerText(), "100 / 20");
   assert.equal(await page.locator("#cost").innerText(), "$0.000020000");
   assert.notEqual(await page.locator("#llm-time").innerText(), "—");
+  assert.notEqual(await page.locator("#llm-first-text").innerText(), "—");
+  assert.notEqual(await page.locator("#tts-first-text").innerText(), "—");
   assert.match(await page.locator("#diagnostic-link").getAttribute("href"), /^\/diagnostics\//);
   await page.getByRole("button", {name: "Clear", exact: true}).click();
   assert.equal(await page.locator("#reply").getAttribute("src"), null);
@@ -256,11 +271,12 @@ test("search sources are safe links, and combined cost includes the search fee",
   const page = await pageFor(t);
   const id = "search-test";
   const events = [
-    {type: "start", id, encoding: "pcm_s16le", sample_rate: 16000, channels: 1, sources: [
+    {type: "start", id, encoding: "pcm_s16le", sample_rate: 16000, channels: 1, sources: []},
+    {type: "audio", pcm: Buffer.alloc(3200).toString("base64")},
+    {type: "done", id, sources: [
       {url: "https://example.com/weather", title: "Weather source"},
       {url: "javascript:alert(1)", title: "Unsafe link"},
     ]},
-    {type: "audio", pcm: Buffer.alloc(3200).toString("base64")}, {type: "done", id},
   ];
   await page.route("**/converse/stream", (route) => route.fulfill({contentType: "application/x-ndjson",
     headers: {"X-Diagnostics-ID": id}, body: events.map((event) => JSON.stringify(event) + "\n").join("")}));

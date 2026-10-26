@@ -24,10 +24,11 @@ programming remains blocked by a missing cable. On 2026-10-25 the user also
 authorized the local push-to-talk tester, with human testing deferred, and
 publishing the rebuild/backend-tester branch to the existing private repository.
 The user subsequently authorized streamed playback, shorter default answers, and
-general web search on 2026-10-25. This slice streams ElevenLabs audio after Haiku
-finishes, and caps native web search at one use per exchange. Keep search fees
-separate from token estimates. Realtime microphone upload, overlapping Haiku
-text/TTS generation, deployment, and firmware are not automatically in scope.
+general web search on 2026-10-25, then overlapping Haiku text/TTS generation on
+2026-10-26. The streaming route now feeds final-answer words from Messages SSE
+into one ElevenLabs text-input WebSocket. Native search remains capped at one
+use per exchange. Keep search fees separate from token estimates. Realtime
+microphone upload, deployment, and firmware are not automatically in scope.
 Follow STATUS.md for the current handoff.
 Flash v2.5 is the user-approved TTS default. Keep project records focused on
 durable decisions, implementation, verification, blockers, and the next action.

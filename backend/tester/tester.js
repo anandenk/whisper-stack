@@ -59,7 +59,7 @@ function clearReply() {
   $("diagnostic-link").hidden = true;
   $("diagnostic-link").removeAttribute("href");
   $("reply-status").textContent = "Your reply will appear here after you send a recording.";
-  for (const id of ["first-audio", "first-playback", "underruns", "total-time", "stt-time", "llm-time", "tts-time", "tokens", "searches", "cost"]) {
+  for (const id of ["first-audio", "first-playback", "underruns", "total-time", "stt-time", "llm-first-text", "tts-first-text", "llm-time", "tts-time", "tokens", "searches", "cost"]) {
     $(id).textContent = "—";
   }
 }
@@ -204,13 +204,15 @@ async function showDiagnostics(id) {
   const seconds = (value) => typeof value === "number" && Number.isFinite(value) ? `${(value / 1000).toFixed(2)} s` : "—";
   $("total-time").textContent = seconds(event.total_elapsed_ms);
   $("stt-time").textContent = seconds(event.stt_elapsed_ms);
+  $("llm-first-text").textContent = seconds(event.llm_first_text_elapsed_ms);
+  $("tts-first-text").textContent = seconds(event.tts_first_text_elapsed_ms);
   $("llm-time").textContent = seconds(event.elapsed_ms);
   $("tts-time").textContent = seconds(event.tts_elapsed_ms);
   $("tokens").textContent = `${event.tokens?.input_tokens ?? "—"} / ${event.tokens?.output_tokens ?? "—"}`;
   $("cost").textContent = event.estimated_cost_usd == null ? "Unknown" : `$${event.estimated_cost_usd}`;
   $("searches").textContent = event.web_search_requests ?? "Unknown";
   $("metrics").hidden = false;
-  $("diagnostic-note").textContent = "Estimated cost includes Haiku tokens and search ($0.01 per search), excluding ElevenLabs. First audio is measured in the browser; scheduled playback is an estimate, not a measurement at your speaker. Total processing excludes recording and playback.";
+  $("diagnostic-note").textContent = "Estimated cost includes Haiku tokens and search ($0.01 per search), excluding ElevenLabs. First audio is measured in the browser; scheduled playback is an estimate, not a measurement at your speaker. Stages overlap, so their durations do not add to the total. Processing excludes recording and playback.";
   $("diagnostic-note").hidden = false;
 }
 
@@ -261,7 +263,7 @@ async function sendRecording() {
       $("first-audio").textContent = `${(audio.firstReceivedMs / 1000).toFixed(2)} s`;
       $("first-playback").textContent = audio.firstScheduledMs == null ? "—" : `${(audio.firstScheduledMs / 1000).toFixed(2)} s`;
       $("underruns").textContent = String(audio.underruns);
-    });
+    }, showSources);
     const audio = player.wav();
     replyURL = URL.createObjectURL(audio);
     $("reply").src = replyURL;

@@ -1,5 +1,5 @@
 # Full environment pinned after verification on Python 3.14.7 / macOS arm64.
-# Direct dependencies: fastapi, uvicorn, httpx, python-dotenv, elevenlabs; tests: pytest.
+# Direct dependencies: fastapi, uvicorn, httpx, python-dotenv, elevenlabs, anyio, websockets; tests: pytest.
 # Regenerate deliberately in a clean backend virtual environment with pip freeze.
 annotated-doc==0.0.5
 annotated-types==0.8.0

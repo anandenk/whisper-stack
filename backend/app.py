@@ -20,8 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .diagnostics import Diagnostics
-from .llm import MODEL, generate_reply, key_format_valid
-from .streaming import audio_events
+from .llm import MODEL, generate_reply, key_format_valid, new_event
+from .overlap import ConnectOnce, overlapped_audio_events
 
 
 API_BASE = "https://api.elevenlabs.io"
@@ -134,7 +134,7 @@ class ChatInput(SpeechInput):
         return self
 
 
-def create_app(settings: Settings | None = None, transport=None, anthropic_transport=None, diagnostics_path=None) -> FastAPI:
+def create_app(settings: Settings | None = None, transport=None, anthropic_transport=None, diagnostics_path=None, tts_connect=None) -> FastAPI:
     settings = settings or Settings.from_env()
 
     async def check_upstream(upstream):
@@ -319,7 +319,7 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
             raise HTTPException(404, "Diagnostic record not found.")
         return JSONResponse(event, headers={"Cache-Control": "no-store"})
 
-    async def prepare_conversation(request, endpoint):
+    async def transcribe_conversation(request):
         # Check all local configuration before spending on any provider stage.
         if not key_format_valid(settings.anthropic_api_key) or not settings.api_key or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", settings.voice_id):
             raise HTTPException(503, "Configure Anthropic, ElevenLabs, and a voice before running the voice loop.")
@@ -330,15 +330,22 @@ def create_app(settings: Settings | None = None, transport=None, anthropic_trans
             raise HTTPException(422, "No speech was recognized; Haiku and TTS were not called.")
         if len(transcript["text"]) > 1000:
             raise HTTPException(422, "Transcript exceeds this increment's 1000-character limit; Haiku and TTS were not called.")
-        text, event, sources = await reply(transcript["text"], [], endpoint)
+        return started, stt_ms, transcript["text"]
+
+    async def prepare_conversation(request, endpoint):
+        started, stt_ms, transcript = await transcribe_conversation(request)
+        text, event, sources = await reply(transcript, [], endpoint)
         return started, stt_ms, text, event, sources
 
     @app.post("/converse/stream")
     async def converse_stream(request: Request):
-        started, stt_ms, text, event, sources = await prepare_conversation(request, "converse_stream")
+        started, stt_ms, transcript = await transcribe_conversation(request)
+        event = new_event("converse_stream")
+        app.state.diagnostics.save(event)
         return StreamingResponse(
-            audio_events(app.state.speech, settings, text, event, sources,
-                         app.state.diagnostics, started, stt_ms, MAX_SPEECH_BYTES),
+            overlapped_audio_events(app.state.llm_client, settings, transcript, event,
+                                    app.state.diagnostics, started, stt_ms, MAX_SPEECH_BYTES,
+                                    connector=tts_connect or ConnectOnce),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Diagnostics-ID": event["id"]},
         )

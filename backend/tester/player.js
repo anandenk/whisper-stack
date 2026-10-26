@@ -65,7 +65,7 @@ export class PCMPlayer {
   }
 }
 
-export async function consumeStream(response, player, onStart, onAudio) {
+export async function consumeStream(response, player, onStart, onAudio, onSources = () => {}) {
   if (response.headers.get("Content-Type")?.split(";")[0] !== "application/x-ndjson" || !response.body) {
     throw new Error("The backend returned an unexpected streaming format.");
   }
@@ -93,6 +93,7 @@ export async function consumeStream(response, player, onStart, onAudio) {
           player.append(event.pcm);
           onAudio(player);
         } else if (event.type === "done") {
+          if (Array.isArray(event.sources)) onSources(event.sources);
           done = true;
         } else if (event.type === "error") {
           throw new Error(typeof event.detail === "string" ? event.detail : "Audio stream failed.");
