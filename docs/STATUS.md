@@ -17,6 +17,14 @@ checks use the same synthetic question file; no physical mic/playback was used.
 Replies are saved for later review. The local server is running on
 127.0.0.1:8765; check /health before relying on process state.
 
+The user's subsequent microphone attempt hit “Invalid streaming event.” The
+WebSocket adapter forwarded provider-sized PCM frames as single NDJSON events,
+which could exceed the browser's 64 KiB line cap. The adapter now splits PCM into
+16 KiB events before base64 encoding, preserving all samples and the existing
+browser cap. The local server was restarted with the fix. Human retry/listening
+is pending; the correction was verified with mocked providers, without new paid
+requests or audible playback.
+
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
 Console's exact timestamp takes precedence. No scheduled reminder was requested.
@@ -42,6 +50,8 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
   and audio queues are capped at eight items. One request/connection per provider,
   no retries, 50-character TTS generation schedule, complete-word input fragments.
   NDJSON start/audio/done/error is preserved; citations now arrive on done.
+  Provider PCM is split into at most 16 KiB per audio event, safely below the
+  browser's 64 KiB event limit after base64/JSON encoding.
   The client requires done; partial audio is not a complete replay. Cancellation
   closes both upstreams; known complete model/search usage is preserved. Missing
   model completion/usage yields unknown final cost with usage_complete=false.
@@ -88,7 +98,7 @@ working boundaries, and [backend/README.md](../backend/README.md) for setup/API 
 
 ## Verification and durable evidence
 
-**Local checks:** final Python suite **118 passed**, providers mocked:
+**Local checks:** final Python suite **120 passed**, providers mocked:
 
 ```sh
 backend/.venv/bin/python -m pytest backend/test_app.py backend/test_chat.py backend/test_tester.py backend/test_streaming.py backend/test_compare_tts.py backend/test_overlap.py -q --tb=line
@@ -107,6 +117,11 @@ Current browser capture is a deterministic synthetic WAV recorder fixture; the
 earlier suite exercised native MediaRecorder separately. Playback uses real Web
 Audio in a muted headless Chrome profile. No physical microphone or audible sound.
 The current suite verifies citations delivered on done and both new text timings.
+Large-frame regression checks reproduced rejection before the correction, then
+passed with 67,774-byte and 300,000-byte provider PCM frames. They verify event
+sizes, sample alignment and byte-for-byte preservation. Browser fixtures now use
+67,774-byte provider frames, and verify successful playback scheduling plus a
+replay WAV duration matching the sample count reported by backend diagnostics.
 Commands: npm --prefix backend/ui-tests ci --ignore-scripts, then
 npm --prefix backend/ui-tests test. No live provider calls in either test suite.
 Git whitespace/credential-ignore checks pass. macOS .DS_Store metadata is ignored.
@@ -132,6 +147,13 @@ backend/.venv/bin/python -m backend.compare_tts --live.
 
 **Earlier live voice/search evidence:**
 
+- **October 26 user microphone failure:** ledger ID
+  **ef09f3f9-3ff8-441d-bc38-458466d53020** completed model work but recorded
+  pipeline_status=disconnected after 67,774 PCM bytes. STT **630.182 ms**, first
+  backend audio **1838.355 ms**, known model cost **$0.000336800**, zero searches.
+  The browser reported “Invalid streaming event”; large provider frames reproduce
+  its size-limit rejection. This attempt is not successful browser playback or
+  listening evidence. No user recording/transcript was retained in the ledger.
 - **October 26 silent overlapped voice-loop check:** same question.wav as the
   prior seasons test. One POST /converse/stream, HTTP 200, valid start/audio/done.
   First client PCM **2538.791 ms**, completion **3163.637 ms**. Ledger ID
@@ -188,9 +210,11 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-The overlapped Flash-backed backend exchange is verified. When convenient, review
-the saved reply and confirm browser playback with the updated stream. Listening
-checks were not performed during the silent run. The local backend is running;
+Next: refresh /tester and repeat the user's own-voice exchange to confirm playback
+and spoken quality after the event-size correction. The overlapping backend and
+large-frame browser path pass their automated checks; successful human playback
+after this fix remains unverified. Listening checks were not performed during
+the silent run. The local backend is running;
 check /health before reuse. Recommended next project milestone is a minimal
 device capture/playback interaction once the board/parts and data cable are
 available; no firmware work is authorized by this recommendation.

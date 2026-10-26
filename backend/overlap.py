@@ -14,6 +14,11 @@ from .model_stream import stream_reply
 from .streaming import encode_event
 
 
+# Base64 plus JSON stays below the browser's 64 KiB event limit. Provider
+# WebSocket frames can be much larger; their boundaries are not wire events.
+PCM_EVENT_BYTES = 16 * 1024
+
+
 class ConnectOnce(connect):
     """Reject redirects, including cross-origin redirects carrying xi-api-key."""
     def process_redirect(self, error):
@@ -118,7 +123,8 @@ async def overlapped_audio_events(client, settings, transcript, event, diagnosti
                         event["first_audio_elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
                         event["audio_before_llm_complete"] = not event.get("usage_complete", False)
                         diagnostics.save(event)
-                    yield encode_event("audio", pcm=base64.b64encode(pcm).decode("ascii"))
+                    for offset in range(0, len(pcm), PCM_EVENT_BYTES):
+                        yield encode_event("audio", pcm=base64.b64encode(pcm[offset:offset + PCM_EVENT_BYTES]).decode("ascii"))
             await asyncio.gather(*tasks)
         if carry or not event["audio_bytes"] or event.get("status") != "ok":
             raise ValueError("Incomplete voice exchange")

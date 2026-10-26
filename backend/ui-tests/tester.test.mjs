@@ -28,7 +28,7 @@ before(async () => {
   }
   assert.ok(ready, "Mock backend started");
   browser = await chromium.launch({channel: process.env.TEST_BROWSER_CHANNEL || "chrome", headless: true,
-    args: ["--autoplay-policy=no-user-gesture-required"]});
+    args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required"]});
 }, {timeout: 30000});
 
 after(async () => {
@@ -111,7 +111,7 @@ async function record(page) {
   assert.ok(await page.evaluate(() => window.testTracks.every((track) => track.readyState === "ended")));
 }
 
-test("page load is free; synthetic recording traverses the mocked provider pipeline once", async (t) => {
+test("page load is free; large provider audio frames reach browser playback and replay once", async (t) => {
   const page = await pageFor(t);
   let posts = 0;
   page.on("request", (request) => { if (request.method() === "POST") posts += 1; });
@@ -122,6 +122,12 @@ test("page load is free; synthetic recording traverses the mocked provider pipel
   assert.equal(posts, 0, "Review does not upload audio");
   await page.evaluate(() => { const button = document.getElementById("send"); button.click(); button.click(); });
   await page.waitForFunction(() => document.getElementById("capture-state").dataset.phase === "done");
+  const audioBytes = await page.locator("#diagnostic-link").evaluate(async (element) =>
+    (await (await fetch(element.href)).json()).audio_bytes);
+  assert.ok(audioBytes >= 67774, "Large provider audio was preserved");
+  await page.waitForFunction(() => document.getElementById("reply").readyState >= 1);
+  const replaySeconds = await page.locator("#reply").evaluate((element) => element.duration);
+  assert.ok(Math.abs(replaySeconds - audioBytes / 32000) < 1 / 16000, "Replay duration preserves all PCM samples");
   assert.equal(posts, 1, "Double click cannot duplicate paid work");
   assert.equal(await page.locator("#reply").isVisible(), true);
   assert.equal(await page.locator("#tokens").innerText(), "100 / 20");

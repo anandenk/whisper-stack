@@ -49,6 +49,6 @@ if __name__ == "__main__":
             Settings(api_key="speech-test-key", voice_id="test_voice", anthropic_api_key="sk-ant-haiku-test-key"),
             transport=httpx.MockTransport(speech), anthropic_transport=httpx.MockTransport(haiku),
             diagnostics_path=Path(folder) / "diagnostics.sqlite3",
-            tts_connect=FakeConnect(final_delay=0.7),
+            tts_connect=FakeConnect(final_delay=0.7, audio_bytes=67774),
         )
         uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]), log_level="warning")

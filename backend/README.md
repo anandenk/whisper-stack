@@ -151,6 +151,8 @@ and no-store. Each line is one event:
 
 - `start`: diagnostic ID, pcm_s16le encoding, 16000 Hz mono, and initially empty sources.
 - `audio`: base64 PCM bytes, always whole 16-bit samples, capped at 8 MiB decoded.
+  Each event contains at most 16 KiB decoded PCM; larger provider frames are split
+  so base64/JSON lines stay below the browser's 64 KiB event limit.
 - `done`: successful completion and cited source links. An `error` event instead
   marks incomplete audio.
 

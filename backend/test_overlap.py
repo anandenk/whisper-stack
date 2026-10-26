@@ -49,9 +49,10 @@ def sse_payload(payload, *, wrap=True):
 
 
 class FakeSocket:
-    def __init__(self, mode="ok", final_delay=0):
+    def __init__(self, mode="ok", final_delay=0, audio_bytes=3200):
         self.mode = mode
         self.final_delay = final_delay
+        self.audio_bytes = audio_bytes
         self.received = []
         self.queue = asyncio.Queue()
         self.closed = False
@@ -65,7 +66,7 @@ class FakeSocket:
             assert value["try_trigger_generation"] is True
             assert "<voice>" not in value["text"] and "</voice>" not in value["text"]
             if self.mode not in {"empty", "no_final"}:
-                pcm = b"x" if self.mode == "odd" else b"\x01\x00" * 1600
+                pcm = b"x" if self.mode == "odd" else b"\x01\x00" * (self.audio_bytes // 2)
                 await self.queue.put(json.dumps({"audio": base64.b64encode(pcm).decode()}))
         elif self.mode != "no_final":
             await self.queue.put(json.dumps({"isFinal": True}))
@@ -88,16 +89,17 @@ class FakeSocket:
 
 
 class FakeConnect:
-    def __init__(self, mode="ok", final_delay=0):
+    def __init__(self, mode="ok", final_delay=0, audio_bytes=3200):
         self.mode = mode
         self.final_delay = final_delay
-        self.socket = FakeSocket(mode, final_delay)
+        self.audio_bytes = audio_bytes
+        self.socket = FakeSocket(mode, final_delay, audio_bytes)
         self.calls = 0
 
     @asynccontextmanager
     async def __call__(self, uri, **options):
         self.calls += 1
-        self.socket = FakeSocket(self.mode, self.final_delay)
+        self.socket = FakeSocket(self.mode, self.final_delay, self.audio_bytes)
         assert uri.startswith("wss://api.elevenlabs.io/v1/text-to-speech/test_voice/stream-input?")
         assert "output_format=pcm_16000" in uri and "api_key" not in uri
         assert options["additional_headers"] == {"xi-api-key": "speech-test-key"}
@@ -168,6 +170,20 @@ def test_ws_failures_are_explicit_sanitized_and_closed(tmp_path, monkeypatch, mo
         assert record["estimated_cost_usd"] == "0.000750000"
     else:
         assert record["estimated_cost_usd"] is None
+
+
+@pytest.mark.parametrize("audio_bytes", [67774, 300000])
+def test_large_provider_audio_is_split_for_browser_without_losing_samples(tmp_path, audio_bytes):
+    client, connector = build_client(tmp_path, connector=FakeConnect(audio_bytes=audio_bytes))
+    with client:
+        response, frames, record = exchange(client)
+    assert frames[-1]["type"] == "done" and record["pipeline_status"] == "ok"
+    assert all(len(line) <= 65536 for line in response.iter_lines())
+    pcm = [base64.b64decode(frame["pcm"]) for frame in frames if frame["type"] == "audio"]
+    assert all(len(chunk) % 2 == 0 for chunk in pcm)
+    sends = sum(bool(item["text"]) for item in connector.socket.received[1:])
+    assert b"".join(pcm) == b"\x01\x00" * (audio_bytes // 2) * sends
+    assert sum(map(len, pcm)) == record["audio_bytes"]
 
 
 def test_missing_message_stop_is_not_complete_or_free(tmp_path):
