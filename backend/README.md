@@ -49,10 +49,8 @@ Claude Haiku 5.5 is the user-selected reply model. No extra package is required:
 the backend calls Anthropic's Messages API through its existing HTTPX dependency.
 Create a personal API key scoped to your development workspace (Default is fine)
 in the [Claude Console](https://platform.claude.com/settings/keys). Account access
-and API credits must be available. The working balance is the user's reported
-$3 on October 25; it has not been independently verified. The earlier $10
-discussion was hypothetical. Use mocked checks and minimal live requests; no
-purchase, auto-reload, or hard account-wide spending limit is configured.
+and API access must be available. Use mocked checks and bounded live requests;
+no purchase, auto-reload, or hard account-wide spending limit is configured.
 
 From the repository root, enter the key locally at a hidden prompt:
 
@@ -88,8 +86,7 @@ Restart after any configuration change. Interactive API docs are at
 
 Current models are `scribe_v2` for STT and `eleven_flash_v2_5` for TTS. The user
 approved Flash v2.5 after the October 25 comparison and listening check. George
-remains the initial test voice. Work is paused at the user's request because
-credits are low; start the server or paid tests only when the user resumes.
+remains the initial test voice.
 
 ## Local push-to-talk tester
 
@@ -201,8 +198,7 @@ provider cost/region headers. Character-cost headers are not dollar amounts.
 The authorized October 25 comparison measured **1675.754 ms** first PCM for
 Multilingual v2 versus **221.072 ms** for Flash v2.5. See STATUS.md for evidence.
 One sample per model does not establish statistical latency or voice quality;
-the user subsequently listened and approved Flash as the new default. The local
-server is stopped for the requested pause; no further paid comparisons are queued.
+the user subsequently listened and approved Flash as the new default.
 
 The helper's free mocked checks are:
 

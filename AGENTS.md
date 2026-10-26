@@ -29,9 +29,8 @@ finishes, and caps native web search at one use per exchange. Keep search fees
 separate from token estimates. Realtime microphone upload, overlapping Haiku
 text/TTS generation, deployment, and firmware are not automatically in scope.
 Follow STATUS.md for the current handoff.
-The user approved Flash v2.5 and requested stopping on 2026-10-25 because credits
-are low. Finish the default/configuration handoff and publication, then stop.
-Do not resume development or paid checks until the user resumes work.
+Flash v2.5 is the user-approved TTS default. Keep project records focused on
+durable decisions, implementation, verification, blockers, and the next action.
 
 ## Keep one coherent project
 

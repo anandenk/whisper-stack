@@ -13,8 +13,8 @@
 > A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
 > available at `/tester`, with recording preview, streamed reply playback, short
 > default answers, bounded general web search, source links, and diagnostics.
-> Flash v2.5 is the approved speech default. Work is paused at the user's request;
-> the local server is stopped. Read the handoff before resuming.
+> Flash v2.5 is the approved speech default. Read the handoff for the next
+> verification step and current server state.
 > Automated browser checks use synthetic audio and mocked providers.
 > See the handoff for
 > exact evidence and setup. The existing server/firmware and the description

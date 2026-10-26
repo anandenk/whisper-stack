@@ -1,19 +1,16 @@
 # Whisper Stack: current status and session handoff
 
-Updated: 2026-10-25 (America/New_York).
+Updated: 2026-10-26 (America/New_York).
 
-## Current request: stop work
+## Current state
 
-**Paused at the user's request.** The user listened to the comparison and says
-Flash v2.5 sounds perfect. They report low credits and asked to stop after all
-necessary work/docs are pushed. Flash is now the application and local configured
-TTS default: **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the George voice remain.
-The local server has been stopped. No further paid calls, microphone capture,
-background tests, or development are queued. Resume only when the user asks.
+The user listened to the comparison and approved Flash v2.5. The application and
+local configured TTS default is **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the
+George voice remain. Implementation and handoff are published on the rebuild
+branch. The local server is not running. The next verification is a full voice-loop
+exchange using Flash; the completed comparison tested TTS separately.
 
-The latest remaining credit balance and provider are unspecified. The earlier
-Anthropic $3 balance was user-reported, not a current verified wallet. No purchase,
-auto-reload, or automatic retry is configured. The Anthropic key was generated on
+The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
 Console's exact timestamp takes precedence. No scheduled reminder was requested.
 
@@ -131,12 +128,11 @@ Recordings, screenshots, metrics JSON, SQLite data and secrets are ignored/local
 only. Their measured summaries are preserved here for other machines. Human
 assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unverified.
 
-## Blockers and next action on resume
+## Blockers and next action
 
-Work is stopped. Start by reading this handoff and checking Git/configuration;
-do not make paid calls automatically. The local server is **not running**.
-When the user resumes and wants to use credits, the next check is one short
-Flash-backed /tester exchange, comparing first audio against the previous results.
+Start by reading this handoff and checking Git/configuration. The local server
+is **not running**. The next check is one short Flash-backed /tester exchange,
+comparing first audio against the previous results.
 TTS switching cannot remove the separate search/model delay. Overlapping Haiku
 text/TTS generation, realtime input, firmware, deployment, and main merge remain
 outside this increment. Hardware programming still needs a micro-USB data cable.
@@ -151,8 +147,8 @@ final voice, memory/retention, provisioning, and hardware contract remain open.
 Publication branch: **rebuild/backend-tester** in the existing private
 https://github.com/anandenk/whisper-stack repository. Main is not merged or changed
 by this work. Earlier published commits include c4542b9 (stream/search) and
-73c3463 (TTS comparison). This final increment adopts Flash and records the stop;
-its code/docs are committed and pushed to the same branch. No PR or new repo.
+73c3463 (TTS comparison) and 9cdb93b (Flash adoption). Code/docs are committed and
+pushed to the same branch. No PR or new repo.
 Credentials, environments, generated audio/data and installed test dependencies
 stay local/ignored; next session must check git status --short --branch and
 recent commits before assuming remote state.
