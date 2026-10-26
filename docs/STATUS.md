@@ -21,9 +21,11 @@ The user's subsequent microphone attempt hit “Invalid streaming event.” The
 WebSocket adapter forwarded provider-sized PCM frames as single NDJSON events,
 which could exceed the browser's 64 KiB line cap. The adapter now splits PCM into
 16 KiB events before base64 encoding, preserving all samples and the existing
-browser cap. The local server was restarted with the fix. Human retry/listening
-is pending; the correction was verified with mocked providers, without new paid
-requests or audible playback.
+browser cap. The local server was restarted with the fix. The user subsequently
+retried with their own voice and reported that it “works pretty great,” confirming
+successful browser use and user-accepted spoken quality after the correction.
+This is user-reported acceptance, not an independent quality/latency benchmark.
+The agent's correction checks used mocked providers without audible playback.
 
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
@@ -147,6 +149,10 @@ backend/.venv/bin/python -m backend.compare_tts --live.
 
 **Earlier live voice/search evidence:**
 
+- **October 26 user acceptance after the event-size fix:** the user retried the
+  tester with their own voice and reported that it “works pretty great.” This
+  resolves the pending human playback/quality check for the updated stream; no
+  new timing measurements or independent transcription assessment were supplied.
 - **October 26 user microphone failure:** ledger ID
   **ef09f3f9-3ff8-441d-bc38-458466d53020** completed model work but recorded
   pipeline_status=disconnected after 67,774 PCM bytes. STT **630.182 ms**, first
@@ -210,12 +216,10 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-Next: refresh /tester and repeat the user's own-voice exchange to confirm playback
-and spoken quality after the event-size correction. The overlapping backend and
-large-frame browser path pass their automated checks; successful human playback
-after this fix remains unverified. Listening checks were not performed during
-the silent run. The local backend is running;
-check /health before reuse. Recommended next project milestone is a minimal
+The user accepted their own-voice browser test after the event-size correction.
+The overlapping backend and large-frame browser path also pass automated checks.
+The local backend is running; check /health before reuse.
+Recommended next project milestone is a minimal
 device capture/playback interaction once the board/parts and data cable are
 available; no firmware work is authorized by this recommendation.
 The latest sample waited about 1.11 s for STT and another 1.20 s before final-answer
