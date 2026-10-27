@@ -38,9 +38,10 @@ interruptions, quiet waiting and cross-session memory recall. The user selected
 ElevenLabs’ official browser WebRTC client (D24). Use the SDK’s
 audio processing; do not add playback-time microphone muting or custom echo
 cancellation. This is not permission to migrate or expand the working backend. The
-user authorized merging the completed rebuild into main (D26). The main README
-rewrite is explicitly for the next turn: short old/new project descriptions and
-other relevant information, without starting hardware or feature work.
+user authorized merging the completed rebuild into main (D26). The README now
+provides short old/new project descriptions and links to setup and status. Keep
+the front page concise; detailed historical instructions belong in the archive.
+This documentation work does not authorize hardware or feature work.
 
 ## Keep one coherent project
 
@@ -68,8 +69,9 @@ the rebuild inherits the old architecture, dependencies, or configuration.
 
 The old context is preserved in
 [notes/archive/claude-context-2026-05.md](notes/archive/claude-context-2026-05.md).
-`plan.md`, the existing notes, and the historical portion of README.md describe
-that implementation. They are evidence, not the current roadmap or instructions.
+`plan.md`, the existing notes, and the
+[archived README](notes/archive/README-before-overview-2026-10-26.md) describe that
+implementation. They are evidence, not the current roadmap or instructions.
 Firmware v2/v3 names in those files are historical, not names for the new rebuild.
 
 ## Evidence and handoff

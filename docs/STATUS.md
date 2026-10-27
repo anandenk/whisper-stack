@@ -34,8 +34,11 @@ speech recognition, natural interruptions, quiet waiting after answers, and
 hosted Mem0 preference recall in a new session. These are user-reported live
 results, not independent acoustic, latency or memory-reliability benchmarks.
 The completed rebuild was merged into main through PR #1 (D26), verified on
-GitHub and in the local checkout. The README rewrite is selected for the next
-turn and has not been started.
+GitHub and in the local checkout. The subsequent README rewrite is complete
+locally: 88 lines introducing the old project, current rebuild, validation,
+startup, repository layout and license. The previous 459-line README is preserved
+in [the archive](../notes/archive/README-before-overview-2026-10-26.md), with
+relative links rebased. The saved project one-liner is retained verbatim.
 
 ### Current implementation
 
@@ -320,9 +323,13 @@ waiting and hosted memory recall across sessions are accepted by user testing.
 No browser-startup or credential blocker is currently reported. The user
 requested and completed merge through
 [PR #1](https://github.com/anandenk/whisper-stack/pull/1).
-Next turn: collaboratively rewrite the main README with brief old/new project
-descriptions and other relevant information. Do not start that rewrite in the
-merge turn, or implicitly start hardware, migration or additional features.
+The next requested documentation increment is now ready for review: the main
+README gives short old/new descriptions and links to the detailed guides. Local
+links and whitespace checks pass; archive verification confirms the full prior
+README is retained apart from link rebasing. No code, configuration, service or
+provider state changed, so no runtime tests were rerun for this documentation-only
+edit. Next action: review the new README with the user. Do not implicitly start
+hardware, migration or additional features.
 Broader retention policy, migration, web-search parity and deployment remain
 choices to revisit together.
 
@@ -351,8 +358,9 @@ repository. Merge commit: **e1e064ec92f4fef668183d8283d9d2067edb21de**,
 2026-10-26 (America/New_York). GitHub reported MERGED, and this checkout was
 switched to main and fast-forwarded to the remote merge commit. Continue on main.
 The rebuild branch and all incremental history are preserved; no squash or
-history rewrite. The README is unchanged from the reviewed rebuild and its
-rewrite remains explicitly deferred to the next turn.
+history rewrite. After that merge, the user started the separate README rewrite.
+Current README/archive/handoff edits are local, uncommitted and unpushed on main;
+the published main remains c4b0999 until this documentation increment is reviewed.
 
 Published rebuild commits include c4542b9 (stream/search), 73c3463 (TTS comparison),
 9cdb93b (Flash adoption), 125afe0 (overlap), bef3f53 (large PCM frames), and
