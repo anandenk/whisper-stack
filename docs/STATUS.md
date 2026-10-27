@@ -328,8 +328,8 @@ README gives short old/new descriptions and links to the detailed guides. Local
 links and whitespace checks pass; archive verification confirms the full prior
 README is retained apart from link rebasing. No code, configuration, service or
 provider state changed, so no runtime tests were rerun for this documentation-only
-edit. Next action: review the new README with the user. Do not implicitly start
-hardware, migration or additional features.
+edit. Next action: none selected; the user requested publication and wrap-up. Do not
+implicitly start hardware, migration or additional features.
 Broader retention policy, migration, web-search parity and deployment remain
 choices to revisit together.
 
@@ -359,8 +359,8 @@ repository. Merge commit: **e1e064ec92f4fef668183d8283d9d2067edb21de**,
 switched to main and fast-forwarded to the remote merge commit. Continue on main.
 The rebuild branch and all incremental history are preserved; no squash or
 history rewrite. After that merge, the user started the separate README rewrite.
-Current README/archive/handoff edits are local, uncommitted and unpushed on main;
-the published main remains c4b0999 until this documentation increment is reviewed.
+The user authorized publication of the README/archive/handoff update, committed
+and pushed to main as e487536. The documentation increment is complete.
 
 Published rebuild commits include c4542b9 (stream/search), 73c3463 (TTS comparison),
 9cdb93b (Flash adoption), 125afe0 (overlap), bef3f53 (large PCM frames), and
