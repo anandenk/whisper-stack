@@ -33,8 +33,9 @@ The agent's correction checks used mocked providers without audible playback.
 speech recognition, natural interruptions, quiet waiting after answers, and
 hosted Mem0 preference recall in a new session. These are user-reported live
 results, not independent acoustic, latency or memory-reliability benchmarks.
-The user subsequently requested merging the completed rebuild into main (D26).
-The README rewrite is selected for the next turn and has not been started.
+The completed rebuild was merged into main through PR #1 (D26), verified on
+GitHub and in the local checkout. The README rewrite is selected for the next
+turn and has not been started.
 
 ### Current implementation
 
@@ -317,7 +318,8 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 The current increment is complete: WebRTC interaction, interruption, quiet
 waiting and hosted memory recall across sessions are accepted by user testing.
 No browser-startup or credential blocker is currently reported. The user
-requested merge through [PR #1](https://github.com/anandenk/whisper-stack/pull/1).
+requested and completed merge through
+[PR #1](https://github.com/anandenk/whisper-stack/pull/1).
 Next turn: collaboratively rewrite the main README with brief old/new project
 descriptions and other relevant information. Do not start that rewrite in the
 merge turn, or implicitly start hardware, migration or additional features.
@@ -343,17 +345,20 @@ final voice, memory/retention, provisioning, and hardware contract remain open.
 
 ## Git and historical context
 
-Integration: [PR #1](https://github.com/anandenk/whisper-stack/pull/1) brings
-**rebuild/backend-tester** into **main** in the existing private
-https://github.com/anandenk/whisper-stack repository, per D26. Continue on main
-after verifying the merge and local/remote refs. Preserve the feature branch and
-its incremental history; no new repository, squash or history rewrite. The
-README rewrite is deferred to the next turn.
+[PR #1](https://github.com/anandenk/whisper-stack/pull/1) is **merged** into
+**main** in the existing private https://github.com/anandenk/whisper-stack
+repository. Merge commit: **e1e064ec92f4fef668183d8283d9d2067edb21de**,
+2026-10-26 (America/New_York). GitHub reported MERGED, and this checkout was
+switched to main and fast-forwarded to the remote merge commit. Continue on main.
+The rebuild branch and all incremental history are preserved; no squash or
+history rewrite. The README is unchanged from the reviewed rebuild and its
+rewrite remains explicitly deferred to the next turn.
 
 Published rebuild commits include c4542b9 (stream/search), 73c3463 (TTS comparison),
 9cdb93b (Flash adoption), 125afe0 (overlap), bef3f53 (large PCM frames), and
-c9064cc (Agents + Mem0). Final merge verification must confirm PR state and that
-local main matches remote main. Commit/PR messages omit co-author and generated-by
+c9064cc (Agents + Mem0). All 149 local checks passed on the reviewed source;
+GitHub had no configured Actions checks and reported the PR cleanly mergeable.
+Commit/PR messages omit co-author and generated-by
 attribution at the user's request. Credentials, environments, generated audio/data
 and installed test dependencies remain local/ignored; they do not transfer with
 checkout. Check git status and recent commits on every session.
