@@ -1,0 +1,16 @@
+{
+  "name": "whisper-stack-d23-webrtc-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild web/client.js --bundle --format=esm --outfile=web/dist/client.js",
+    "test": "node --test web/client.test.mjs"
+  },
+  "dependencies": {
+    "@elevenlabs/client": "1.31.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.64.1"
+  }
+}

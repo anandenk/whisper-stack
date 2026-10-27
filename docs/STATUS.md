@@ -27,30 +27,101 @@ successful browser use and user-accepted spoken quality after the correction.
 This is user-reported acceptance, not an independent quality/latency benchmark.
 The agent's correction checks used mocked providers without audible playback.
 
-The user wants the next session to perform only the basic ElevenLabs Agents +
-hosted Mem0 integration, then work with them on testing and refinement (D23).
-Earlier research into alternatives to the first build's Markdown memory is in
-[Voice assistant memory approaches](<../reports/Voice assistant memory approaches.md>)
-and remains research rather than the selected implementation plan. The user
-accepts Mem0's currently advertised free allowance for the initial evaluation;
-actual Mem0 account enrollment and credentials have not been verified. No setup
-was started in this session, and no Mem0 key is known to be configured.
+## D23–D25 isolated Agents + Mem0 experiment (complete)
 
-A read-only authenticated GET /v1/convai/llm/list on October 26 returned HTTP 200
-and 111 model entries, including native claude-haiku-5-5 (not deprecated), with
-parallel tool calls and configurable reasoning effort. The static documentation
-listed Haiku 4.5 but omitted 5.5. This confirms catalog availability, not a tested
-agent conversation or Mem0 integration; is_approved_for_workspace was null.
-Local ignored evidence: backend/output/elevenagents-models-20261027T022531Z.json.
-No agent was created, no credentials changed, and no voice/model generation ran.
-The next session is authorized to create a separate test agent with native
-Haiku 5.5 and configure the basic memory integration, following
-https://docs.mem0.ai/integrations/elevenlabs. Preserve the working backend and
-existing agents. Request only missing credentials or consequential choices.
-Stop after basic configuration and review readiness with the user; collaborate
-on the first live tests and subsequent changes. Do not automatically run paid
-conversations, play audio, purchase anything, expand features, or migrate the
-working backend. This is a limited integration experiment, not a migration.
+**Basic setup and collaborative validation are complete.** The user accepted
+speech recognition, natural interruptions, quiet waiting after answers, and
+hosted Mem0 preference recall in a new session. These are user-reported live
+results, not independent acoustic, latency or memory-reliability benchmarks.
+No next milestone has been selected or started.
+
+### Current implementation
+
+- Separate agent **Whisper Stack - D23 Haiku 5.5 + Mem0 test**,
+  `agent_placeholder_000000000000000000`: native `claude-haiku-5-5`, low effort,
+  1024-token cap, disabled alternate LLM fallback, required authentication, and
+  response-returning `addMemories`/`retrieveMemories` client tools.
+- Preferred local tester: **http://127.0.0.1:8766**, served by
+  `experiments/agents-mem0/web_server.py`. Check process state before reuse.
+  Start activates microphone/speaker and obtains a private-agent WebRTC token;
+  End closes it. Page load makes no provider call or microphone request.
+- Official `@elevenlabs/client` 1.31.0 owns capture/playback; its LiveKit defaults
+  enable echo cancellation, noise suppression and gain control. No custom DSP,
+  raw-PCM browser transport, playback-time microphone muting or fallback transport.
+  The SDK's unmodified worklet is served locally for CSP compatibility.
+- A loopback-only FastAPI bridge keeps both API keys server-side and forwards
+  memory tools to hosted Mem0 using fixed USER_ID `whisper-stack-d23-test`.
+  It checks Host/Origin/local-page token, bounds tool arguments, disables caching,
+  sanitizes failures, and exposes no CORS. Memory initializes on the first tool
+  call. No application-level retries; vendor transport recovery retains defaults.
+- Native `conversation_config.turn.turn_timeout=-1` disables seven-second idle
+  check-ins (D25). The session stays available for user-initiated follow-ups;
+  the unchanged maximum duration is 600 seconds. PATCH/GET readback verified only
+  the intended setting changed. Local agent.json reflects current configuration.
+- The English-agent API rejected Flash v2.5; this test uses Flash v2 and George.
+  WebRTC negotiates its own audio transport. The existing backend remains on its
+  approved Flash v2.5 default. No backend, legacy firmware or deployment changes.
+- Mem0 V3 pending saves are reported as submitted, not confirmed available.
+  The user separately confirmed recall after starting a new session. Browser
+  transcripts remain in page memory; numeric backend diagnostics do not cover
+  this separate hosted Agents path.
+- ElevenLabs defaults record voice and retain conversations indefinitely
+  (retention_days=-1); built-in user memory is disabled. Mem0 persists submitted
+  facts. Long-term retention policy remains undecided. Credentials, provider
+  readbacks, recordings, generated bundles and dependencies are local/ignored.
+
+### Verified and retained context
+
+**Final checks for publication:** 7 experiment Python checks and 8 Chrome browser
+checks pass with mocked providers/synthetic input. The unchanged working-backend
+Python suite passes **120 tests**, with its existing Starlette/HTTPX deprecation
+warning. Both Python environments pass pip check. Read-only live verification
+passes Mem0 ping, native Haiku agent authentication and both tool definitions;
+no paid model/audio generation or memory writes were initiated for publication.
+
+Browser tests load the real bundled SDK and official worklet under CSP with
+external requests blocked. Mocked sessions verify WebRTC selection, supported
+signalling option, no playback muting, safe transcript display, memory tools,
+End, cancellation and token/permission/connection failures with redacted errors.
+The real ready page also loaded without errors or external requests. These
+checks do not substitute for the user's live acceptance or ESP32 verification.
+
+Chrome initially failed with “could not establish signal connection: Failed to
+fetch.” Token auth and server-side validation succeeded; Edge worked. The user
+then disabled multiple Chrome privacy extensions, including Privacy Badger among
+those disabled, and reported that Chrome works too. This is extension
+interference; the specific extension/rule was not isolated. Do not attribute the
+failure specifically to Privacy Badger. The supported SDK option
+`webRtc.singlePeerConnection=false` remains from diagnosis, but did not fix
+Chrome on its own and its necessity is unverified. No further diagnosis is needed.
+
+The earlier Python tester is preserved as reference. Its local `audio.py`
+correction fixes the ElevenLabs 2.74.1 microphone-thread loop handoff; two
+synthetic regressions cover it. The user confirmed input worked after that fix
+but reported speaker feedback, prompting the official WebRTC client (D24).
+
+### Resume and reproduce
+
+Setup, pinned dependencies, existing remote resource IDs, credentials, test
+commands, accepted test procedure and troubleshooting are in the
+[experiment README](../experiments/agents-mem0/README.md). From repository root:
+
+```sh
+npm --prefix experiments/agents-mem0 ci
+npm --prefix experiments/agents-mem0 run build
+npm --prefix experiments/agents-mem0 test
+experiments/agents-mem0/.venv/bin/python -m unittest discover -s experiments/agents-mem0 -p 'test_*.py' -v
+experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/run.py --verify
+experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/web_server.py
+```
+
+The final command starts only the local page; the user must click Start for a
+live conversation. Keep existing hosted resources; checkout does not provision
+another agent. Local ignored readback evidence includes
+`experiments/agents-mem0/output/idle-checkins-verification.json` and
+`webrtc-verification.json`; the relevant outcomes are summarized above for other
+machines. No further feature, hardware, migration or deployment work follows
+from completing or publishing this experiment.
 
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
@@ -241,11 +312,13 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-Next session: inspect existing agent/configuration state, obtain a Mem0 key
-securely if missing, then create/configure the isolated Haiku 5.5 test agent and
-basic Mem0 save/retrieve tools. Stop at a reviewable setup and work with the user
-on testing. Broader retention policy, migration, web-search parity and deployment
-remain decisions to revisit together, rather than extra implementation tasks.
+The current increment is complete: WebRTC interaction, interruption, quiet
+waiting and hosted memory recall across sessions are accepted by user testing.
+No browser-startup or credential blocker is currently reported. Next action:
+review or choose further work with the user only when requested. Do not
+implicitly start hardware, migration or additional features.
+Broader retention policy, migration, web-search parity and deployment remain
+choices to revisit together.
 
 The user accepted their own-voice browser test after the event-size correction.
 The overlapping backend and large-frame browser path also pass automated checks.
@@ -270,8 +343,9 @@ https://github.com/anandenk/whisper-stack repository. Main is not merged or chan
 by this work. Earlier published commits include c4542b9 (stream/search) and
 73c3463 (TTS comparison) and 9cdb93b (Flash adoption). The subsequent documentation
 updates record silent full voice-loop checks and the authorized overlap increment
-on the same branch. Code/docs
-are committed and pushed; no PR or new repo.
+on the same branch. This session publishes the D23–D25 experiment, tests and
+handoff on that branch; no PR, main merge or new repository. Commit messages
+omit co-author and generated-by attribution at the user's request.
 Credentials, environments, generated audio/data and installed test dependencies
 stay local/ignored; next session must check git status --short --branch and
 recent commits before assuming remote state.

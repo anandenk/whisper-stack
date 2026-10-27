@@ -14,8 +14,14 @@
 > available at `/tester`, with recording preview, overlapping answer/speech generation,
 > streamed reply playback, short
 > default answers, bounded general web search, source links, and diagnostics.
-> Flash v2.5 is the approved speech default. Read the handoff for the next
-> verification step and current server state.
+> Flash v2.5 is the approved speech default.
+>
+> A separate [ElevenLabs Agents + Mem0 experiment](experiments/agents-mem0/README.md)
+> uses native Haiku 5.5 and the official WebRTC browser client. The user validated
+> speech recognition, interruptions, quiet waiting, and memory recall across new
+> sessions. It preserves the working backend and May implementation; device
+> firmware, deployment, and migration remain outside this increment. Read the
+> handoff for current server state and verification boundaries.
 > Automated browser checks use synthetic audio and mocked providers.
 > See the handoff for
 > exact evidence and setup. The existing server/firmware and the description

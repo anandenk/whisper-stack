@@ -1,0 +1,16 @@
+:root {color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; background: #141817; color: #e9eeea;}
+body {margin: 0; padding: 40px 24px;}
+main {max-width: 720px; margin: 0 auto;}
+.eyebrow {font-size: 12px; letter-spacing: .14em; color: #a3b5a8;}
+h1 {font-size: clamp(36px, 7vw, 56px); line-height: 1.1; font-weight: 600; margin: 24px 0 16px;}
+h2 {font-size: 18px; margin-top: 36px;}
+.notice, .note {color: #b7c1b9; font-size: 14px;}
+.controls {display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 16px;}
+button {font: inherit; padding: 12px 20px; border-radius: 8px; border: 1px solid #5d7666; color: #e9eeea; background: #283e30; cursor: pointer;}
+button:disabled {opacity: .45; cursor: default;}
+button:focus-visible {outline: 3px solid #bbddc5; outline-offset: 3px;}
+#status {font-weight: 600;}
+#levels, #empty {font-size: 14px; color: #a3b5a8;}
+#transcript {padding-left: 0; list-style: none;}
+#transcript li {padding: 12px 0; border-bottom: 1px solid #344138; overflow-wrap: anywhere; white-space: pre-wrap;}
+.note {margin-top: 30px;}

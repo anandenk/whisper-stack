@@ -10,6 +10,14 @@ controls, and enclosure. The first deliverable is a USB-powered desk device that
 uses Wi-Fi and cloud processing. In its eventual deployed form it must work with
 the workstation switched off. Fully offline AI processing is not a requirement.
 
+## Saved project one-liner
+
+> Haiku 5.5 + Mem0, using ElevenLabs’ WebRTC audio.
+
+Saved at the user's request on 2026-10-26 for a future finished-project
+description or showcase. This wording currently describes the isolated Agents
+experiment; final project architecture remains subject to later decisions.
+
 ## Decisions from the revival discussion
 
 Initial decisions established with the user on 2026-10-19; updates are dated
@@ -41,6 +49,34 @@ distinguished from work the user has asked to implement.
 | D21 | Adopt Eleven Flash v2.5 as the TTS default (user decision, 2026-10-25). | The user listened and approved Flash. Set eleven_flash_v2_5 in the application default, example configuration, and local ignored configuration. The default is verified locally; an October 26 synthetic-input live voice exchange passed with first client audio at 2.737 s and completion at 3.311 s. Browser/human listening validation for that full Flash exchange remains separate; see STATUS.md. |
 | D22 | Overlap Haiku answer generation and TTS (user authorization, 2026-10-26). | Use Messages SSE and one ElevenLabs text-input WebSocket for /converse/stream. Send whole-word final-answer fragments before Haiku completes; exclude reasoning and unmarked search preambles through a voice-marker protocol. Bounded queues, capped responses, no retries/automatic continuation, and explicit partial-stream errors preserve usage evidence. The installed ElevenLabs SDK offers synchronous text-input streaming only, so this async adapter uses the already pinned websockets dependency; HTTP speech endpoints retain the SDK. Keep /chat and buffered /converse contracts. One silent live check reached first audio at 2.539 s versus the earlier 2.737 s sample, and audio preceded the model terminal event. These separate single samples are not a statistical speed benchmark. |
 | D23 | In the next session, do only a basic ElevenLabs Agents + hosted Mem0 integration, then collaborate with the user (user authorization, 2026-10-26). | Create a separate test agent using native Haiku 5.5, whose catalog availability was verified, and configure Mem0 save/retrieve tools using the documented integration. The user accepts Mem0's advertised free allowance for initial evaluation; account/key availability remains unverified. Preserve the working backend and existing agents. Stop after basic setup and work with the user on live testing and refinement; no automatic paid conversation tests, audio playback, purchases, broader feature work or production migration. This authorizes an isolated experiment alongside D14's single-turn backend, without replacing it. |
+| D24 | Try ElevenLabs’ official browser WebRTC client for the isolated Agents + Mem0 experiment (user authorization, 2026-10-26). | After the Python microphone correction, the user confirmed input/output worked but reported the assistant hearing its own speaker output repeatedly. They rejected muting capture during playback and custom echo-cancellation integration, first requested planning, then selected the official WebRTC client. Use the SDK/browser’s existing audio processing, preserving the same test agent and Mem0 tools. A minimal loopback page/credential-and-tool bridge is within this test; the working backend, device firmware, deployment and production migration remain unchanged/out of scope. |
+| D25 | Answer one-off questions, then wait quietly for user-initiated follow-ups (user decision, 2026-10-26). | The user accepted the WebRTC audio test in Edge but does not want repeated “are you still there?” prompts during silence. Disable the test agent's native silence re-engagement timer (`conversation_config.turn.turn_timeout=-1`, previously 7 seconds). Keep follow-up questions/context within the open session; this is not an auto-disconnect or wake-word implementation. Other settings, memory tools and working backend remain unchanged. |
+
+### D23 setup choices and boundary (2026-10-26)
+
+The separate native Haiku 5.5 test agent and hosted Mem0 client-tool runner now
+exist under [experiments/agents-mem0](../experiments/agents-mem0/README.md).
+Authentication is required (signed URL for Python, session token for WebRTC),
+and alternate LLM fallback is disabled so the
+experiment retains the selected model. Agent defaults: low reasoning effort,
+1024-token cap, short replies, George voice, fixed local test-user memory scope.
+The English Agents API rejected `eleven_flash_v2_5`, so the experiment uses
+`eleven_flash_v2` (agent setup choice); D21's working-backend default is unchanged.
+These are replaceable experiment settings, not a backend migration or final
+voice/memory policy. The user supplied a local Mem0 key and authentication plus
+agent/tool definition checks passed. Basic setup is complete. The user tested the
+Python runner and reported successful listening but speaker feedback; D24 selects
+the official WebRTC client. The user subsequently accepted its speech recognition
+and speaker behavior in Microsoft Edge, including interruptions. The user later
+reported Chrome also works after disabling multiple privacy extensions; the
+specific extension/rule was not isolated. D25 disables idle re-engagement.
+The user confirmed that a saved preference was recalled in a new session,
+validating the basic hosted Mem0 persistence/recall flow. D23–D25 setup and
+collaborative evaluation are complete; this does not authorize migration or
+further feature work.
+ElevenLabs creation defaults currently record voice and retain conversation data
+indefinitely; long-term retention policy remains an open choice. See STATUS.md
+for verification and next action.
 
 ## Intended component responsibilities
 

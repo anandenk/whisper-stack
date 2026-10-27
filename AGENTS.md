@@ -32,9 +32,12 @@ microphone upload, deployment, and firmware are not automatically in scope.
 Follow STATUS.md for the current handoff.
 Flash v2.5 is the user-approved TTS default. Keep project records focused on
 durable decisions, implementation, verification, blockers, and the next action.
-The next session is authorized for the basic isolated ElevenLabs Agents + Mem0
-setup described by PROJECT.md D23, followed by collaborative testing; this is
-not permission to migrate or expand the working backend.
+The basic isolated ElevenLabs Agents + Mem0 setup and collaborative evaluation
+in PROJECT.md D23–D25 are complete by user acceptance, including WebRTC audio,
+interruptions, quiet waiting and cross-session memory recall. The user selected
+ElevenLabs’ official browser WebRTC client (D24). Use the SDK’s
+audio processing; do not add playback-time microphone muting or custom echo
+cancellation. This is not permission to migrate or expand the working backend.
 
 ## Keep one coherent project
 
@@ -81,6 +84,8 @@ Firmware v2/v3 names in those files are historical, not names for the new rebuil
   Temporary files under `/tmp` are not durable handoff evidence.
 - Check the diff for accidental edits and stale documentation. State whether
   changes are committed and pushed; never imply another machine has local work.
+- Use plain commit messages without Codex co-author or generated-by attribution
+  (user request, 2026-10-26).
 - Finish the current request without automatically starting the next milestone.
 - Begin answers with one short sentence suggesting technical phrasing for the
   user's question; then answer normally (user preference, 2026-10-26).
