@@ -33,7 +33,8 @@ The agent's correction checks used mocked providers without audible playback.
 speech recognition, natural interruptions, quiet waiting after answers, and
 hosted Mem0 preference recall in a new session. These are user-reported live
 results, not independent acoustic, latency or memory-reliability benchmarks.
-No next milestone has been selected or started.
+The user subsequently requested merging the completed rebuild into main (D26).
+The README rewrite is selected for the next turn and has not been started.
 
 ### Current implementation
 
@@ -75,7 +76,8 @@ No next milestone has been selected or started.
 **Final checks for publication:** 7 experiment Python checks and 8 Chrome browser
 checks pass with mocked providers/synthetic input. The unchanged working-backend
 Python suite passes **120 tests**, with its existing Starlette/HTTPX deprecation
-warning. Both Python environments pass pip check. Read-only live verification
+warning. The existing backend browser suite also passes all 14 checks on the
+merge candidate. Both Python environments pass pip check. Read-only live verification
 passes Mem0 ping, native Haiku agent authentication and both tool definitions;
 no paid model/audio generation or memory writes were initiated for publication.
 
@@ -314,9 +316,11 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 The current increment is complete: WebRTC interaction, interruption, quiet
 waiting and hosted memory recall across sessions are accepted by user testing.
-No browser-startup or credential blocker is currently reported. Next action:
-review or choose further work with the user only when requested. Do not
-implicitly start hardware, migration or additional features.
+No browser-startup or credential blocker is currently reported. The user
+requested merge through [PR #1](https://github.com/anandenk/whisper-stack/pull/1).
+Next turn: collaboratively rewrite the main README with brief old/new project
+descriptions and other relevant information. Do not start that rewrite in the
+merge turn, or implicitly start hardware, migration or additional features.
 Broader retention policy, migration, web-search parity and deployment remain
 choices to revisit together.
 
@@ -328,7 +332,8 @@ device capture/playback interaction once the board/parts and data cable are
 available; no firmware work is authorized by this recommendation.
 The latest sample waited about 1.11 s for STT and another 1.20 s before final-answer
 text, so overlap alone has not reached the proposed 1–1.5 s target. Realtime input,
-firmware, deployment, and main merge remain outside this increment. Hardware
+firmware and deployment remain outside this increment. Main integration is
+authorized by D26. Hardware
 programming still needs a micro-USB data cable.
 
 The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 plus other checklist parts;
@@ -338,17 +343,20 @@ final voice, memory/retention, provisioning, and hardware contract remain open.
 
 ## Git and historical context
 
-Publication branch: **rebuild/backend-tester** in the existing private
-https://github.com/anandenk/whisper-stack repository. Main is not merged or changed
-by this work. Earlier published commits include c4542b9 (stream/search) and
-73c3463 (TTS comparison) and 9cdb93b (Flash adoption). The subsequent documentation
-updates record silent full voice-loop checks and the authorized overlap increment
-on the same branch. This session publishes the D23–D25 experiment, tests and
-handoff on that branch; no PR, main merge or new repository. Commit messages
-omit co-author and generated-by attribution at the user's request.
-Credentials, environments, generated audio/data and installed test dependencies
-stay local/ignored; next session must check git status --short --branch and
-recent commits before assuming remote state.
+Integration: [PR #1](https://github.com/anandenk/whisper-stack/pull/1) brings
+**rebuild/backend-tester** into **main** in the existing private
+https://github.com/anandenk/whisper-stack repository, per D26. Continue on main
+after verifying the merge and local/remote refs. Preserve the feature branch and
+its incremental history; no new repository, squash or history rewrite. The
+README rewrite is deferred to the next turn.
+
+Published rebuild commits include c4542b9 (stream/search), 73c3463 (TTS comparison),
+9cdb93b (Flash adoption), 125afe0 (overlap), bef3f53 (large PCM frames), and
+c9064cc (Agents + Mem0). Final merge verification must confirm PR state and that
+local main matches remote main. Commit/PR messages omit co-author and generated-by
+attribution at the user's request. Credentials, environments, generated audio/data
+and installed test dependencies remain local/ignored; they do not transfer with
+checkout. Check git status and recent commits on every session.
 
 Original baseline c7d050d and continuity commit ea1591b are preserved. Historical
 May context: [notes/archive/claude-context-2026-05.md](../notes/archive/claude-context-2026-05.md).

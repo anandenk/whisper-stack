@@ -37,7 +37,10 @@ in PROJECT.md D23–D25 are complete by user acceptance, including WebRTC audio,
 interruptions, quiet waiting and cross-session memory recall. The user selected
 ElevenLabs’ official browser WebRTC client (D24). Use the SDK’s
 audio processing; do not add playback-time microphone muting or custom echo
-cancellation. This is not permission to migrate or expand the working backend.
+cancellation. This is not permission to migrate or expand the working backend. The
+user authorized merging the completed rebuild into main (D26). The main README
+rewrite is explicitly for the next turn: short old/new project descriptions and
+other relevant information, without starting hardware or feature work.
 
 ## Keep one coherent project
 
