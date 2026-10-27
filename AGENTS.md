@@ -32,6 +32,9 @@ microphone upload, deployment, and firmware are not automatically in scope.
 Follow STATUS.md for the current handoff.
 Flash v2.5 is the user-approved TTS default. Keep project records focused on
 durable decisions, implementation, verification, blockers, and the next action.
+The next session is authorized for the basic isolated ElevenLabs Agents + Mem0
+setup described by PROJECT.md D23, followed by collaborative testing; this is
+not permission to migrate or expand the working backend.
 
 ## Keep one coherent project
 
@@ -79,6 +82,8 @@ Firmware v2/v3 names in those files are historical, not names for the new rebuil
 - Check the diff for accidental edits and stale documentation. State whether
   changes are committed and pushed; never imply another machine has local work.
 - Finish the current request without automatically starting the next milestone.
+- Begin answers with one short sentence suggesting technical phrasing for the
+  user's question; then answer normally (user preference, 2026-10-26).
 - End progress reports with the next concrete step and any real blocker. The
   user requested more independence on 2026-10-24: carry routine authorized work
   forward and choose sensible defaults; ask only for necessary information,

@@ -27,15 +27,15 @@ successful browser use and user-accepted spoken quality after the correction.
 This is user-reported acceptance, not an independent quality/latency benchmark.
 The agent's correction checks used mocked providers without audible playback.
 
-The current request is research into runtime conversation context and memory,
-including alternatives to the first build's Markdown-based memory. See
+The user wants the next session to perform only the basic ElevenLabs Agents +
+hosted Mem0 integration, then work with them on testing and refinement (D23).
+Earlier research into alternatives to the first build's Markdown memory is in
 [Voice assistant memory approaches](<../reports/Voice assistant memory approaches.md>)
-for inspected voice-framework and DIY-project examples. The recommendation is
-bounded session dialogue followed by summaries and editable durable facts; it is
-not an accepted implementation decision. Research added no dependencies, paid
-calls or runtime retention, and did not benchmark the cited projects.
+and remains research rather than the selected implementation plan. The user
+accepts Mem0's currently advertised free allowance for the initial evaluation;
+actual Mem0 account enrollment and credentials have not been verified. No setup
+was started in this session, and no Mem0 key is known to be configured.
 
-ElevenLabs Agents + Mem0 is now under consideration as a managed alternative.
 A read-only authenticated GET /v1/convai/llm/list on October 26 returned HTTP 200
 and 111 model entries, including native claude-haiku-5-5 (not deprecated), with
 parallel tool calls and configurable reasoning effort. The static documentation
@@ -43,8 +43,14 @@ listed Haiku 4.5 but omitted 5.5. This confirms catalog availability, not a test
 agent conversation or Mem0 integration; is_approved_for_workspace was null.
 Local ignored evidence: backend/output/elevenagents-models-20261027T022531Z.json.
 No agent was created, no credentials changed, and no voice/model generation ran.
-An isolated Agents + Mem0 evaluation is a proposed next step, not an authorized
-migration or a change to the accepted backend/model.
+The next session is authorized to create a separate test agent with native
+Haiku 5.5 and configure the basic memory integration, following
+https://docs.mem0.ai/integrations/elevenlabs. Preserve the working backend and
+existing agents. Request only missing credentials or consequential choices.
+Stop after basic configuration and review readiness with the user; collaborate
+on the first live tests and subsequent changes. Do not automatically run paid
+conversations, play audio, purchase anything, expand features, or migrate the
+working backend. This is a limited integration experiment, not a migration.
 
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
@@ -235,9 +241,11 @@ assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unveri
 
 ## Blockers and next action
 
-Next: agree on session lifetime, restart persistence and explicit versus automatic
-fact retention before implementing memory. No memory implementation is authorized
-by the research request; PROJECT.md retains memory/retention as an open choice.
+Next session: inspect existing agent/configuration state, obtain a Mem0 key
+securely if missing, then create/configure the isolated Haiku 5.5 test agent and
+basic Mem0 save/retrieve tools. Stop at a reviewable setup and work with the user
+on testing. Broader retention policy, migration, web-search parity and deployment
+remain decisions to revisit together, rather than extra implementation tasks.
 
 The user accepted their own-voice browser test after the event-size correction.
 The overlapping backend and large-frame browser path also pass automated checks.
