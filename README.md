@@ -1,5 +1,32 @@
 # whisper stack
 
+> **Revival workspace, October 2026:** Start with
+> [the current handoff](docs/STATUS.md) and
+> [the project decisions](docs/PROJECT.md). Coding agents should first read
+> [AGENTS.md](AGENTS.md).
+>
+> The rebuild backend is in [backend/](backend/README.md): ElevenLabs STT/TTS,
+> Claude Haiku 5.5 replies, and local token/cost diagnostics. Live STT, TTS, Haiku,
+> and the complete buffered voice loop have passed checks using known synthesized
+> speech. The user also reports one successful browser microphone exchange;
+> ESP32 hardware checks remain pending.
+> A local [push-to-talk tester](backend/README.md#local-push-to-talk-tester) is
+> available at `/tester`, with recording preview, overlapping answer/speech generation,
+> streamed reply playback, short
+> default answers, bounded general web search, source links, and diagnostics.
+> Flash v2.5 is the approved speech default.
+>
+> A separate [ElevenLabs Agents + Mem0 experiment](experiments/agents-mem0/README.md)
+> uses native Haiku 5.5 and the official WebRTC browser client. The user validated
+> speech recognition, interruptions, quiet waiting, and memory recall across new
+> sessions. It preserves the working backend and May implementation; device
+> firmware, deployment, and migration remain outside this increment. Read the
+> handoff for current server state and verification boundaries.
+> Automated browser checks use synthetic audio and mocked providers.
+> See the handoff for
+> exact evidence and setup. The existing server/firmware and the description
+> below document the May prototype and serve as historical reference.
+
 A self-hosted voice assistant backend. Whisper for STT, Gemini 2.5
 Flash for the LLM, Kokoro for streaming TTS — full mic-to-speaker
 loop on one machine. Speak into a phone, a terminal, or a custom

@@ -1,0 +1,44 @@
+[
+  {
+    "tool_config": {
+      "type": "client",
+      "name": "addMemories",
+      "description": "Save important user-provided facts or preferences for future conversations.",
+      "expects_response": true,
+      "response_timeout_secs": 20,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The user-provided information to remember."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
+  },
+  {
+    "tool_config": {
+      "type": "client",
+      "name": "retrieveMemories",
+      "description": "Retrieve relevant facts from this test user's past conversations.",
+      "expects_response": true,
+      "response_timeout_secs": 20,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The topic or question to recall."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "name": "whisper-stack-tester-checks",
+  "private": true,
+  "scripts": {"test": "node --test tester.test.mjs"},
+  "devDependencies": {"playwright": "1.64.1"}
+}

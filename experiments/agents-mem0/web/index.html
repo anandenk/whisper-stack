@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whisper Stack · WebRTC test</title>
+<link rel="stylesheet" href="/style.css">
+<main>
+  <p class="eyebrow">WHISPER STACK / ISOLATED TEST</p>
+  <h1>Let’s talk.</h1>
+  <p>Haiku 5.5 + Mem0, using ElevenLabs’ WebRTC audio.</p>
+  <p class="notice">Start enables your microphone and speaker and uses service credits. End stops the session. Conversation recording and retention follow your ElevenLabs settings.</p>
+  <div class="controls">
+    <button id="start" disabled>Start conversation</button>
+    <button id="stop" disabled>End conversation</button>
+  </div>
+  <p id="status" role="status">Preparing…</p>
+  <p id="levels">Microphone — · Speaker —</p>
+  <h2>Conversation</h2>
+  <p id="empty">Nothing recorded yet.</p>
+  <ol id="transcript" aria-live="polite"></ol>
+  <p class="note">Try a short question, let the reply finish, then interrupt a longer reply. Check that its own voice does not appear as “You.”</p>
+</main>
+<script type="module" src="/client.js"></script>
+</html>
