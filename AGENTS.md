@@ -14,14 +14,15 @@ authorize new work. A proposed next milestone is not permission to implement it.
 
 ## Current boundary
 
-**Publication authorized (D42, 2026-10-28).** The user approved the final README
-diagram and explicitly requested committing and pushing the completed backend
-milestone to the existing private repository. This supersedes earlier
-no-commit/no-push instructions for this publication only. Include the completed
-source, mocked checks, synthetic evaluation fixtures/reports, deferred notes and
-documentation; keep credentials, environments, generated bundles and raw output
-ignored. No new feature, provider evaluation, service restart or hardware work.
-Read STATUS.md for publication verification and the next bounded milestone.
+**Backend milestone published (D42, 2026-10-28).** The user approved the final
+README diagram and authorized committing/pushing the completed work together.
+Milestone commit 97e75e6 is published to the existing private main branch; see
+STATUS.md for verification and the current handoff. Earlier no-commit/no-push
+holds were superseded for this publication. Credentials, environments, generated
+bundles and raw output remain local/ignored. The tester is not currently running;
+do not restart automatically. No new feature, live evaluation, deployment or
+hardware work is authorized by publication. Next work, when selected, supports
+the device connection and one physical question/answer slice.
 
 **README and milestone closure (D41, 2026-10-28).** The user considers the browser
 backend milestone finished for the agreed personal-prototype scope and wants a

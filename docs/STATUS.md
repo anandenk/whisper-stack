@@ -5,14 +5,16 @@ Updated: 2026-10-28 (America/New_York).
 ## Browser-backend milestone publication (D42)
 
 **The user approved the final README/diagram and explicitly requested commit
-and push to the existing private repository.** Earlier no-commit/no-push holds
-are superseded for this publication. This packages the completed browser-backend
+and push to the existing private repository. The milestone is published.**
+Earlier no-commit/no-push holds were superseded for this publication.
+Milestone commit: [97e75e6 — Complete browser backend milestone](https://github.com/anandenk/whisper-stack/commit/97e75e66426a2ab359fa14701bf0adc20a4ea4c6).
+This packages the completed browser-backend
 scope: selected Agents path, memory viewer, active-only recall, evaluated model
 budgets, offline setup/errors, synthetic evaluation runners/fixtures/reports,
 deferred brainstorming and the README with its single SVG architecture diagram.
 Device integration, independent hosting and new features remain unfinished.
 
-**Pre-publication verification:** build, 49 mocked Python checks, 10 mocked Chrome
+**Verification:** build, 49 mocked Python checks, 10 mocked Chrome
 browser checks, offline startup and whitespace pass. Exact configured-key and
 selected secret-pattern scanning of publishable files found no matches.
 Credentials, environments, dependencies, generated bundles and raw evaluation/
@@ -20,15 +22,21 @@ preview output remain ignored. No live evaluation or provider request, memory
 operation, settings change or purchase was performed for publication.
 Remote metadata confirms anandenk/whisper-stack is PRIVATE with main as default;
 fetch confirms local/remote main matched at 822f546 before this publication.
+Push succeeded to origin/main; `git ls-remote origin refs/heads/main` then matched
+the full 97e75e6 milestone SHA. The working tree was clean after that commit/push.
+GitHub's contents API separately confirmed the checked-in SVG on main. This
+handoff update records that verified result; use git log/status for its revision.
 
 **Runtime checked now:** no listeners on 8766 or 8767; the former tester PID 37914
 is absent. No process was stopped or restarted in this publication. Prior running
 tester claims below are historical. The documented startup command remains the
 way to run it later; ignored local credentials/assets are required.
 
-**Next concrete step:** finish commit/push and record remote verification here.
-Then, when selected, review the board's connection to the existing backend and
+**Next concrete step, when selected:** review the board's connection to the existing backend and
 confirm board/cable access before one physical question/answer audio slice.
+No further backend feature work starts automatically. Sections below retain
+historical evidence; their old uncommitted/running-service claims are superseded
+by this publication handoff.
 
 ## README and browser-backend milestone closure (D41)
 
