@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "purpose": "One bounded in-session context recall check, with all external memory access denied.",
+  "expected": {
+    "project": "Cinder Finch",
+    "marker": "ultramarine",
+    "number": "7462"
+  },
+  "seed": {
+    "id": "seed",
+    "message": "For this conversation only, the imaginary observatory project is called Cinder Finch, its crate marker is ultramarine, and its verification number is 7462. Keep those details only in this chat. Do not save them or use memory tools during this conversation. Reply just Understood."
+  },
+  "intervening": [
+    {
+      "id": "print-queue",
+      "message": "A fictional workshop has printers A and B. A small job takes 18 minutes on either printer; a large job takes 42 minutes. Five small jobs and three large jobs are waiting. The workshop opens for three hours, and each printer needs a separate 10-minute calibration at opening. Jobs cannot be split or moved once started. Suggest a reasonable ordering and explain what spare time would mean; exact optimization is unnecessary. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "library-cart",
+      "message": "A library cart holds 36 invented books: 12 science, 9 history, 8 fiction and 7 art. Volunteers are arranging them on three shelves, each with room for 14 books. They want subject groups kept together, but a shelf may contain multiple groups. Explain one feasible allocation and how to label the shelves so another volunteer can restore the arrangement after browsing. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "game-queue",
+      "message": "Six friends are sharing a two-player board game. Each round takes eight minutes and a player may stay for at most two consecutive rounds. Two friends arrive 16 minutes after play begins. Describe a simple queue rule that gives newcomers a fair chance while keeping the game moving. Distinguish fairness by number of rounds from fairness by time spent waiting. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "csv-checks",
+      "message": "A toy CSV import accepts item code, quantity and location. Item codes are case-insensitive, quantities must be whole numbers from zero through 200, and locations must be one of A1, B2 or C3. The input may contain blank lines, extra spaces, duplicated codes and malformed rows. Explain the order in which validation and normalization should happen, and how to report errors without silently inventing values. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "garden-rotation",
+      "message": "In an invented garden schedule, four volunteers cover a weekly rota. Each volunteer can attend two mornings. Monday and Wednesday require two people; Tuesday, Thursday and Friday require one. One volunteer is unavailable on Monday, and another is unavailable on Wednesday. Explain how to check whether a proposed rota is feasible before trying to make it perfectly fair. No actual plant-care advice is needed. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "latency-story",
+      "message": "A fictional service takes 80 milliseconds to validate a request, 240 milliseconds to read a record and 120 milliseconds to format a reply. A proposed cache reduces the record-read time to 30 milliseconds on a hit and has a 70 percent hit rate. Treat the stages as sequential and ignore network variability. Explain how to estimate the average response time and what that average hides. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "museum-route",
+      "message": "A small fictional museum has a lobby connected to rooms A and B. Both rooms connect to C, and C connects to an exit gallery D. Room A takes 12 minutes, B takes 18, C takes 15 and D takes 10. Visitors have 45 minutes and must see C and D. Discuss a sensible route and explain why the map structure matters as much as the time totals. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "meeting-notes",
+      "message": "A fictional team meeting produces three kinds of notes: decisions, open questions and assigned tasks. People often state suggestions in the same tone as decisions. A task may lack an owner or a deadline. Describe a concise way to write the notes so someone absent can distinguish what was agreed from what still needs confirmation, without treating silence as agreement. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "catalog-cleanup",
+      "message": "A toy catalog lists the same object as Oak Desk, oak desk and Oak  Desk, while a different object is Oak Desk Mini. Prices are deliberately omitted. The catalog also has supplier-specific item IDs and some missing measurements. Explain a cautious deduplication strategy that uses normalization while retaining uncertainty about objects whose names look similar but may describe different sizes. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "fictional-trains",
+      "message": "For a completely invented timetable, train R leaves at 09:10 and reaches the interchange at 09:42. Train S leaves the interchange at 09:50 and arrives at the destination at 10:15. Moving between platforms takes six minutes. Another connection leaves at 10:05 and arrives at 10:35. Explain the timing tradeoff, including the distinction between a mathematically possible connection and one with a useful delay buffer. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "recipe-scale",
+      "message": "A fictional classroom recipe for six portions uses 360 grams of flour, 240 grams of water and 12 grams of salt. Students want nine portions, but one measuring container holds at most 300 grams. Explain proportional scaling and a practical way to measure the scaled ingredients in batches. Treat this purely as an arithmetic exercise; no dietary or medical conclusions are involved. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "dependencies",
+      "message": "A toy project has tasks A through F. A and B can begin immediately. C requires A; D requires A and B; E requires C and D; F requires E. Task durations are A two hours, B three, C one, D two, E one and F one. Assume unlimited workers. Explain how dependencies determine the earliest completion time and why adding all durations gives a different quantity. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "energy-example",
+      "message": "An imaginary device draws 24 watts when active for three hours and 4 watts in standby for the other 21 hours of a day. A redesign changes standby draw to 1 watt while leaving active use unchanged. Explain how to compute daily energy in watt-hours and which part of the operating pattern makes the redesign useful. Do not infer electricity prices or real product specifications. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "backup-labels",
+      "message": "A fictional archive keeps a full snapshot on Sunday and incremental snapshots on other days. Two snapshots have the same visible filename but different creation dates, and a recent incremental snapshot has not yet been verified. Describe labels and checks that would help an operator understand the available recovery chain. This is a discussion only: do not suggest executing deletion or replacement commands. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "cache-policy",
+      "message": "A toy application caches four documents but has room for only three. One document is large and requested once a day; two small documents are requested frequently; another small document is requested in a short burst each morning. Explain how least-recently-used and frequency-based policies might behave differently, and why a single workload average may conceal the morning burst. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "radio-schedule",
+      "message": "An imaginary radio station schedules a 25-minute interview, a 15-minute music segment and a 10-minute news segment inside a one-hour slot. Transitions take one minute each, and the hour must end with a two-minute station announcement. Explain how to check the total and place spare time without assuming that every segment will finish at exactly its planned duration. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "practice-session",
+      "message": "A fictional music practice session lasts 50 minutes. The learner wants scales, sight-reading, a difficult passage and a complete run-through. The difficult passage needs repeated attempts, while the run-through must remain uninterrupted. Suggest a structure with a short break and explain how to tell whether time is being spent productively. There is no need to relate this to any personal preferences. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "ticket-arithmetic",
+      "message": "A fictional exhibition prints 120 paper tickets in batches of 15. Three batches are reserved for school groups, two for volunteers and the rest for general visitors. Later, one reserved school batch becomes available again. Explain the initial and revised visitor allocations and why an inventory log should record the transfer rather than silently replacing the earlier allocation. This is an arithmetic and recordkeeping exercise. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "test-design",
+      "message": "A toy function accepts a temperature value and returns cold below 10, mild from 10 through 24, and warm above 24. The developer also expects a clear error for text that is not numeric. Describe a compact set of useful boundary and invalid-input tests, and explain why trying many arbitrary middle values is less informative than checking the transitions deliberately. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    },
+    {
+      "id": "parcel-bins",
+      "message": "A fictional sorting table has bins A, B and C with capacities of six, eight and ten parcels. Parcels arrive in groups of four, five, three, six and two, and a group should stay together if possible. Explain one feasible arrangement and how to communicate that a later arrival may require rearrangement. Do not reuse earlier scenarios or introduce personal facts. Give a detailed explanation in 60 to 80 words, without referring to other topics in this chat."
+    }
+  ],
+  "recall": {
+    "id": "recall",
+    "message": "From the beginning of this conversation, what were the imaginary project name, its crate marker, and its verification number? Answer from this conversation only, without using memory tools."
+  }
+}

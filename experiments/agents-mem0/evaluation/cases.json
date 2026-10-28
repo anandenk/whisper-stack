@@ -1,0 +1,501 @@
+{
+  "version": 1,
+  "description": "Fabricated evaluation persona; no real user facts. Exact wording frozen before live execution.",
+  "seed": [
+    {
+      "id": "seed-drink",
+      "text": "My favorite hot drink is rooibos tea.",
+      "anchors": [
+        [
+          "rooibos"
+        ]
+      ]
+    },
+    {
+      "id": "seed-lamp",
+      "text": "My desk lamp is cyan.",
+      "anchors": [
+        [
+          "cyan"
+        ],
+        [
+          "lamp"
+        ]
+      ]
+    },
+    {
+      "id": "seed-city",
+      "text": "I live in the fictional town of Bellmere.",
+      "anchors": [
+        [
+          "Bellmere"
+        ]
+      ]
+    },
+    {
+      "id": "seed-cat",
+      "text": "My cat is named Juniper.",
+      "anchors": [
+        [
+          "Juniper"
+        ]
+      ]
+    },
+    {
+      "id": "seed-project",
+      "text": "My personal coding project is called Lantern.",
+      "anchors": [
+        [
+          "Lantern"
+        ]
+      ]
+    },
+    {
+      "id": "seed-hobby",
+      "text": "My favorite weekend hobby is pottery.",
+      "anchors": [
+        [
+          "pottery"
+        ]
+      ]
+    },
+    {
+      "id": "seed-plant",
+      "text": "I grow basil on my windowsill.",
+      "anchors": [
+        [
+          "basil"
+        ]
+      ]
+    },
+    {
+      "id": "seed-start",
+      "text": "My usual workday starts at 8:15 in the morning.",
+      "anchors": [
+        [
+          "8:15",
+          "08:15"
+        ]
+      ]
+    },
+    {
+      "id": "seed-finish",
+      "text": "My usual workday ends at 5:40 in the afternoon.",
+      "anchors": [
+        [
+          "5:40",
+          "17:40"
+        ]
+      ]
+    },
+    {
+      "id": "seed-notebook",
+      "text": "My paper notebook has an ochre cover.",
+      "anchors": [
+        [
+          "ochre"
+        ]
+      ]
+    },
+    {
+      "id": "seed-language",
+      "text": "I am learning Italian.",
+      "anchors": [
+        [
+          "Italian"
+        ]
+      ]
+    },
+    {
+      "id": "seed-music",
+      "text": "My favorite music genre is jazz.",
+      "anchors": [
+        [
+          "jazz"
+        ]
+      ]
+    },
+    {
+      "id": "seed-snack",
+      "text": "My preferred afternoon snack is pistachios.",
+      "anchors": [
+        [
+          "pistachios"
+        ]
+      ]
+    },
+    {
+      "id": "seed-commute",
+      "text": "I commute to work by bicycle.",
+      "anchors": [
+        [
+          "bicycle",
+          "bike"
+        ]
+      ]
+    },
+    {
+      "id": "seed-exercise",
+      "text": "My preferred exercise is swimming.",
+      "anchors": [
+        [
+          "swimming"
+        ]
+      ]
+    },
+    {
+      "id": "seed-season",
+      "text": "My favorite season is autumn.",
+      "anchors": [
+        [
+          "autumn",
+          "fall"
+        ]
+      ]
+    },
+    {
+      "id": "seed-meal",
+      "text": "My favorite lunch is lentil soup.",
+      "anchors": [
+        [
+          "lentil"
+        ],
+        [
+          "soup"
+        ]
+      ]
+    },
+    {
+      "id": "seed-author",
+      "text": "My favorite author is Ursula Le Guin.",
+      "anchors": [
+        [
+          "Ursula"
+        ],
+        [
+          "Le Guin"
+        ]
+      ]
+    },
+    {
+      "id": "seed-movie",
+      "text": "My favorite film is Spirited Away.",
+      "anchors": [
+        [
+          "Spirited Away"
+        ]
+      ]
+    },
+    {
+      "id": "seed-focus",
+      "text": "I use 35-minute focus sessions.",
+      "anchors": [
+        [
+          "35"
+        ],
+        [
+          "focus"
+        ]
+      ]
+    },
+    {
+      "id": "seed-break",
+      "text": "I take 7-minute breaks between focus sessions.",
+      "anchors": [
+        [
+          "7"
+        ],
+        [
+          "break",
+          "breaks"
+        ]
+      ]
+    },
+    {
+      "id": "seed-shelf",
+      "text": "My bookshelf is made of walnut wood.",
+      "anchors": [
+        [
+          "walnut"
+        ]
+      ]
+    },
+    {
+      "id": "seed-keyboard",
+      "text": "My keyboard has tactile switches.",
+      "anchors": [
+        [
+          "tactile"
+        ]
+      ]
+    },
+    {
+      "id": "seed-mouse",
+      "text": "I use a trackball instead of a conventional mouse.",
+      "anchors": [
+        [
+          "trackball"
+        ]
+      ]
+    },
+    {
+      "id": "seed-meeting",
+      "text": "My recurring club meeting is on Thursday.",
+      "anchors": [
+        [
+          "Thursday"
+        ]
+      ]
+    },
+    {
+      "id": "seed-trail",
+      "text": "My favorite walking trail is Cedar Loop.",
+      "anchors": [
+        [
+          "Cedar Loop"
+        ]
+      ]
+    },
+    {
+      "id": "seed-game",
+      "text": "My favorite board game is Azul.",
+      "anchors": [
+        [
+          "Azul"
+        ]
+      ]
+    },
+    {
+      "id": "seed-bread",
+      "text": "I bake sourdough bread on weekends.",
+      "anchors": [
+        [
+          "sourdough"
+        ]
+      ]
+    },
+    {
+      "id": "seed-light",
+      "text": "I prefer warm lighting in the evening.",
+      "anchors": [
+        [
+          "warm"
+        ],
+        [
+          "lighting",
+          "light"
+        ]
+      ]
+    },
+    {
+      "id": "seed-units",
+      "text": "I prefer distances in kilometers.",
+      "anchors": [
+        [
+          "kilometers",
+          "kilometres"
+        ]
+      ]
+    }
+  ],
+  "duplicates": [
+    {
+      "id": "duplicate-drink",
+      "text": "My favorite hot drink is rooibos tea."
+    },
+    {
+      "id": "duplicate-cat",
+      "text": "Juniper is the name of my cat."
+    },
+    {
+      "id": "duplicate-game",
+      "text": "When I choose a board game, my favorite is Azul."
+    }
+  ],
+  "changes": [
+    {
+      "id": "change-drink",
+      "text": "My favorite hot drink has changed. I now prefer chamomile tea, not rooibos tea."
+    },
+    {
+      "id": "change-city",
+      "text": "I moved away from Bellmere. I now live in the fictional town of Larkhaven."
+    },
+    {
+      "id": "change-meeting",
+      "text": "My recurring club meeting moved from Thursday to Tuesday. Tuesday is the current meeting day."
+    }
+  ],
+  "queries": [
+    {
+      "id": "query-drink",
+      "kind": "changed",
+      "query": "What hot drink do I currently prefer?",
+      "expected": "Chamomile tea; rooibos is outdated.",
+      "anchors": [
+        [
+          "chamomile"
+        ]
+      ],
+      "old_value": "rooibos"
+    },
+    {
+      "id": "query-city",
+      "kind": "changed",
+      "query": "Which town do I live in now?",
+      "expected": "Larkhaven; Bellmere is the previous town.",
+      "anchors": [
+        [
+          "Larkhaven"
+        ]
+      ],
+      "old_value": "Bellmere"
+    },
+    {
+      "id": "query-meeting",
+      "kind": "changed",
+      "query": "On which day is my club meeting now?",
+      "expected": "Tuesday; Thursday is the previous meeting day.",
+      "anchors": [
+        [
+          "Tuesday"
+        ]
+      ],
+      "old_value": "Thursday"
+    },
+    {
+      "id": "query-cat",
+      "kind": "duplicate",
+      "query": "What is my cat called?",
+      "expected": "Juniper.",
+      "anchors": [
+        [
+          "Juniper"
+        ]
+      ]
+    },
+    {
+      "id": "query-game",
+      "kind": "duplicate",
+      "query": "Which board game do I like best?",
+      "expected": "Azul.",
+      "anchors": [
+        [
+          "Azul"
+        ]
+      ]
+    },
+    {
+      "id": "query-hobby",
+      "kind": "paraphrase",
+      "query": "What do I like doing as a hobby on weekends?",
+      "expected": "Pottery.",
+      "anchors": [
+        [
+          "pottery"
+        ]
+      ]
+    },
+    {
+      "id": "query-plant",
+      "kind": "direct",
+      "query": "What herb am I growing on the windowsill?",
+      "expected": "Basil.",
+      "anchors": [
+        [
+          "basil"
+        ]
+      ]
+    },
+    {
+      "id": "query-language",
+      "kind": "paraphrase",
+      "query": "Which language am I studying?",
+      "expected": "Italian.",
+      "anchors": [
+        [
+          "Italian"
+        ]
+      ]
+    },
+    {
+      "id": "query-meal",
+      "kind": "direct",
+      "query": "What is my favorite lunch?",
+      "expected": "Lentil soup.",
+      "anchors": [
+        [
+          "lentil"
+        ],
+        [
+          "soup"
+        ]
+      ]
+    },
+    {
+      "id": "query-project",
+      "kind": "direct",
+      "query": "What is my personal coding project called?",
+      "expected": "Lantern.",
+      "anchors": [
+        [
+          "Lantern"
+        ]
+      ]
+    },
+    {
+      "id": "query-focus",
+      "kind": "direct",
+      "query": "How long are my focus sessions?",
+      "expected": "35 minutes.",
+      "anchors": [
+        [
+          "35"
+        ],
+        [
+          "focus"
+        ]
+      ]
+    },
+    {
+      "id": "query-commute",
+      "kind": "paraphrase",
+      "query": "How do I travel to work?",
+      "expected": "By bicycle.",
+      "anchors": [
+        [
+          "bicycle",
+          "bike"
+        ]
+      ]
+    },
+    {
+      "id": "query-unknown-dog",
+      "kind": "unknown",
+      "query": "What is my dog called?",
+      "expected": "Unknown: only a cat was mentioned. Do not substitute Juniper.",
+      "anchors": []
+    },
+    {
+      "id": "query-unknown-employer",
+      "kind": "unknown",
+      "query": "Which company do I work for?",
+      "expected": "Unknown: a commute was mentioned, but no employer.",
+      "anchors": []
+    },
+    {
+      "id": "query-unknown-allergy",
+      "kind": "unknown",
+      "query": "What food am I allergic to?",
+      "expected": "Unknown: a snack preference does not establish an allergy.",
+      "anchors": []
+    },
+    {
+      "id": "query-unknown-code",
+      "kind": "unknown",
+      "query": "What is the access code for my workshop?",
+      "expected": "Unknown: no access code was provided.",
+      "anchors": []
+    }
+  ]
+}

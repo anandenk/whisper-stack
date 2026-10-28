@@ -17,6 +17,10 @@ from mem0 import AsyncMemoryClient
 HERE = Path(__file__).resolve().parent
 
 
+class ConfigurationError(ValueError):
+    """An actionable setup error containing no credential values."""
+
+
 def configuration():
     local = dotenv_values(HERE / ".env")
     backend = dotenv_values(HERE.parents[1] / "backend" / ".env")
@@ -26,8 +30,18 @@ def configuration():
     values["ELEVENLABS_API_KEY"] = values["ELEVENLABS_API_KEY"] or backend.get("ELEVENLABS_API_KEY")
     missing = [k for k, v in values.items() if not v]
     if missing:
-        raise ValueError("Missing local settings: " + ", ".join(missing))
-    reference = json.loads((HERE / "agent-reference.json").read_text())
+        raise ConfigurationError("Missing local settings: " + ", ".join(missing))
+    try:
+        reference = json.loads((HERE / "agent-reference.json").read_text())
+    except OSError:
+        raise ConfigurationError("Cannot read agent-reference.json; restore the existing agent reference.") from None
+    except (ValueError, UnicodeError):
+        raise ConfigurationError("Invalid agent-reference.json; restore the existing agent reference.") from None
+    if (not isinstance(reference, dict)
+            or not isinstance(reference.get("agent_id"), str) or not reference["agent_id"].strip()
+            or not isinstance(reference.get("tool_ids"), list) or len(reference["tool_ids"]) != 2
+            or any(not isinstance(item, str) or not item.strip() for item in reference["tool_ids"])):
+        raise ConfigurationError("agent-reference.json must identify the existing agent and two memory tools.")
     return values, reference
 
 
@@ -55,7 +69,9 @@ def register_memory_tools(tools, memory, user_id):
     async def retrieve_memories(parameters):
         text = message(parameters)
         try:
-            result = await memory.search(query=text, filters={"user_id": user_id}, top_k=5)
+            result = await memory.search(
+                query=text, filters={"user_id": user_id}, top_k=5, latest_only=True,
+            )
             memories = [item["memory"] for item in result["results"]]
         except Exception:
             raise RuntimeError("Mem0 retrieval failed; no retry was made.") from None
@@ -152,10 +168,10 @@ def main():
             print("Local settings present. No provider calls or microphone access. Use --verify for setup checks.")
     except KeyboardInterrupt:
         print("Session stopped.")
-    except ValueError as error:
-        # Configuration errors contain setting names only; SDK errors may contain private data.
-        if str(error).startswith("Missing local settings:"):
-            raise SystemExit(str(error)) from None
+    except ConfigurationError as error:
+        raise SystemExit(str(error)) from None
+    except ValueError:
+        # Only ConfigurationError messages above are safe to expose.
         raise SystemExit("Setup failed; check local configuration and provider access.") from None
     except Exception as error:
         raise SystemExit(f"Setup/session failed ({type(error).__name__}); provider details withheld.") from None

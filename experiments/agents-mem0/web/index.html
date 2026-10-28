@@ -19,6 +19,18 @@
   <p id="empty">Nothing recorded yet.</p>
   <ol id="transcript" aria-live="polite"></ol>
   <p class="note">Try a short question, let the reply finish, then interrupt a longer reply. Check that its own voice does not appear as “You.”</p>
+  <section aria-labelledby="memories-heading">
+    <h2 id="memories-heading">Saved memories</h2>
+    <p class="notice">What the assistant remembers about you. New memories may take a moment to appear.</p>
+    <button id="view-memories" disabled>View saved memories</button>
+    <p id="memory-status" role="status">Load your saved memories without starting a conversation.</p>
+    <ul id="memories" aria-label="Saved memories" aria-busy="false"></ul>
+    <nav id="memory-pages" aria-label="Memory pages" hidden>
+      <button id="previous-memories">Previous</button>
+      <span id="memory-page"></span>
+      <button id="next-memories">Next</button>
+    </nav>
+  </section>
 </main>
 <script type="module" src="/client.js"></script>
 </html>

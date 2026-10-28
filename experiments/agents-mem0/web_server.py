@@ -1,15 +1,16 @@
-"""Loopback-only WebRTC test page. No provider calls until a user starts it."""
+"""Loopback-only voice tester and memory viewer. No provider calls on page load."""
 
 import asyncio
+import argparse
 from contextlib import asynccontextmanager
 import json
 import secrets
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from run import HERE, configuration, register_memory_tools
+from run import HERE, ConfigurationError, configuration, register_memory_tools
 
 from elevenlabs.conversational_ai.conversation import ClientTools
 from mem0 import AsyncMemoryClient
@@ -22,6 +23,21 @@ def create_app(values=None, reference=None, provider_transport=None, memory_fact
     memory = None
     tools = ClientTools()
     memory_lock = asyncio.Lock()
+
+    async def memory_client():
+        nonlocal memory
+        async with memory_lock:
+            if memory is None:
+                if memory_factory:
+                    memory = memory_factory()
+                else:
+                    # Construction validates the key; defer until an explicit memory action.
+                    memory = await asyncio.to_thread(
+                        AsyncMemoryClient, api_key=values["MEM0_API_KEY"],
+                        client=httpx.AsyncClient(timeout=15, follow_redirects=False),
+                    )
+                register_memory_tools(tools, memory, values["USER_ID"])
+        return memory
 
     @asynccontextmanager
     async def lifespan(app):
@@ -97,9 +113,34 @@ def create_app(values=None, reference=None, provider_transport=None, memory_fact
             raise HTTPException(502, "Could not obtain an ElevenLabs session token.") from None
         return {"conversationToken": token}
 
+    @app.post("/api/memories")
+    async def memories(request: Request, page: int = Query(default=1, ge=1, le=100_000)):
+        # Clients choose only the page, never the owner, filters or provider URL.
+        if set(request.query_params) - {"page"}:
+            raise HTTPException(400, "Only a page number is supported")
+        try:
+            client = await memory_client()
+            result = await client.get_all(
+                filters={"user_id": values["USER_ID"]}, page=page, page_size=25,
+            )
+            items, count, next_page = result["results"], result["count"], result["next"]
+            if (not isinstance(items, list) or len(items) > 25
+                    or type(count) is not int or count < 0
+                    or (next_page is not None and not isinstance(next_page, str))):
+                raise ValueError("Invalid memory page")
+            visible = []
+            for item in items:
+                text = item["memory"]
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError("Invalid memory text")
+                # Return memory text only, not provider metadata or pagination URLs.
+                visible.append({"memory": text})
+        except Exception:
+            raise HTTPException(502, "Could not load saved memories. No retry was made.") from None
+        return {"memories": visible, "count": count, "page": page, "has_more": bool(next_page)}
+
     @app.post("/api/tools/{name}")
     async def tool(name: str, request: Request):
-        nonlocal memory
         if name not in {"addMemories", "retrieveMemories"}:
             raise HTTPException(404, "Unknown tool")
         body = bytearray()
@@ -115,17 +156,7 @@ def create_app(values=None, reference=None, provider_transport=None, memory_fact
         except (ValueError, AttributeError):
             raise HTTPException(400, "A message of 1–4000 characters is required") from None
         try:
-            async with memory_lock:
-                if memory is None:
-                    if memory_factory:
-                        memory = memory_factory()
-                    else:
-                        # SDK construction validates the key; defer it until a real tool call.
-                        memory = await asyncio.to_thread(
-                            AsyncMemoryClient, api_key=values["MEM0_API_KEY"],
-                            client=httpx.AsyncClient(timeout=15, follow_redirects=False),
-                        )
-                    register_memory_tools(tools, memory, values["USER_ID"])
+            await memory_client()
             result = await tools.handle(name, {"message": message})
         except Exception:
             raise HTTPException(502, "Mem0 tool failed; no retry was made.") from None
@@ -134,10 +165,39 @@ def create_app(values=None, reference=None, provider_transport=None, memory_fact
     return app
 
 
-if __name__ == "__main__":
-    import uvicorn
+def local_setup():
+    """Validate local files/settings without constructing either provider client."""
+    values, reference = configuration()
+    for relative, instruction in [
+        ("web/dist/client.js", "Run npm --prefix experiments/agents-mem0 run build first."),
+        ("node_modules/@elevenlabs/client/worklets/rawAudioProcessor.js",
+         "Run npm --prefix experiments/agents-mem0 ci first."),
+    ]:
+        if not (HERE / relative).is_file():
+            raise ConfigurationError(instruction)
+    return values, reference
 
-    if not (HERE / "web/dist/client.js").exists():
-        raise SystemExit("Run npm --prefix experiments/agents-mem0 run build first.")
-    print("Open http://127.0.0.1:8766 — Start conversation activates microphone and paid service use.")
-    uvicorn.run(create_app(), host="127.0.0.1", port=8766, access_log=False)
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Check local setup only; no server or provider calls")
+    parser.add_argument("--port", type=int, default=8766, help="Loopback port (default: 8766)")
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    try:
+        values, reference = local_setup()
+    except ConfigurationError as error:
+        raise SystemExit(str(error)) from None
+    if args.check:
+        print("Local settings, existing agent reference and browser assets are ready. "
+              "No provider calls, server or microphone access. Provider access is not checked.")
+        return
+
+    import uvicorn
+    print(f"Open http://127.0.0.1:{args.port} — Start conversation activates microphone and service-credit use.")
+    uvicorn.run(create_app(values, reference), host="127.0.0.1", port=args.port, access_log=False)
+
+
+if __name__ == "__main__":
+    main()

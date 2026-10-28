@@ -14,6 +14,58 @@ authorize new work. A proposed next milestone is not permission to implement it.
 
 ## Current boundary
 
+**Publication authorized (D42, 2026-10-28).** The user approved the final README
+diagram and explicitly requested committing and pushing the completed backend
+milestone to the existing private repository. This supersedes earlier
+no-commit/no-push instructions for this publication only. Include the completed
+source, mocked checks, synthetic evaluation fixtures/reports, deferred notes and
+documentation; keep credentials, environments, generated bundles and raw output
+ignored. No new feature, provider evaluation, service restart or hardware work.
+Read STATUS.md for publication verification and the next bounded milestone.
+
+**README and milestone closure (D41, 2026-10-28).** The user considers the browser
+backend milestone finished for the agreed personal-prototype scope and wants a
+polished README before publishing the completed work together. README work is
+documentation only: accurately show the browser/ElevenLabs voice path, local
+token/memory bridge and hosted Mem0. Device integration and hosting remain open.
+Preserve all local changes; do not automatically publish as part of this README
+request or start backend features, services, evaluations or hardware work.
+
+**Personal-prototype essentials (D40, 2026-10-28).** The user resumed from D39
+and authorized checking easy startup, local access, secret/memory isolation,
+saved-data/deletion understanding and basic troubleshooting/usage. Keep this
+private and single-owner; consumer accounts, broader diagnostics and deployment
+are not required now. See STATUS.md for the completed checks and limits.
+Preserve every local edit and untracked report/script. Do not commit/push,
+restart existing services, rerun completed live evaluations or reopen the
+selected architecture automatically. This scope does not authorize retention
+changes, deletion, extra spending, prompt tuning, deployment or hardware work.
+
+**D31's active-only recall change is complete (2026-10-27).** Preserve every
+local edit. Do not commit or push; the user wants to publish completed changes
+together later. D29/D30's isolated evaluations used only included Mem0 allowance,
+with no additional spend, and verified native superseding/active-only reads.
+The user then selected step 1: normal recall now uses latest_only=True while
+the memory viewer retains its existing history listing. No memory deletion,
+historical-query mode, remote agent/audio change or further live evaluation.
+Read STATUS.md for verification, the running tester and next proposed action.
+The user subsequently authorized D32's bounded actual-assistant answer test;
+it is now complete: eight real text-only cases passed the scoped correctness/
+abstention review, with unchanged agent/prompt and synthetic-owner recall.
+It consumed only included credits/allowance, with no memory writes, purchases
+or remote settings changes. See STATUS.md for rough edges and the next proposal.
+D38's final bounded context check passed: all three opening details recalled
+after 20 intervening exchanges, with zero Mem0 access or target refresh. The
+initial small memory/conversation-context evaluation round is complete. D33/D34
+stopped before recall; D35–D37 diagnosed/corrected model budgets. Remote/local
+agent.json now use 4,096 tokens/10 seconds; the evaluation guard matches.
+Keep Haiku, low effort, concise prompt, disabled fallback and all local edits.
+Included credits only; no commit/push. Reasoning and brevity mistakes observed
+in filler replies are recorded separately; no general reasoning/compaction or
+hardware pass is implied. Do not automatically run more evaluations, tune the
+prompt, implement deferred features, deploy or start hardware work. Read
+STATUS.md for evidence and the proposed main-service readiness review.
+
 The user authorized the audio backend, then selected Claude Haiku 5.5 and
 per-exchange cost diagnostics on 2026-10-24. Build the text-response and buffered
 STT → Haiku → TTS interaction in backend/, isolated from the legacy implementation.
@@ -30,14 +82,23 @@ into one ElevenLabs text-input WebSocket. Native search remains capped at one
 use per exchange. Keep search fees separate from token estimates. Realtime
 microphone upload, deployment, and firmware are not automatically in scope.
 Follow STATUS.md for the current handoff.
-Flash v2.5 is the user-approved TTS default. Keep project records focused on
+Flash v2.5 is the user-approved TTS default for the custom pipeline; the selected
+Agents path currently uses Flash v2. Keep project records focused on
 durable decisions, implementation, verification, blockers, and the next action.
 The basic isolated ElevenLabs Agents + Mem0 setup and collaborative evaluation
 in PROJECT.md D23–D25 are complete by user acceptance, including WebRTC audio,
 interruptions, quiet waiting and cross-session memory recall. The user selected
 ElevenLabs’ official browser WebRTC client (D24). Use the SDK’s
 audio processing; do not add playback-time microphone muting or custom echo
-cancellation. This is not permission to migrate or expand the working backend. The
+cancellation. The original experiment-only architecture boundary was superseded
+on 2026-10-27: the user selected Agents + Haiku 5.5 + hosted Mem0 as the main
+backend (PROJECT.md D27). Its code remains in experiments/agents-mem0; preserve
+backend/ as the earlier custom pipeline. Do not assume its search, diagnostics,
+Flash v2.5 default or PCM contract apply to Agents. This selection and milestone
+discussion do not automatically start feature, deployment or hardware work.
+The user then authorized only viewing saved memories (D28): an on-demand list
+with refresh/paging for the existing owner. Do not infer deletion, retention,
+diagnostics or web-search work from that selection. The
 user authorized merging the completed rebuild into main (D26). The README now
 provides short old/new project descriptions and links to setup and status. Keep
 the front page concise; detailed historical instructions belong in the archive.

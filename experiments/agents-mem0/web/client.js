@@ -5,6 +5,13 @@ const stop = document.querySelector("#stop");
 const status = document.querySelector("#status");
 const levels = document.querySelector("#levels");
 const transcript = document.querySelector("#transcript");
+const viewMemories = document.querySelector("#view-memories");
+const memoryStatus = document.querySelector("#memory-status");
+const memories = document.querySelector("#memories");
+const memoryPages = document.querySelector("#memory-pages");
+const previousMemories = document.querySelector("#previous-memories");
+const nextMemories = document.querySelector("#next-memories");
+let memoryPage = 1, loadingMemories = false;
 let config, conversation, busy = false, cancelled = false, timer;
 
 function safeError(error) {
@@ -35,6 +42,44 @@ async function post(path, body = {}) {
   }
   return response.json();
 }
+
+async function loadMemories(page = 1) {
+  if (!config || loadingMemories) return;
+  loadingMemories = true;
+  viewMemories.disabled = previousMemories.disabled = nextMemories.disabled = true;
+  memories.setAttribute("aria-busy", "true");
+  memories.replaceChildren();
+  memoryPages.hidden = true;
+  memoryStatus.textContent = "Loading saved memories…";
+  try {
+    const result = await post(`/api/memories?page=${page}`);
+    for (const {memory} of result.memories) {
+      const item = document.createElement("li");
+      item.textContent = memory;
+      memories.append(item);
+    }
+    memoryPage = result.page;
+    const count = result.count;
+    memoryStatus.textContent = result.memories.length
+      ? `${count} saved ${count === 1 ? "memory" : "memories"} · showing ${result.memories.length} on this page.`
+      : page === 1 ? "No saved memories yet." : "No memories on this page. Refresh to see the latest list.";
+    document.querySelector("#memory-page").textContent = `Page ${memoryPage}`;
+    memoryPages.hidden = memoryPage === 1 && !result.has_more;
+    previousMemories.disabled = memoryPage === 1;
+    nextMemories.disabled = !result.has_more;
+  } catch {
+    memoryStatus.textContent = "Could not load saved memories. Choose Refresh to try again.";
+  } finally {
+    loadingMemories = false;
+    viewMemories.disabled = false;
+    viewMemories.textContent = "Refresh";
+    memories.setAttribute("aria-busy", "false");
+  }
+}
+
+viewMemories.addEventListener("click", () => loadMemories());
+previousMemories.addEventListener("click", () => loadMemories(memoryPage - 1));
+nextMemories.addEventListener("click", () => loadMemories(memoryPage + 1));
 
 function reset() {
   clearInterval(timer);
@@ -120,6 +165,7 @@ try {
   if (!response.ok) throw new Error();
   config = await response.json();
   start.disabled = false;
+  viewMemories.disabled = false;
   status.textContent = "Ready · microphone is off";
 } catch {
   status.textContent = "Local configuration unavailable. Restart the test server.";

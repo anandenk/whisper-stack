@@ -61,6 +61,10 @@ async function pageFor(t, mocked = true) {
     }};
   });
   const page = await context.newPage();
+  page.memoryRequests = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/memories") page.memoryRequests.push(request);
+  });
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -76,6 +80,57 @@ test("actual bundled SDK loads without microphone or provider calls", async t =>
   assert.equal(await page.evaluate(() => window.micCalls), 0);
   assert.match(await page.locator("#status").textContent(), /microphone is off/);
   assert.equal(await page.getByRole("button", {name: "End conversation"}).isDisabled(), true);
+  assert.equal(page.memoryRequests.length, 0);
+  assert.equal(await page.locator("#memories li").count(), 0);
+});
+
+test("memory viewer loads only on click, renders safe text and pages without starting audio", async t => {
+  const page = await pageFor(t);
+  await page.route("**/api/memories?*", route => {
+    const requestedPage = Number(new URL(route.request().url()).searchParams.get("page"));
+    return route.fulfill({json: {
+      count: 26, page: requestedPage, has_more: requestedPage === 1,
+      memories: requestedPage === 1
+        ? Array.from({length: 25}, (_, i) => ({memory: i === 0 ? "<img src=x onerror=alert(1)>" : `Preference ${i}`}))
+        : [{memory: "Last preference"}],
+    }});
+  });
+  assert.equal(page.memoryRequests.length, 0);
+  await page.getByRole("button", {name: "View saved memories"}).click();
+  await page.waitForFunction(() => document.querySelectorAll("#memories li").length === 25);
+  assert.equal(await page.locator("#memories img").count(), 0);
+  assert.match(await page.locator("#memories").textContent(), /<img src=x/);
+  assert.equal(await page.locator("#previous-memories").isDisabled(), true);
+  assert.equal(await page.locator("#memories").getAttribute("aria-busy"), "false");
+  await page.locator("#next-memories").click();
+  await page.waitForFunction(() => document.querySelector("#memory-page").textContent === "Page 2");
+  assert.equal(await page.locator("#memories li").textContent(), "Last preference");
+  assert.equal(await page.locator("#next-memories").isDisabled(), true);
+  await page.locator("#previous-memories").click();
+  await page.waitForFunction(() => document.querySelector("#memory-page").textContent === "Page 1");
+  await page.getByRole("button", {name: "Refresh", exact: true}).click();
+  await page.waitForFunction(() => document.querySelector("#memories").getAttribute("aria-busy") === "false");
+  assert.deepEqual(page.memoryRequests.map(request => new URL(request.url()).searchParams.get("page")), ["1", "2", "1", "1"]);
+  assert.equal(await page.evaluate(() => window.sdkStarts + window.micCalls), 0);
+  await page.setViewportSize({width: 375, height: 812});
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+});
+
+test("memory viewer shows empty and failed loads separately and allows manual refresh", async t => {
+  const page = await pageFor(t);
+  await page.getByRole("button", {name: "View saved memories"}).click();
+  await page.waitForFunction(() => document.querySelector("#memory-status").textContent === "No saved memories yet.");
+  assert.equal(await page.locator("#memory-pages").isVisible(), false);
+  await page.route("**/api/memories?*", route => route.fulfill({status: 502, json: {detail: "private-provider-detail"}}));
+  await page.getByRole("button", {name: "Refresh", exact: true}).click();
+  await page.waitForFunction(() => document.querySelector("#memory-status").textContent.startsWith("Could not load"));
+  assert.equal((await page.locator("#memory-status").textContent()).includes("private-provider-detail"), false);
+  assert.equal(page.memoryRequests.length, 2);
+  assert.equal(await page.locator("#memories li").count(), 0);
+  assert.equal(await page.getByRole("button", {name: "Refresh", exact: true}).isDisabled(), false);
+  await page.unroute("**/api/memories?*");
+  await page.getByRole("button", {name: "Refresh", exact: true}).click();
+  await page.waitForFunction(() => document.querySelector("#memory-status").textContent === "No saved memories yet.");
 });
 
 test("official audio worklet loads under the page's content security policy", async t => {

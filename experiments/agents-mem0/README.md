@@ -1,7 +1,13 @@
 # Isolated ElevenLabs Agents + Mem0 test
 
+Selected as the **main backend architecture** on 2026-10-27 (PROJECT.md D27).
+The directory name and local implementation are unchanged; the original
+experiment-only boundary below describes setup history. Deployment and device
+integration remain unfinished. See [remaining milestones](../../docs/PROJECT.md#proposed-remaining-milestones-after-d27).
+
 Preferred client: **ElevenLabs’ official browser WebRTC SDK** (D24).
-Open **http://127.0.0.1:8766** after starting the local page server. Edge audio
+The default port is **8766**; the existing saved tester is on **8767**.
+Reuse **http://127.0.0.1:8767** while that tester is running. Edge audio
 is user-accepted. The user also confirmed Chrome works after disabling their
 privacy extensions; the specific extension/rule has not been isolated.
 
@@ -10,8 +16,16 @@ privacy extensions; the specific extension/rule has not been isolated.
 From the repository root, using the already-installed environment:
 
 ```sh
+experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/web_server.py --check
 experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/web_server.py
 ```
+
+`--check` checks settings, the existing agent reference and browser assets locally;
+it starts no server, microphone or provider request. Missing settings/files give
+short instructions without credential values or a setup traceback. It does not
+verify key validity, remote settings or whether a port is free. `--port 8767`
+selects that port when starting a service later. If a tester is already running,
+reuse it; a port-in-use error is not a reason to kill the existing process.
 
 Open the URL, click **Start conversation**, and allow microphone access.
 **End conversation** stops the session. Page load does not request a provider
@@ -31,11 +45,40 @@ The SDK uses standard WebRTC audio rather than the earlier Python PCM path.
 The working `backend/`, its running tester, and existing remote agent settings
 are unchanged by D24. No cloud deployment or backend migration.
 
+## View saved memories
+
+On the tester page, scroll to **Saved memories** and choose **View saved memories**.
+This reads memories for the same fixed owner used by conversation recall. It
+does not start a conversation or enable the microphone. **Refresh** reloads the
+first page; **Previous** and **Next** browse longer lists, 25 memories per page.
+New saves may still be processing, so they may not appear immediately.
+
+The list loads only when requested. A failed load is shown separately from an
+empty list. Memory text stays in page memory; the bridge does not save or log it.
+The list uses the existing same-origin/local-page-token checks and keeps the
+owner filter server-side. Only text and paging counts reach the page, not provider
+metadata. There are no editing/deletion controls in this increment (D28).
+Mem0 documents this read operation as
+[Get Memories](https://docs.mem0.ai/api-reference/memory/get-memories).
+
+Normal conversation recall uses Mem0's native `latest_only=True` filter (D31)
+to exclude superseded facts. This viewer retains the provider's default history
+listing, including superseded records; no memories are deleted. The recall tool
+does not currently offer a separate historical-query mode. D30's
+[live comparison](evaluation/native-corrections-2026-10-27.md) verified the filter
+on three corrections; generated-answer reliability is separate evaluation work.
+
 ## Existing agent and memory configuration
+
+The separate [bounded memory evaluation](evaluation/README.md) uses fabricated
+facts and a fresh owner to investigate extraction/retrieval without changing the
+conversation tester. Its default command is offline; live runs consume Mem0
+allowance and require a current account/budget check (D29).
 
 - Agent `agent_placeholder_000000000000000000`, named
   **Whisper Stack - D23 Haiku 5.5 + Mem0 test**.
-- Native `claude-haiku-5-5`, low effort, 1024-token cap, alternate LLM fallback
+- Native `claude-haiku-5-5`, low effort, 4,096-token thinking/answer cap,
+  10-second model wait, alternate LLM fallback
   disabled, concise answers. Authentication required.
 - George and `eleven_flash_v2`. The English Agents API rejected Flash v2.5;
   the working backend retains its approved Flash v2.5 default.
@@ -57,11 +100,62 @@ Independent acoustic benchmarks and broader memory reliability remain unverified
 The user confirmed the older Python microphone fix worked, but its speaker
 feedback prompted the move to the official WebRTC client.
 
-ElevenLabs defaults record voice and retain conversations indefinitely
-(retention_days=-1); built-in user memory is disabled. Hosted Mem0 persists
-submitted facts. These are recorded defaults, not a settled long-term retention
-policy. This page keeps transcript display in memory and writes no recordings
-or conversation text to local files. Provider retention is separate.
+For the personal-prototype access boundary, saved-data controls and usage checks,
+see [Personal prototype essentials](#personal-prototype-essentials). This page
+keeps transcript display in memory and writes no recordings or conversation text
+to local files. Provider retention is separate; evaluation runners deliberately
+save synthetic transcripts/evidence in ignored `output/`.
+
+## Personal prototype essentials
+
+This is a private, single-owner tester. The server binds to `127.0.0.1`, checks
+Host, and requires a matching Origin plus a page token for POSTs. These checks
+block unrelated web pages; they are not user accounts or protection against other
+software running on this computer. Do not expose the tester with a public tunnel
+or bind it to a network interface. Device/remote access needs a separate design.
+
+Keys remain server-side in ignored `.env` files (both existing files are mode
+600 on this Mac). `.env.*` variants are also ignored except `.env.example`.
+Do not put real keys in example files, transcripts or notes. Conversation tools
+always use the configured owner; client arguments cannot select someone else.
+Synthetic evaluation runners use separate generated owners. Normal recall hides
+superseded facts; hiding a fact is not deletion. Spoken facts can be saved by the
+existing agent: do not dictate passwords, API keys or access codes. Automated
+secret detection in spoken content is not implemented.
+
+Saved data has separate locations:
+
+- **ElevenLabs:** conversations/transcripts and, when enabled, call audio.
+  The historical setup recorded audio saving and `retention_days=-1`; current
+  account findings are in [the handoff](../../docs/STATUS.md). The current public
+  [retention documentation](https://elevenlabs.io/docs/eleven-agents/customization/privacy/retention)
+  describes a two-year default, so defaults do not establish this agent's settings.
+  The agent's Advanced settings contain retention and audio-saving controls.
+  Turning off [audio saving](https://elevenlabs.io/docs/eleven-agents/customization/privacy/audio-saving)
+  affects future recordings, not existing ones or transcript retention.
+  The provider also supports deleting an
+  [individual conversation](https://elevenlabs.io/docs/eleven-agents/api-reference/conversations/delete).
+- **Mem0:** extracted facts submitted by the memory tool, including synthetic
+  evaluation memories. Inspect the correct owner in the provider dashboard before
+  removing anything. The documented [single-memory deletion operation](https://docs.mem0.ai/api-reference/memory/delete-memory)
+  takes a memory ID; leave linked/bulk deletion out of a single-record removal.
+  ElevenLabs conversation deletion and Mem0 memory deletion are separate actions.
+  No Mem0 automatic expiry is configured by this app; account/backend retention
+  and backup erasure are not established by this audit.
+- **Local:** page transcript/list contents are in browser memory. Ignored
+  `output/` contains persistent synthetic evaluation evidence; refreshing the page
+  or deleting provider data does not remove those files.
+
+No retention setting or data was changed in this audit. Provider deletion
+operations are documented, not exercised. No custom delete interface is needed.
+
+For usage, open ElevenLabs **Developers → Analytics → Usage**
+([official instructions](https://elevenlabs.io/docs/help-center/account/general/how-can-i-see-information-about-credit-usage-for-my-account))
+and the account's Subscription page for its allowance. Use Mem0's dashboard
+Billing/usage view for add/retrieval allowance; its current account numbers were
+not refreshed in this audit. Included credits, nominal USD/token estimates and
+actual cash payments are different measures. No automatic account polling or
+new diagnostics dashboard is added.
 
 ## Repeating the accepted test
 
@@ -91,7 +185,8 @@ browser. Add keys to local `.env` using `.env.example` without overwriting an
 existing credential file. Python pins and npm lockfile are independent of the
 working backend. `web/dist/`, `.env`, environments, dependencies and `output/`
 are ignored. `agent.json` preserves the current selected remote configuration
-(including quiet waiting); `tools.json` preserves the tool definitions. The
+(including quiet waiting, the 4,096-token thinking/answer cap and 10-second
+model-response wait); `tools.json` preserves the tool definitions. The
 tool IDs in `agent-reference.json` were attached to the agent at creation. These
 IDs refer to existing resources in the user's account; checkout does not create
 or provision another agent automatically.
@@ -103,8 +198,10 @@ npm --prefix experiments/agents-mem0 test
 ```
 
 `--verify` performs GETs for Mem0 ping and ElevenLabs agent/tool configuration
-only. The 7 Python and 8 browser checks use mocks/synthetic audio; no real
-microphone or provider generation. Browser checks also load the real SDK bundle
+only. The 49 Python and 10 browser checks last passed with mocks/synthetic
+input; no real microphone or provider generation in those suites. Python now
+includes evaluation-runner isolation checks; live evaluation evidence is
+separate and linked from [the handoff](../../docs/STATUS.md). Browser checks also load the real SDK bundle
 and official worklet under the page CSP. The test server uses fake credentials
 and mocked upstreams. Local readback/evidence is in ignored `output/`.
 
@@ -119,6 +216,15 @@ Sources: [ElevenLabs JavaScript SDK](https://elevenlabs.io/docs/eleven-agents/li
 [Mem0 integration](https://docs.mem0.ai/integrations/elevenlabs).
 
 ## Startup diagnostics
+
+| Problem | First check |
+| --- | --- |
+| Server will not start | Run `web_server.py --check`; fix the named setting, reference or asset. |
+| Port already in use | Reuse the existing tester; check the saved port in STATUS.md. |
+| Session token fails | Check ElevenLabs key/access and account allowance; the page hides upstream details. |
+| Microphone/WebRTC fails | Check browser microphone permission and privacy extensions; the page shows a redacted SDK reason. |
+| Memory read/save fails | Check Mem0 key/access and allowance. Failure is not an empty list or a successful save; retry manually. |
+| Usage unclear | Check provider usage pages above; the tester does not display an account balance. |
 
 If startup fails, the page displays whether it failed obtaining a session token
 or establishing microphone/WebRTC, followed by a sanitized SDK reason. Session

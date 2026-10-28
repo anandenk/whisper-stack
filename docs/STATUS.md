@@ -1,52 +1,436 @@
 # Whisper Stack: current status and session handoff
 
-Updated: 2026-10-26 (America/New_York).
+Updated: 2026-10-28 (America/New_York).
+
+## Browser-backend milestone publication (D42)
+
+**The user approved the final README/diagram and explicitly requested commit
+and push to the existing private repository.** Earlier no-commit/no-push holds
+are superseded for this publication. This packages the completed browser-backend
+scope: selected Agents path, memory viewer, active-only recall, evaluated model
+budgets, offline setup/errors, synthetic evaluation runners/fixtures/reports,
+deferred brainstorming and the README with its single SVG architecture diagram.
+Device integration, independent hosting and new features remain unfinished.
+
+**Pre-publication verification:** build, 49 mocked Python checks, 10 mocked Chrome
+browser checks, offline startup and whitespace pass. Exact configured-key and
+selected secret-pattern scanning of publishable files found no matches.
+Credentials, environments, dependencies, generated bundles and raw evaluation/
+preview output remain ignored. No live evaluation or provider request, memory
+operation, settings change or purchase was performed for publication.
+Remote metadata confirms anandenk/whisper-stack is PRIVATE with main as default;
+fetch confirms local/remote main matched at 822f546 before this publication.
+
+**Runtime checked now:** no listeners on 8766 or 8767; the former tester PID 37914
+is absent. No process was stopped or restarted in this publication. Prior running
+tester claims below are historical. The documented startup command remains the
+way to run it later; ignored local credentials/assets are required.
+
+**Next concrete step:** finish commit/push and record remote verification here.
+Then, when selected, review the board's connection to the existing backend and
+confirm board/cable access before one physical question/answer audio slice.
+
+## README and browser-backend milestone closure (D41)
+
+**The user considers the browser-backend milestone finished and requested a
+polished README before publishing the completed changes together.** This closes
+the agreed personal-prototype scope, not device integration or deployment.
+The current documentation pass does not commit/push or start the next milestone.
+
+README now leads with the project and completed browser milestone, describes
+working capabilities, and includes a single SVG architecture diagram. It shows
+direct browser/ElevenLabs voice, Haiku inside the hosted agent, the local bridge's
+session-token and memory roles, and hosted Mem0. Setup links/commands, scoped
+verification, the existing milestone sequence and repository guide follow;
+earlier implementations are preserved in a collapsed history section.
+
+The user's latest diagram direction replaces the three-flow Mermaid version
+with one complete diagram, showing every component once. The checked-in vector
+asset is docs/assets/backend-architecture.svg, linked from README.md. Explicit
+coordinates keep labels unwrapped and routes separate: direct browser/agent
+voice, browser/bridge setup and tools, two parallel token request/response paths,
+and bridge/Mem0 memory. Latest preview copies are preview-v3.html and diagram-v3.png
+in the evidence folder below; earlier preview versions remain local evidence.
+
+**Verified now:** SVG renders successfully; a local GitHub-style Markdown
+preview was visually reviewed. Desktop and 420 px mobile rendering have no page
+overflow or browser errors. SVG XML, text bounds, local file/heading links and
+whitespace checks pass. This is local rendering, not a hosted
+GitHub readback. Ignored local evidence in
+experiments/agents-mem0/output/readme-2026-10-28/ includes standalone preview.html,
+diagram.png, desktop/mobile screenshots, render-summary.json and before/ copies.
+Preview tools are isolated under that ignored folder; no project dependencies
+or lockfiles changed. The standalone SVG contains no scripts or external assets.
+
+Only README.md, AGENTS.md, this handoff, PROJECT.md and the SVG asset changed
+across this documentation pass;
+all earlier source edits, evaluation runners/reports and notes are preserved.
+The guide retains D40's 49 Python/10 browser checks as prior evidence, separate
+from user-tested voice and bounded real hosted-text checks. No backend suite or
+completed live evaluation rerun; no provider session, account/settings change,
+memory access, service restart or hardware action. main remains at 822f546;
+all subsequent work remains local, uncommitted and unpushed.
+
+**Next concrete step:** review the README, then publish the completed changes
+together under the user's publishing direction. Do not infer publication from
+README completion. After publication, scope the device-connection review and
+confirm board/cable access before physical audio work.
+
+## Personal-prototype essentials checked (D40)
+
+**The user resumed D39 and narrowed readiness to a private, single-owner
+prototype.** The five essentials below are checked at that scope; this is not
+consumer/deployment readiness or a guarantee against every secret/data risk.
+No new account system, deletion UI, diagnostics dashboard or prompt change.
+
+1. **Easy startup:** `web_server.py --check` now validates local settings,
+   the existing agent reference and browser assets without opening a server,
+   microphone or provider connection. Missing/invalid setup produces short
+   instructions without values/raw tracebacks. `--port` is supported; default
+   remains 8766, existing tester remains on 8767. Documentation corrected the
+   stale 1,024-token setting and distinguishes default from running port.
+2. **Private access:** existing loopback binding, Host restriction, same-origin
+   POST/page-token checks and server-side keys are retained. Mocked contracts
+   and read-only local HTTP checks passed. Live agent GET confirms required
+   authentication. These are local-page protections, not authentication against
+   other programs/users on this computer; remote/device access remains unselected.
+3. **Keys/memory isolation:** no configured API keys or selected key/private-key
+   patterns found in current publishable files or reachable Git patch history;
+   no configured keys found in served page/config/assets. This bounded scan is
+   not a universal secret detector. Existing `.env` files are ignored/mode 600;
+   `.env.*` variants are now ignored, with `.env.example` remaining publishable.
+   Personal owner is distinct from synthetic owners. Fixed-owner calls and
+   evaluation isolation pass mocked checks. Spoken secrets can still be sent
+   to providers/saved by the existing agent; automatic secret filtering was
+   neither added nor claimed.
+4. **Know what is saved:** read-only ElevenLabs GET confirms `record_voice=true`,
+   `retention_days=-1`, `delete_audio=false`, `zero_retention_mode=false`.
+   Audio saving/unlimited conversation retention are the existing agent settings,
+   not today's public defaults. Mem0 stores submitted extracted facts separately;
+   this app sets no expiry. Local evaluation evidence persists in ignored output/.
+   Current official retention, audio-saving and individual conversation/memory
+   deletion operations are documented in the guide below. No data deleted,
+   retention changed or deletion operation exercised; Mem0 account retention/
+   backup erasure remains unverified. No automatic-expiry guarantee.
+5. **Basic troubleshooting/usage:** existing sanitized session/memory failures,
+   pending-save wording and manual retries verified; startup guide now maps
+   failures to checks and links provider usage pages. Live subscription GET:
+   4,283/131,000 credits used, 126,717 remaining, extension disabled. Mem0 billing
+   numbers were not refreshed. No account polling/new dashboard.
+
+Guide: [personal essentials and provider controls](../experiments/agents-mem0/README.md#personal-prototype-essentials).
+
+**Verified now:** 49 mocked Python checks and 10 Chrome browser checks pass;
+offline local setup check passes. Five existing local routes return HTTP 200
+with no-store; invalid Host and unauthorized session POST return 403. Only two
+authenticated provider GETs (existing agent and subscription); zero conversations,
+generation, Mem0 requests, memory writes/deletion, settings changes or purchases.
+Provider readback reconfirms Haiku low effort/4,096 tokens/10-second model wait.
+No completed live evaluation, earlier backend or hardware suite rerun.
+
+```sh
+experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/web_server.py --check
+experiments/agents-mem0/.venv/bin/python -m unittest discover -s experiments/agents-mem0 -p 'test_*.py'
+npm --prefix experiments/agents-mem0 test
+```
+
+**Saved local state:** main still at 822f546 tracking origin/main, with all prior
+edits/untracked evaluations/notes preserved; nothing committed or pushed.
+Tester http://127.0.0.1:8767, PID 37914, unchanged and still listening. New startup
+behavior applies on the next invocation; no restart required for this audit.
+Ignored local evidence: experiments/agents-mem0/output/readiness-2026-10-28/
+contains local-summary.json, provider-summary.json and before/ source/doc copies.
+Remote model changes remain only the previously selected D36/D37 settings.
+
+**Next concrete step:** confirm data-cable/board access before selecting one
+physical question/answer audio slice. The missing cable is the recorded hardware
+blocker, not rechecked here. Hardware work is not started/authorized by this audit.
+Remote access, hosting, retention changes, secret-filtering policy, reply polish,
+search parity, large-store/compaction work and brainstorming remain deferred/open.
+
+## Completed evaluation — bounded context passed; initial round complete (D38)
+
+**All three opening details were recalled correctly after 20 intervening
+exchanges, with no Mem0 access or target refresh.** One completed text-only
+session used the unchanged frozen fixture, accepted agent/prompt, Haiku low
+effort, selected 4,096-token/10-second settings and disabled fallback. Exact
+provider messages match the captured 22 user questions and 22 answers plus
+greeting. Final answer: Cinder Finch, ultramarine, 7462. No judge-model calls.
+
+Actual session 116.607 s; provider duration 117 s. Transcript: 45 messages,
+19,812 characters/UTF-8 bytes and 3,324 whitespace-separated words, including
+greeting. Before/after agent hashes match each other and verified D37 settings.
+Zero memory tools/requests, ASR/TTS, microphone/audio, settings change, client
+retry or service restart. Twelve successful reads/auth requests including the
+final allowance check; one WebSocket session. No new feature or larger test.
+
+- **Included usage:** 416 credits (352 platform + 64 LLM), matching settled
+  subscription 3,867→4,283/131,000; 126,717 remain. No purchase/upgrade/extension
+  or extra cash spend. Nominal USD/token usage stays distinct from credits;
+  initiated/irreversible token ledgers are not added together.
+- **Scope:** initial small memory/conversation-context round complete. D32's
+  eight-case answer baseline remains prior evidence. This is a bounded recall
+  pass, not capacity/compaction, general reasoning, voice or hardware proof.
+- **Observed rough edges:** library filler split groups despite the constraint;
+  recipe filler gave an incorrect flour-batching total. Eleven of 20 filler
+  replies exceeded the requested 80-word ceiling (range 66–98). Logged as
+  separate reasoning/instruction-following findings; no tuning or new test.
+- **Verification:** D37's 44 passing mocked Python checks remain prior evidence;
+  D38 changed records only, so they were not repeated. Current whitespace and
+  local links pass. No browser/earlier backend/audio/hardware suite. Tester on
+  port 8767 remains running on PID 37914.
+- **Evidence:** [final context results and historical attempts](../experiments/agents-mem0/evaluation/context-2026-10-27.md),
+  [budget diagnosis/fixes](../experiments/agents-mem0/evaluation/timeout-diagnosis-2026-10-27.md).
+  Ignored output/context-evaluation/ under experiments/agents-mem0 retains
+  context-70664525.json (original) and context-reviewed-70664525.json (review,
+  counts, secondary observations, settled usage). D33–D37 evidence preserved.
+
+**Subsequent action:** D39 saved this evaluation; D40 completed the narrowed
+personal-prototype readiness checks above without another live evaluation.
+Brainstorming remains parked; retention/secret handling, reply-policy choices,
+large stores, compaction, hardware and deployment remain open. All local changes
+are preserved, uncommitted and unpushed. Current remote/local model settings:
+4,096 tokens, 10-second wait, low effort, concise prompt, disabled fallback.
+
+## Prior answer baseline — complete (D32)
+
+**Eight of eight scoped answer cases passed assistant review of real hosted
+output:** three corrected facts, four unknowns and one unchanged fact. The
+existing native Haiku agent chose its own recall queries and used the shared
+D31 active-only tool against the synthetic owner. Each question had a fresh
+text-only conversation/test user, one user message and exactly one recall.
+No answer keys, facts or special system prompt were injected.
+
+Provider transcripts match captured answers; all eight conversations report
+done/text-only and native claude-haiku-5-5 usage, with zero ASR/TTS audio.
+Agent configuration hashes before/after match. No memory write was attempted,
+no remote/app setting changed, and the current browser service was not restarted.
+Unknown answers explicitly admitted missing evidence even with distractors.
+
+- **Included usage:** 132 ElevenLabs credits (128 platform + four LLM), matching
+  subscription usage 3,556→3,688 of 131,000; 127,312 remain. Credit-limit extension
+  stayed disabled. Mem0 reads 37→45 of 1,000; adds stayed 37/10,000. No additional
+  cash payment/purchase/upgrade. Provider nominal USD price fields are retained
+  separately from included credits, tokens and actual payment.
+- **Observed rough edges:** employer/access-code replies exceeded the preferred
+  30 words (40/41); one offered to save an access code. No code was supplied or
+  stored. Brevity/secret-handling policy remains open; no tuning was performed.
+- **Verified now:** all 36 mocked Python checks pass, including seven new
+  runner-isolation checks; offline default, whitespace and local links pass.
+  D31's 10 browser checks remain historical; no new browser/hardware suite.
+
+Full [answer findings, commands and limits](../experiments/agents-mem0/evaluation/answers-2026-10-27.md).
+Ignored evidence folder: experiments/agents-mem0/output/answer-evaluation/;
+answers-c381b8b5.json preserves original replies/tool traces/provider usage,
+answers-reviewed.json adds semantic review, and allowance-after.json plus
+mem0-allowance.json record the account checks. Eight sessions/35 runner HTTP
+requests (27 ElevenLabs reads/auth and eight Mem0 searches); no retries.
+
+**Subsequent action:** D33/D34 stopped before recall, D35–D37 corrected the
+model budgets, and D38 passed the bounded context scenario. One trial is not
+general reliability, multi-hour, scaling or compaction proof. Brainstorming
+and reply-policy refinements remain deferred; nothing is committed or pushed.
+
+## Current implementation — active-only recall (D31)
+
+The user selected step 1 after the memory-evaluation recap. **Normal recall now
+passes latest_only=True** to Mem0 in run.py's shared retrieveMemories handler.
+Owner scope, top_k=5 and the response format are unchanged. The viewer's get_all
+call retains default history, refresh and paging; no memory is deleted or
+rewritten. Historical-question recall remains a separate policy choice.
+
+**Verified in D31:** all **29 Python checks and 10 browser checks pass**, with mocked
+providers/synthetic input. The existing contract check confirms caller arguments
+cannot disable active-only recall or change the owner; the viewer check includes
+a superseded record and still requires the unchanged history-list call. Local
+page/assets/config on port 8767 return HTTP 200, and whitespace/local links pass.
+No live memory request, provider session, microphone access or generation was
+initiated in D31; no remote agent setting, dependency or audio behavior changed.
+The earlier custom backend/hardware suites were not rerun.
+
+**Running tester:** http://127.0.0.1:8767. The prior 8766/8767 listeners were no
+longer present when checked. Started one updated loopback server on 8767,
+PID 37914, using the command in Current state below. It is left running.
+Reload any previously opened page before using it. Ignored local verification
+summary: experiments/agents-mem0/output/active-only-recall-verification.json.
+
+**Prior live evidence (D30):** all three old facts were confirmed superseded and
+linked to active replacements. Default reads still included history after about
+an hour; latest_only=true excluded all three old IDs and ranked each current
+fact first. Full-history/active-only counts were 33/30. This was native behavior
+on the Free account, not a failed superseding mechanism or an upgrade requirement.
+Unknown-answer controls still returned distractors; active-only retrieval does
+not establish answerability. See [native findings/evidence](../experiments/agents-mem0/evaluation/native-corrections-2026-10-27.md).
+
+The actual-assistant answer test is complete in D32 and bounded context passed
+in D38 above. Multi-hour context/scaling remain untested. Preserve every local edit; nothing is committed
+or pushed.
+
+## First retrieval baseline — 2026-10-27 (D29, historical)
+
+**First isolated retrieval baseline completed and assistant-reviewed.** The user
+selected existing included Mem0 allowance only, with no additional spend.
+The standalone runner defaults to a plan with no key reads or network requests.
+It submitted 30 fabricated facts, three repeats and three corrections under a
+fresh owner, then ran 16 searches using the app's top_k=5/provider defaults.
+
+- **Findings:** all 30 seed facts represented on inspection; duplicate phase
+  kept the same 30 ID/text records. Corrections added three records (33 total),
+  preserving the outdated assertions. Correct evidence appeared in top five
+  for all 12 known-answer queries; unchanged facts ranked first in 9/9, but
+  **all three corrections ranked the old assertion first and new fact second**.
+  All four unknown-answer questions returned distractors. This is retrieval
+  evidence, not proof of the agent answering correctly or hallucinating.
+- **Timing/size:** median search 304 ms, maximum 413 ms; largest current tool
+  result 339 UTF-8 bytes. Tiny synthetic sample; no scale/context-size bound.
+- **Processing delay:** the original run stopped at write 23 after six status
+  checks. A later explicit read confirmed completion. A tested explicit
+  continuation submitted only untouched cases, preserving the owner and
+  cumulative caps; no write replay. Revised bounded wait: 20 status checks.
+- **Allowance:** signed-in Billing before/after showed Free, model calls on
+  Mem0, adds 1→37 of 10,000 and retrievals 5→25 of 1,000. Usage stayed included.
+  Ledger: 36 adds, 70 event reads, four lists, 16 searches (126 total, cap 280).
+  Actual token/USD usage was not returned; it remains unknown.
+- **Verified now:** 24 mocked Python checks pass (13 evaluation + 11 existing).
+  Plan-only execution, whitespace and local links pass. No browser suite,
+  earlier custom-backend suite or hardware check was rerun for this CLI addition.
+
+Full findings, commands and durable evidence filenames:
+[baseline results](../experiments/agents-mem0/evaluation/baseline-2026-10-27.md)
+and [procedure](../experiments/agents-mem0/evaluation/README.md). Ignored local
+evidence is in experiments/agents-mem0/output/whisper-stack-eval-20261027T191436Z-0c01e00a62fa/;
+reviewed.json retains the review, original/continued reports preserve the run.
+The evaluation owner and 33 records remain; no deletion was performed.
+
+**Original next action (completed by D30 above):** investigate native correction/temporal handling against the
+three captured conflicts and define a small follow-up to distinguish delayed
+enrichment from persistent ambiguity. No tuning, follow-up provider calls,
+larger dataset or additional context agent was started. Long-session recall
+and answer abstention remain untested; they need separate evaluation scope.
+Brainstorming stays [parked](../notes/brainstorm-2026-10-27.md). App/agent settings,
+audio, credentials and existing services are unchanged. All local changes are
+uncommitted and unpushed; the user's no-commit/no-push instruction still applies.
+
+## Historical paused handoff — 2026-10-27 (superseded only by D29)
+
+**Paused at the user's request. Preserve every current edit; do not commit or
+push.** The user wants to commit/push the completed changes together later.
+
+- **Saved state:** main at 822f546, with 12 modified tracked files. Architecture
+  docs and the memory viewer are all saved locally, uncommitted and unpushed.
+  No changes were discarded, reverted or stashed. Changed files are AGENTS.md,
+  README.md, docs/PROJECT.md, this handoff, and experiments/agents-mem0/{README.md,
+  web_server.py, test_web_server.py, web/client.js, web/client.test.mjs,
+  web/index.html, web/style.css, web/mock_server.py}.
+- **Decisions/completed work:** D27 selects Agents + Haiku 5.5 + hosted Mem0 as
+  the main backend; D28's view-only saved-memory list is implemented and
+  user-accepted. It uses the existing owner, explicit loading/refresh, 25-item
+  pages and distinct empty/error states. Preserve official SDK audio processing.
+- **Tests already run:** build passed; 11 Python and 10 Chrome browser checks
+  passed with mocked providers. One live read returned/rendered 1 memory with
+  no session start, microphone access or memory write. Desktop/mobile screenshots
+  were reviewed. Evidence: experiments/agents-mem0/output/memory-view-verification.json
+  and memory-view-{desktop,mobile}.png (ignored/local). No runtime tests were
+  rerun for this pause; final whitespace/link checks pass.
+- **Processes:** lsof at pause confirms listeners on 8766 (PID 83076, older
+  server) and 8767 (PID 94123, updated viewer). Left both running. Use
+  http://127.0.0.1:8767 for the feature; recheck processes after resuming.
+- **Remaining work:** deletion, revised save feedback, session stats, retention
+  settings and web search are not built. Memory-growth testing is only proposed;
+  no test harness, large dataset or extra context agent was created. Prefer
+  Mem0's native retrieval/cleanup before custom management. Dream capabilities
+  were checked in docs, not this account; automatic ElevenLabs live-context
+  compression remains unconfirmed. Hardware/deployment remain unfinished.
+- **Next step on resume:** review the small isolated-memory test plan in
+  PROJECT.md and agree live-test scope/budget before any provider writes. Begin
+  with 30–50 fake facts and fixed recall/duplicate/change/missing-fact questions;
+  expand only if useful. Test long conversation recall separately from Mem0.
+  Do not resume implementation or commit/push until the user asks.
 
 ## Current state
 
-The user listened to the comparison and approved Flash v2.5. The application and
-local configured TTS default is **eleven_flash_v2_5**. Scribe v2, Haiku 5.5, and the
-George voice remain. Implementation and handoff are published on the rebuild
-branch. The user then authorized overlapping Haiku text generation and speech.
-The streaming route now sends final-answer words to ElevenLabs before Haiku
-finishes. One silent live check reached first client audio at **2.539 s** and
-completion at **3.164 s**; audio arrived before the model terminal event. The
-earlier sequential sample was 2.737 s / 3.311 s. This is a modest single-sample
-improvement, not an achieved 1–1.5 s target or a statistical benchmark. Both
-checks use the same synthetic question file; no physical mic/playback was used.
-Replies are saved for later review. The local server is running on
-127.0.0.1:8765; check /health before relying on process state.
+The user selected **ElevenLabs Agents + native Haiku 5.5 + hosted Mem0 as the
+main backend** on October 27 (PROJECT.md D27). The accepted browser client uses
+ElevenLabs' official WebRTC SDK. This resolves the architecture choice; the code
+still lives in experiments/agents-mem0, and the bridge remains loopback-only.
+The earlier custom pipeline in backend/ is preserved independently. Its general
+web search, token/cost ledger, Flash v2.5 setting and measured latency do not
+automatically apply to the selected Agents path (currently Flash v2).
 
-The user's subsequent microphone attempt hit “Invalid streaming event.” The
-WebSocket adapter forwarded provider-sized PCM frames as single NDJSON events,
-which could exceed the browser's 64 KiB line cap. The adapter now splits PCM into
-16 KiB events before base64 encoding, preserving all samples and the existing
-browser cap. The local server was restarted with the fix. The user subsequently
-retried with their own voice and reported that it “works pretty great,” confirming
-successful browser use and user-accepted spoken quality after the correction.
-This is user-reported acceptance, not an independent quality/latency benchmark.
-The agent's correction checks used mocked providers without audible playback.
+D28 is complete: **Saved memories** on the existing tester loads an owner-scoped
+list only when View is clicked. Refresh starts at page 1; Previous/Next browse
+25 memories per page. Loading, empty and failed states are separate. The list
+returns text/counts only, displays plain text safely and keeps provider metadata,
+URLs and credentials server-side. It adds no memory writes/deletes or audio changes.
 
-## D23–D25 isolated Agents + Mem0 experiment (complete)
+**Current runnable version: http://127.0.0.1:8767.** D31 found the old 8766/8767
+processes absent and started a fresh updated server on 8767 (PID 37914). It uses
+the existing configured owner and provider resources. Check processes before reuse.
+
+```sh
+experiments/agents-mem0/.venv/bin/python -m uvicorn web_server:create_app --factory --app-dir experiments/agents-mem0 --host 127.0.0.1 --port 8767 --no-access-log
+```
+
+Verified in D28: the build, **11 Python tests** and **10 Chrome browser tests** passed,
+using mocked providers/synthetic input. New checks cover fixed-owner listing,
+paging, access checks, empty/error states, plain-text rendering and no automatic
+memory/audio requests. Existing conversation/tool/worklet checks still pass.
+A separate live browser check returned HTTP 200 with **1 saved memory**, rendered
+successfully after one list request, with zero session-token requests, microphone
+requests or browser errors. This was a read-only Mem0 check, with no conversation,
+speech generation or memory write. Counts-only live evidence is at ignored
+experiments/agents-mem0/output/memory-view-verification.json. Mocked desktop/mobile
+screenshots at output/memory-view-desktop.png and memory-view-mobile.png were
+visually reviewed; the 375 px browser check found no horizontal overflow.
+
+The earlier architecture documentation changes were already local at session
+start. All those changes plus D28 remain uncommitted and unpushed on main at
+822f546. During D28 no provider settings, dependencies, earlier backend/ code or
+firmware changed. D36/D37 later changed only the selected model wait/cap as
+recorded above. The earlier custom-backend suite was not rerun.
+
+**Discussion before D29:** the user accepted the viewer and raised memory/context
+growth as a major concern, asking whether a separate context manager would help.
+Read-only inspection confirms recall uses Mem0 search with top_k=5 and returns
+only memory strings, discarding scores/dates; there is no application-level
+returned-text budget. Five per lookup is not a bound on accumulated tool results
+or live conversation history. Current Mem0 docs describe ranked hybrid search,
+relevance thresholds and optional reranking. Proposed next investigation:
+evaluate recall/latency at increasing isolated store sizes, add bounded retrieval
+rules where needed, and verify ElevenLabs' long-session/context controls before
+adding another model. No context agent, dataset creation, live call or provider
+change was authorized or performed in that discussion. D29 subsequently
+authorizes the bounded baseline described at the top of this handoff.
+
+Earlier documentation described Dream Supersede/Merge on all plans. D29's
+generic-pricing recheck left entitlement unresolved because Dream was listed
+under Custom. D30's actual Free-account reads now confirm superseded links
+and working latest_only filtering. Pricing labels did not establish that the
+native lifecycle features were absent. Synthesis/dashboard entitlements remain
+unverified. Prefer these demonstrated native controls before custom management.
+ElevenLabs' previously checked guidance asks applications to implement history
+summaries/windows; automatic live-context compaction remains unconfirmed.
+
+## Selected Agents + Mem0 path (D23–D25 basic validation complete; D27 adopted)
 
 **Basic setup and collaborative validation are complete.** The user accepted
 speech recognition, natural interruptions, quiet waiting after answers, and
 hosted Mem0 preference recall in a new session. These are user-reported live
 results, not independent acoustic, latency or memory-reliability benchmarks.
 The completed rebuild was merged into main through PR #1 (D26), verified on
-GitHub and in the local checkout. The subsequent README rewrite is complete
-locally: 88 lines introducing the old project, current rebuild, validation,
-startup, repository layout and license. The previous 459-line README is preserved
-in [the archive](../notes/archive/README-before-overview-2026-10-26.md), with
-relative links rebased. The saved project one-liner is retained verbatim.
+GitHub and in the local checkout. The subsequent README rewrite was published
+on main. The previous 459-line README is preserved in
+[the archive](../notes/archive/README-before-overview-2026-10-26.md), with relative
+links rebased. The saved project one-liner is retained verbatim.
 
 ### Current implementation
 
 - Separate agent **Whisper Stack - D23 Haiku 5.5 + Mem0 test**,
   `agent_placeholder_000000000000000000`: native `claude-haiku-5-5`, low effort,
-  1024-token cap, disabled alternate LLM fallback, required authentication, and
+  4096-token thinking/answer cap, 10-second model wait, disabled alternate LLM
+  fallback, required authentication, and
   response-returning `addMemories`/`retrieveMemories` client tools.
-- Preferred local tester: **http://127.0.0.1:8766**, served by
+- Currently running local tester: **http://127.0.0.1:8767**, served by
   `experiments/agents-mem0/web_server.py`. Check process state before reuse.
   Start activates microphone/speaker and obtains a private-agent WebRTC token;
   End closes it. Page load makes no provider call or microphone request.
@@ -57,15 +441,15 @@ relative links rebased. The saved project one-liner is retained verbatim.
 - A loopback-only FastAPI bridge keeps both API keys server-side and forwards
   memory tools to hosted Mem0 using fixed USER_ID `whisper-stack-d23-test`.
   It checks Host/Origin/local-page token, bounds tool arguments, disables caching,
-  sanitizes failures, and exposes no CORS. Memory initializes on the first tool
-  call. No application-level retries; vendor transport recovery retains defaults.
+  sanitizes failures, and exposes no CORS. Memory initializes on the first explicit memory
+  action (tool call or list request). No application-level retries; vendor transport recovery retains defaults.
 - Native `conversation_config.turn.turn_timeout=-1` disables seven-second idle
   check-ins (D25). The session stays available for user-initiated follow-ups;
   the unchanged maximum duration is 600 seconds. PATCH/GET readback verified only
   the intended setting changed. Local agent.json reflects current configuration.
 - The English-agent API rejected Flash v2.5; this test uses Flash v2 and George.
   WebRTC negotiates its own audio transport. The existing backend remains on its
-  approved Flash v2.5 default. No backend, legacy firmware or deployment changes.
+  approved Flash v2.5 default. D24 made no custom-backend, firmware or deployment changes.
 - Mem0 V3 pending saves are reported as submitted, not confirmed available.
   The user separately confirmed recall after starting a new session. Browser
   transcripts remain in page memory; numeric backend diagnostics do not cover
@@ -77,7 +461,7 @@ relative links rebased. The saved project one-liner is retained verbatim.
 
 ### Verified and retained context
 
-**Final checks for publication:** 7 experiment Python checks and 8 Chrome browser
+**Historical pre-D28 publication checks:** 7 experiment Python checks and 8 Chrome browser
 checks pass with mocked providers/synthetic input. The unchanged working-backend
 Python suite passes **120 tests**, with its existing Starlette/HTTPX deprecation
 warning. The existing backend browser suite also passes all 14 checks on the
@@ -126,8 +510,9 @@ live conversation. Keep existing hosted resources; checkout does not provision
 another agent. Local ignored readback evidence includes
 `experiments/agents-mem0/output/idle-checkins-verification.json` and
 `webrtc-verification.json`; the relevant outcomes are summarized above for other
-machines. No further feature, hardware, migration or deployment work follows
-from completing or publishing this experiment.
+machines. D27 subsequently selected this path as the main backend; the proposed
+remaining milestones are recorded in PROJECT.md. D28 adds the memory viewer;
+other proposed features remain unstarted.
 
 The Anthropic key was generated on
 October 25 with a user-reported 30-day expiry, expected around **November 24, 2026**;
@@ -136,7 +521,7 @@ Console's exact timestamp takes precedence. No scheduled reminder was requested.
 Read [PROJECT.md](PROJECT.md) for accepted decisions, [AGENTS.md](../AGENTS.md) for
 working boundaries, and [backend/README.md](../backend/README.md) for setup/API commands.
 
-## Implemented
+## Earlier custom backend (preserved)
 
 - New implementation is isolated in backend/. Legacy server/, firmware/, tests/,
   tools/, root dependencies and root example configuration remain reference.
@@ -316,39 +701,32 @@ Recordings, screenshots, metrics JSON, SQLite data and secrets are ignored/local
 only. Their measured summaries are preserved here for other machines. Human
 assessments are not independent STT/voice benchmarks; Safari/ESP32 remain unverified.
 
-## Blockers and next action
+## Blockers and next action (see current handoff above)
 
-The current increment is complete: WebRTC interaction, interruption, quiet
-waiting and hosted memory recall across sessions are accepted by user testing.
-No browser-startup or credential blocker is currently reported. The user
-requested and completed merge through
-[PR #1](https://github.com/anandenk/whisper-stack/pull/1).
-The next requested documentation increment is now ready for review: the main
-README gives short old/new descriptions and links to the detailed guides. Local
-links and whitespace checks pass; archive verification confirms the full prior
-README is retained apart from link rebasing. No code, configuration, service or
-provider state changed, so no runtime tests were rerun for this documentation-only
-edit. Next action: none selected; the user requested publication and wrap-up. Do not
-implicitly start hardware, migration or additional features.
-Broader retention policy, migration, web-search parity and deployment remain
-choices to revisit together.
+D28's view-only memory list is complete, live-checked and user-accepted. No blocker
+remains for this feature. D29/D30 evaluations led to D31's implemented native
+active-only recall. D32 passed the eight hosted answer cases, D36/D37 corrected
+the model limits, and D38 passed bounded context recall. The initial evaluation
+round is complete; see the top for the saved backend-readiness starting point.
+The viewer remains at http://127.0.0.1:8767; its new listener was confirmed in D31.
+New saves may take time to appear; Refresh is
+manual and no polling/retries run automatically. This list shows currently
+available memories using Mem0's default listing behavior, not pending save jobs.
 
-The user accepted their own-voice browser test after the event-size correction.
-The overlapping backend and large-frame browser path also pass automated checks.
-The local backend is running; check /health before reuse.
-Recommended next project milestone is a minimal
-device capture/playback interaction once the board/parts and data cable are
-available; no firmware work is authorized by this recommendation.
-The latest sample waited about 1.11 s for STT and another 1.20 s before final-answer
-text, so overlap alone has not reached the proposed 1–1.5 s target. Realtime input,
-firmware and deployment remain outside this increment. Main integration is
-authorized by D26. Hardware
-programming still needs a micro-USB data cable.
+The user authorized the viewer, D29/D30 evaluations and D31 recall change. Deletion,
+changed save feedback, session statistics, retention settings and web search
+remain unimplemented/unselected for the next build. SDK audio processing and
+existing session behavior are preserved. Do not automatically start feature 2.
 
-The user reports ESP32-S3-WROOM-1 and ESP32 DevKit V1 plus other checklist parts;
-exact variants/specifications/wiring are unverified. No firmware build/flash,
-ESP32 capture/playback, or GPU validation was performed. Eventual remote hosting,
-final voice, memory/retention, provisioning, and hardware contract remain open.
+The device transport and memory-tool routing remain open. The last reported
+missing data cable blocks flashing, not local backend work. Exact board variants,
+wiring and parts are unverified. Deployment and workstation-independent operation
+remain unfinished. The milestone sequence is in PROJECT.md.
+
+The viewer's earlier build, 11 Python checks, 10 browser checks and one live
+memory-list read remain historical evidence; D37's 44 mocked checks and D38's live context result are the latest verification above.
+The source, decision records and handoff are local only,
+uncommitted and unpushed. Generated bundles and output evidence remain ignored.
 
 ## Git and historical context
 

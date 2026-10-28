@@ -14,3 +14,7 @@ button:focus-visible {outline: 3px solid #bbddc5; outline-offset: 3px;}
 #transcript {padding-left: 0; list-style: none;}
 #transcript li {padding: 12px 0; border-bottom: 1px solid #344138; overflow-wrap: anywhere; white-space: pre-wrap;}
 .note {margin-top: 30px;}
+#memories {padding-left: 24px;}
+#memories li {padding: 12px 0; border-bottom: 1px solid #344138; overflow-wrap: anywhere; white-space: pre-wrap;}
+#memory-status {font-size: 14px; color: #b7c1b9;}
+#memory-pages:not([hidden]) {display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 20px;}

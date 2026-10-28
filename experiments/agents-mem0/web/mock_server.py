@@ -11,6 +11,7 @@ from web_server import create_app
 memory = AsyncMock()
 memory.add.return_value = {"status": "PENDING"}
 memory.search.return_value = {"results": []}
+memory.get_all.return_value = {"count": 0, "next": None, "previous": None, "results": []}
 app = create_app(
     values={"ELEVENLABS_API_KEY": "fake-eleven", "MEM0_API_KEY": "fake-mem0", "USER_ID": "test-user"},
     reference={"agent_id": "test-agent"},

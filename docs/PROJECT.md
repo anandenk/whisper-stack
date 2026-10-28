@@ -15,8 +15,19 @@ the workstation switched off. Fully offline AI processing is not a requirement.
 > Haiku 5.5 + Mem0, using ElevenLabs’ WebRTC audio.
 
 Saved at the user's request on 2026-10-26 for a future finished-project
-description or showcase. This wording currently describes the isolated Agents
-experiment; final project architecture remains subject to later decisions.
+description or showcase. On 2026-10-27 the user selected this Agents + Mem0
+architecture as the main backend (D27). WebRTC is the accepted browser transport;
+the physical device transport remains unverified and undecided.
+
+## Deferred brainstorming
+
+The user's October 27 handwritten ideas are preserved separately in
+[deferred brainstorming](../notes/brainstorm-2026-10-27.md): optional vault access,
+model alternatives, screen/face visualizations, enclosure ideas, microphone and
+display priorities, hardware feasibility, and a proposed development order.
+The user asked to park these ideas and focus on making the existing backend
+solid first, returning to the prior handoff. They are not new implementation
+requirements; D29 resumes the bounded memory evaluation from the prior handoff.
 
 ## Decisions from the revival discussion
 
@@ -52,6 +63,22 @@ distinguished from work the user has asked to implement.
 | D24 | Try ElevenLabs’ official browser WebRTC client for the isolated Agents + Mem0 experiment (user authorization, 2026-10-26). | After the Python microphone correction, the user confirmed input/output worked but reported the assistant hearing its own speaker output repeatedly. They rejected muting capture during playback and custom echo-cancellation integration, first requested planning, then selected the official WebRTC client. Use the SDK/browser’s existing audio processing, preserving the same test agent and Mem0 tools. A minimal loopback page/credential-and-tool bridge is within this test; the working backend, device firmware, deployment and production migration remain unchanged/out of scope. |
 | D25 | Answer one-off questions, then wait quietly for user-initiated follow-ups (user decision, 2026-10-26). | The user accepted the WebRTC audio test in Edge but does not want repeated “are you still there?” prompts during silence. Disable the test agent's native silence re-engagement timer (`conversation_config.turn.turn_timeout=-1`, previously 7 seconds). Keep follow-up questions/context within the open session; this is not an auto-disconnect or wake-word implementation. Other settings, memory tools and working backend remain unchanged. |
 | D26 | Merge the completed rebuild into main, then rewrite the main README in the next turn (user authorization, 2026-10-26). | The user explicitly requested that the agent create/merge the PR itself after publication and validation. This supersedes D16's earlier no-main-merge boundary. Preserve the commit history and legacy implementation; merging the source does not select a production migration. Defer the README rewrite to the next turn: briefly explain the old project, briefly explain the new project, and choose other relevant information together. |
+| D27 | Adopt the accepted ElevenLabs Agents + Haiku 5.5 + hosted Mem0 work as the main backend (user decision, 2026-10-27). | The user explicitly selected the current work after clarifying whether it should replace the custom STT → Haiku → TTS pipeline as the main architecture. This supersedes D23–D26's experiment-only architecture boundary. The implementation currently remains in experiments/agents-mem0; backend/ is retained as the earlier independent implementation. Selection does not mean code has been relocated, feature parity achieved, or deployment/hardware verified. This turn records the decision and remaining milestones; it does not start their implementation. |
+| D28 | Build only feature 1: view saved memories (user authorization, 2026-10-27). | The user selected the first feature from the milestone-1 breakdown. Add an on-demand, paginated memory list to the existing tester, scoped to the same fixed owner, with refresh and distinct empty/error states. No deletion, memory-write changes, session statistics, retention changes or search are included. Preserve SDK audio and the working conversation path. |
+| D29 | Start the isolated memory evaluation; use existing included Mem0 allowance only, with no additional spend (user authorization, 2026-10-27). | Build and verify the offline runner, then evaluate 30 fabricated facts, three duplicate submissions, three corrections and 16 queries under a new owner after checking account allowance. Keep the application's top_k=5 and provider-default extraction/search settings. Separate lexical diagnostics from semantic review and retrieval from answer generation. No existing-owner writes, automatic retries, deletion, plan changes, additional model/audio calls, larger dataset or deferred features. Preserve all local changes without committing/pushing. Long-session conversation testing remains a separate stage. |
+| D30 | Investigate native correction/temporal handling with a small follow-up (user authorization, 2026-10-27). | Inspect the six captured old/new records and compare delayed default reads with native latest_only=true on the existing synthetic owner. Bound the read-only run to 20 requests and nine searches, including three unchanged/unknown controls. Continue using included Mem0 allowance only, without writes, app/agent settings changes, paid upgrades, another model, dataset expansion or commit/push. Preserve lifecycle fields in evaluation evidence so retained history is distinguishable from active contradictions. |
+| D31 | Apply active-only retrieval to normal current-fact recall; preserve historical viewing (user authorization, 2026-10-27). | D30 verified the native filter on all three corrections. Add latest_only=True to the shared retrieveMemories search while retaining its fixed owner/top_k=5 and the viewer's default history listing. No deletion, new historical-query mode, audio/agent change, additional live evaluation or commit/push. Explicit historical questions may need a later history-aware recall policy. |
+| D32 | Run a bounded actual-assistant evaluation of corrected answers and unknown-answer behavior (user authorization, 2026-10-27). | Use the existing hosted Haiku agent with its unchanged prompt/model/tools and already-permitted text-only session override. Eight fresh sessions, one frozen question each: three corrections, four unknowns and one unchanged fact. Route the shared active-only recall handler to the existing synthetic Mem0 owner; block writes. Included ElevenLabs credits/Mem0 allowance only; no purchases, settings changes, retries, microphone/speaker use or commit/push. Bound to 16 memory searches, 64 HTTP reads/searches, 50 seconds per case and a 1,000-credit observed-delta stop threshold between sessions. Preserve transcripts/tool evidence and distinguish text-answer results from audio/hardware/long-context proof. |
+| D33 | Run the final bounded conversation-context test, then close this initial evaluation round if it passes (user authorization, 2026-10-27). | One unchanged hosted Haiku agent, one text-only session: three fabricated details in the opening message, 20 intervening exchanges, then recall. No Mem0 reads/writes, agent changes, microphone/audio, extra spend or commit/push. Cap at 22 user messages/300 seconds, retaining transcript size, elapsed time and included usage. Check the existing session limit and allowance first. This is a bounded early-detail baseline, not context-window capacity or compaction proof; no automatic larger test. |
+| D34 | Repeat the same D33 context scenario once after its provider timeout (user authorization, 2026-10-27). | Preserve the original inconclusive attempt. Recheck included credits/configuration and retain all D33 isolation and session bounds. No fixture/prompt/agent changes, Mem0 access, additional cash spend, further automatic retry or commit/push. Review actual transcript/usage; a pass closes this initial evaluation round without starting another milestone. |
+| D35 | Diagnose the repeated hosted conversation timeout (user authorization, 2026-10-27). | Inspect existing evidence, current provider settings and SDK/protocol first; use small controlled text probes within existing included credits if needed. First compare simple follow-ups with the unchanged problematic question as the first user message, preserving the current agent/prompt/model and blocking all Mem0 access. No production settings change, model switch/fallback activation, extra cash spend, commit/push or automatic full context rerun. |
+| D36 | Raise only the hosted model response wait from four to 10 seconds and check the unchanged problematic question once (user authorization, 2026-10-27). | Test D35's leading timeout hypothesis with one narrow remote PATCH, exact configuration-diff verification and one text-only session within existing included credits. Preserve Haiku, prompt, low effort, output cap, disabled fallback, tools, audio, owner and session/silence settings. No Mem0 access, full context rerun, additional retries, cash spend, commit or push. |
+| D37 | Raise only the thinking-plus-answer cap from 1,024 to 4,096 tokens and test the unchanged printer question once (user authorization, 2026-10-27). | Test D36's token-exhaustion hypothesis with one narrow remote PATCH, exact configuration-diff verification, matching local configuration/evaluation guard and a single text-only question within included credits. Preserve the selected 10-second wait, Haiku/low effort, concise prompt, disabled fallback, audio, tools and owner; no Mem0 access, full context rerun, automatic retries, extra cash spend or commit/push. |
+| D38 | Run the original frozen context scenario once with the selected 4,096-token/10-second settings (user authorization, 2026-10-27). | Complete the sole unfinished initial check: three fabricated opening details, 20 unrelated exchanges and final recall in one text-only session. Same frozen fixture, no Mem0 access or settings changes. Preserve original attempts; recheck included credits/configuration. Retain D33 session/message/time bounds, no automatic retry, expansion, additional cash spend or commit/push. Close this initial evaluation round if it passes. |
+| D39 | Save all progress and resume next session with backend readiness (user request, 2026-10-27). | Stop after the local handoff; preserve every edit, evaluation report and running service without commit/push. The initial memory/context round is complete. Next session begins with a read-only review of fixed-owner/client-access assumptions on the selected Agents path, producing a small readiness gap list and next increment. No automatic repeated evals, architecture switch, new feature, retention/deletion change, spending, deployment or hardware work. |
+| D40 | Check the five essentials for a private personal prototype (user authorization, 2026-10-28). | Keep startup simple, access local and owner fixed, secrets unpublished and synthetic tests separate. Understand provider storage/deletion and use existing failure messages/provider usage pages. Make small local fixes for demonstrated gaps; no consumer accounts, custom deletion UI or diagnostics dashboard. Preserve the current service and all edits without commit/push. Retention changes, data deletion, extra spending, deployment and hardware work remain separate choices. |
+| D41 | Close the browser-backend milestone and build the project README before publishing the completed work (user direction, 2026-10-28). | Present the working system with one complete architecture diagram, clear setup, scoped verification and the existing device milestones. User review selected a single diagram with each component once; use a checked-in SVG for readable fixed layout instead of the earlier Mermaid variants. Browser backend complete means the agreed personal-prototype scope; device transport, hardware and hosting remain unfinished. Current request is the README; no new backend feature, service restart or publication is performed in this documentation pass. |
+| D42 | Commit and push the completed browser-backend milestone and approved README (user authorization, 2026-10-28). | Supersedes the earlier no-commit/no-push hold for this publication. Publish to the existing private main branch, including completed source/tests, synthetic fixtures/evaluation summaries, deferred notes and documentation. Keep secrets, dependencies, generated bundles and raw evidence ignored. No new feature, live evaluation, provider change, service restart, deployment or hardware work. |
 
 ### D23 setup choices and boundary (2026-10-26)
 
@@ -60,7 +87,8 @@ exist under [experiments/agents-mem0](../experiments/agents-mem0/README.md).
 Authentication is required (signed URL for Python, session token for WebRTC),
 and alternate LLM fallback is disabled so the
 experiment retains the selected model. Agent defaults: low reasoning effort,
-1024-token cap, short replies, George voice, fixed local test-user memory scope.
+an initial 1,024-token cap (superseded by D37's 4,096), short replies, George
+voice, fixed local test-user memory scope.
 The English Agents API rejected `eleven_flash_v2_5`, so the experiment uses
 `eleven_flash_v2` (agent setup choice); D21's working-backend default is unchanged.
 These are replaceable experiment settings, not a backend migration or final
@@ -73,36 +101,39 @@ reported Chrome also works after disabling multiple privacy extensions; the
 specific extension/rule was not isolated. D25 disables idle re-engagement.
 The user confirmed that a saved preference was recalled in a new session,
 validating the basic hosted Mem0 persistence/recall flow. D23–D25 setup and
-collaborative evaluation are complete; this does not authorize migration or
-further feature work.
-ElevenLabs creation defaults currently record voice and retain conversation data
-indefinitely; long-term retention policy remains an open choice. See STATUS.md
+collaborative evaluation are complete. The original experiment-only boundary
+was subsequently superseded by D27's selection as the main backend; new feature,
+deployment and hardware milestones still require their own implementation scope.
+The existing agent's read-only D40 check confirms voice recording and unlimited
+conversation retention (`retention_days=-1`); this is its actual configuration,
+not a claim about today's provider defaults. Long-term retention remains an open choice. See STATUS.md
 for verification and next action.
 
 ## Intended component responsibilities
 
-ElevenLabs is selected for speech recognition and synthesis. The first backend
-uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
+The selected main backend uses ElevenLabs Agents for conversation and audio,
+native Claude Haiku 5.5 for replies, and hosted Mem0 for persistent memory.
+The official WebRTC SDK handles browser audio. Final device transport remains open.
 
 - **Device:** microphone capture, wake/button interaction, speaker playback,
   display, controls, and connection/error behavior.
-- **Backend:** device authentication, conversation orchestration, session state,
-  and AI service integration. Initially runs on a development computer; eventually
-  runs remotely. Normal device operation must not require that computer's
-  microphone, speakers, or GUI.
-  backend/ implements local health, voice listing, recorded-file transcription,
-  buffered and streamed synthesis, Haiku chat with bounded general search,
-  a single-turn voice loop, and numeric usage
-  diagnostics. Device authentication and server conversation sessions are future work. It runs on
-  loopback and returns 16 kHz mono 16-bit PCM in WAV for initial audio testing;
-  that is not a hardware-verified audio contract.
-- **Development tester:** a local browser page at /tester records short questions
-  only after an explicit action and uploads only after Send. It plays streamed
-  speech as it arrives, offers mute/replay, and shows source links and timings.
-  Recorded STT finishes first, then Haiku text and TTS overlap. It is not device
-  firmware or a deployed client.
-- **AI services:** speech recognition, language processing, and speech synthesis.
-  Use ElevenLabs for speech recognition/synthesis and Claude Haiku 5.5 for replies.
+- **Main service:** the FastAPI bridge in experiments/agents-mem0 currently
+  issues private-agent WebRTC session tokens and forwards memory tools to Mem0,
+  keeping keys server-side. It is loopback-only, with a fixed test-owner scope.
+  Device authentication, deployment and broader service diagnostics remain work.
+  ElevenLabs owns the live conversation; do not rebuild its audio/session engine.
+- **Development tester:** the official browser WebRTC client (default port 8766;
+  saved running instance on 8767) is the
+  accepted main-path tester. Capture/playback and audio processing belong to the
+  SDK. The page currently relays memory tool calls to the local bridge; a device
+  client must support those calls or use a separately selected server-tool design.
+- **Earlier custom backend:** backend/ retains independent STT/Haiku/TTS, the
+  /tester push-to-talk page, bounded web search and numeric diagnostics. Those
+  features are not automatically available in the selected Agents path. Its
+  16 kHz PCM contract is not a verified contract for the main path or hardware.
+- **Remote operation:** the bridge/tools must eventually operate without this
+  workstation. The provider-hosted agent alone does not remove the current
+  local service dependency.
 
 ## Hardware and environment facts
 
@@ -129,15 +160,118 @@ uses Python/FastAPI with Claude Haiku 5.5; final device transport remains open.
 ## Choices still open
 
 - Final assistant voice, hosting, and the final device/server transport and audio
-  contract. Flash v2.5 is the accepted current TTS default (D21).
+  contract. The selected Agents path currently uses Flash v2; D21's Flash v2.5
+  default remains specific to the earlier custom backend.
 - Exact hardware inventory, wiring, development/flash computer, and tooling.
 - Budget, response latency, audio quality, and reliability targets.
 - Enclosure dimensions, assembly method, and whether motion belongs in the first
   deliverable. Old servo experiments are not a committed requirement.
 - Memory behavior, retention, privacy, and device provisioning.
+  D32 observed an offer to save a missing access code; no code was supplied or
+  written. Secret-handling and overly long unknown replies are pending policy/
+  polish choices, not selected changes.
+- Memory/context growth: the user raised large-store recall and a possible
+  context-managing agent on 2026-10-27. The inspected bridge requests top_k=5
+  per recall, returns text only, and applies no application-level text/token
+  budget, relevance threshold override or repeated-result filtering. This is
+  not a cap on cumulative conversation context. ElevenLabs owns that context;
+  supported history controls must be verified before promising custom trimming.
+  Clarification after checking native features: evaluate Mem0's existing
+  extraction and ranked retrieval first. [Dream documentation](https://docs.mem0.ai/platform/features/dream)
+  distinguishes automatic Supersede/Merge from opt-in Synthesis. D29's generic
+  [pricing](https://mem0.ai/pricing) recheck left their Free-plan behavior
+  unresolved; **D30 now confirms actual superseded links and working active-only
+  reads on this Free account**. Do not infer that all Dream subfeatures require
+  an upgrade, or that synthesis/dashboard access is included. The baseline's
+  retained old records were expected history, not proof of superseding failure.
+  Earlier suggestions to build duplicate/conflict management were premature.
+  Evaluate existing
+  features and recall/latency first; add custom rules or another model only for
+  demonstrated gaps. D29 starts the small isolated baseline; larger datasets
+  and a context agent remain unselected. ElevenLabs' cost
+  guidance recommends app-managed history summaries/windows; automatic live-call
+  compaction has not been confirmed from the checked documentation.
 
 Earlier FastAPI research did not select a framework. D10 supersedes that open
 choice for the first backend increment; it does not revive the old server stack.
+
+## Proposed remaining milestones after D27
+
+These describe remaining work; D28 completes the viewer, D29/D30 the retrieval
+evaluations, D31 active-only recall and D32 the small hosted text-answer baseline.
+D33/D34 stopped before recall; D35–D37 diagnosed and corrected the model
+budgets. D38 then passed all three opening details after 20 intervening
+exchanges with no Mem0 or target refresh. The initial small memory/context
+round is complete. Filler reasoning/instruction-following mistakes are recorded
+separately; other work and larger evaluations remain unselected.
+
+1. **Main service readiness:** consolidate the existing startup/configuration
+   around the selected path; establish stable owner identity and client access,
+   memory inspection/deletion and retention policy, and timing/error/available
+   usage diagnostics. Existing provider authentication/token issuance is already
+   implemented. D40 narrows the immediate target to the five personal-prototype
+   essentials, checked in STATUS.md: local single-owner access and provider
+   controls are sufficient now; custom deletion, consumer accounts and broader
+   diagnostics remain deferred proposals. General web-search parity is a separate missing feature; preserve
+   the earlier one-search bound and distinguish fees from token estimates.
+   Proposed memory-growth milestone: test correct recall, changed/outdated facts,
+   irrelevant matches, returned text size and latency with increasingly large
+   isolated datasets. Use offline checks for application bounds, and separate
+   real-provider evaluation for retrieval quality; mocked search cannot establish
+   it. Mem0 already provides ranked retrieval, thresholds and optional reranking
+   ([search reference](https://docs.mem0.ai/api-reference/memory/search-memories)).
+   Separately verify long-session behavior on the hosted ElevenLabs path. A
+   separate context agent is an open option, not a selected implementation.
+   Proposed first evaluation: a separate test owner with 30–50 fabricated facts
+   and fixed questions for recall, changed facts, duplicates and unknown answers.
+   Inspect stored records as well as retrieval/answers; wait for asynchronous
+   processing before scoring. Measure correctness, latency, returned text size
+   and usage; expand to 100/1,000 facts only within an agreed budget. Separately
+   test early-detail recall in a long ElevenLabs conversation with that detail
+   kept out of Mem0. This tests behavior, not proof of automatic compaction.
+   D29 authorizes the initial 30-fact evaluation within existing included Mem0
+   allowance only. See [evaluation procedure](../experiments/agents-mem0/evaluation/README.md)
+   and [first baseline results](../experiments/agents-mem0/evaluation/baseline-2026-10-27.md).
+   That baseline is complete: correct evidence in top five for 12/12 known
+   questions, but all three corrections ranked old assertions ahead of new
+   facts. The [D30 follow-up](../experiments/agents-mem0/evaluation/native-corrections-2026-10-27.md)
+   confirms old records are superseded and latest_only=true ranks each active
+   replacement first. D31 now implements that native filter for normal recall
+   while the viewer retains history. The [D32 answer baseline](../experiments/agents-mem0/evaluation/answers-2026-10-27.md)
+   passed all three corrected questions, four unknowns and one unchanged control
+   in fresh real hosted text sessions, with no writes or agent/prompt changes.
+   The [D33 context attempt](../experiments/agents-mem0/evaluation/context-2026-10-27.md)
+   and its explicitly authorized D34 repeat both stopped on the same provider LLM
+   timeout before recall; neither establishes forgetting. The
+   [D35 diagnosis](../experiments/agents-mem0/evaluation/timeout-diagnosis-2026-10-27.md)
+   confirms simple follow-ups work while the problematic question fails even
+   first in a fresh session. D36 then applied only the selected model wait change
+   to 10 seconds; the same question failed with “Brain returned no response”.
+   The reported 3,072 initiated output tokens suggest exhaustion of the 1,024
+   thinking-plus-answer cap across attempts, without exposed stop reasons. A
+   cap increase to 4,096 was selected in D37 and restored the same question's
+   correct answer at the ten-second wait (1,198 output tokens/4.876 s first byte).
+   This supports the budget diagnosis for that case. D38 then passed the original
+   frozen context scenario: all three early details after 20 exchanges, no
+   Mem0 access or target refresh. The initial small memory/context round is
+   complete; no further evaluation automatically. General reasoning/brevity
+   issues observed in filler replies are recorded separately. Historical-question
+   policy, reliability beyond this bounded trial, multi-hour behavior and
+   scaling remain open. Expansion remains unselected.
+2. **Device audio slice:** select and test a feasible device transport/audio
+   contract, then capture one question and play one answer on the physical board.
+   Include session credentials and memory-tool routing. Browser WebRTC acceptance
+   does not establish ESP32 transport or speaker echo behavior. Do this before
+   expanding the backend further, consistent with D06.
+3. **Device interaction:** add the selected activation control, display/status,
+   session ending, and network/error recovery; verify interruption behavior on
+   the physical microphone/speaker. Wake-word activation is still a choice.
+4. **Workstation-independent operation:** choose hosting, deploy the minimal
+   bridge/tools with authenticated access, and demonstrate the device working
+   with the development computer switched off. No host or spending is selected.
+5. **Enclosed desk prototype:** confirm wiring/power, assemble the USB-powered
+   enclosure, and verify repeated use, restarts, outages, latency and cost against
+   agreed targets. Battery and motion remain deferred/unselected.
 
 **Accepted LLM choice, 2026-10-24 (D13):** Claude Haiku 5.5
 (`claude-haiku-5-5`) for concise conversational replies. The earlier proposal is
