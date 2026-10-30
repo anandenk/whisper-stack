@@ -119,7 +119,7 @@ security remains unverified as detailed there.
 **The user approved the final README/diagram and explicitly requested commit
 and push to the existing private repository. The milestone is published.**
 Earlier no-commit/no-push holds were superseded for this publication.
-Milestone commit: [97e75e6 — Complete browser backend milestone](https://github.com/anandenk/whisper-stack/commit/97e75e66426a2ab359fa14701bf0adc20a4ea4c6).
+Milestone commit: [97e75e6 — Complete browser backend milestone](https://github.com/anandenk/whisper-stack/commit/23bc54cb4efb051ccd12252e34bea0070f990f78).
 This packages the completed browser-backend
 scope: selected Agents path, memory viewer, active-only recall, evaluated model
 budgets, offline setup/errors, synthetic evaluation runners/fixtures/reports,
