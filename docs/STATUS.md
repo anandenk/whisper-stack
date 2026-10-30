@@ -2,6 +2,28 @@
 
 Updated: 2026-10-30 (America/New_York).
 
+## Public-release Phase 3 implementation (2026-10-30)
+
+The user approved Phase 3. AGY implemented the scoped remediation in a separate
+local candidate: targeted privacy substitutions across three historical branches
+and an annotated tag; owner-local agent reference with a tracked example and
+synthetic offline reference fixture; focused legacy warnings; and factual sample
+provenance with upstream notice. Author names, chronology, license attribution
+and historical implementation logic were retained. Current local-owner behavior
+and provider settings were not intentionally changed.
+
+AGY reports static syntax/JSON/history checks completed. No application/browser
+suite, build, provider session, audio or hardware check ran in this phase. Those
+results are deferred to independent Phase 4 verification; static checks do not
+establish runtime correctness or publication readiness. The sample bytes remain
+unchanged, with final redistribution disposition still open. Nothing was pushed,
+and no remote visibility/ref change occurred.
+
+**Next concrete step:** independently verify the candidate and privacy/ref scope
+in Phase 4. Before a public release, resolve the sample disposition and review all
+remote/public surfaces. Earlier sections below are dated historical records;
+their statements that Phase 3 had not started are superseded by this section.
+
 ## Public-release Phase 2 review and plan (2026-10-30)
 
 The user authorized critical review/planning and an eventual AGY Phase 3 handoff;
