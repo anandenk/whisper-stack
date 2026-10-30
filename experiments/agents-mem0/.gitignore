@@ -4,3 +4,5 @@ output/
 __pycache__/
 node_modules/
 web/dist/
+agent-reference.json
+

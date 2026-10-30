@@ -1,7 +1,7 @@
 # Network diagnosis — summary
 
 **Date:** 2026-05-10
-**Network:** Enterprise Wi-Fi 2.4 GHz, RSSI -77 to -60 at the workstation/dorm spot
+**Network:** Enterprise Wi-Fi 2.4 GHz, RSSI -77 to -60 at the workstation/bench spot
 **Device:** ESP-WROOM-32, current main firmware (commit `db0b7ff`) with the PS_NONE + TCP buf 32768 fixes
 
 ## TL;DR — the conclusive answer

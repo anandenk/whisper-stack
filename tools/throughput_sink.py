@@ -1,5 +1,11 @@
 """Minimal HTTP sink for the firmware throughput-test mode.
 
+HISTORICAL / DIAGNOSTIC ONLY:
+Binds by default to 0.0.0.0:5000 without authentication to benchmark raw TCP/HTTP
+audio throughput from ESP32 boards across a LAN. Route /listen buffers the request
+body in memory via request.get_data(cache=False). Intended solely for private LAN
+diagnostics; do not expose to public networks.
+
 Listens on 0.0.0.0:5000 and accepts POST /converse (the path the existing
 http_client.c targets). Reads the chunked-transfer body, counts bytes,
 logs receive rate every second. Returns a minimal valid /converse JSON

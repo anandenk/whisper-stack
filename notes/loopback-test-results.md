@@ -1,15 +1,15 @@
 # Loopback test — audio corruption verdict + control experiment
 
 **Date:** 2026-05-10
-**Network:** Enterprise Wi-Fi 2.4 GHz, RSSI -77 to -81 at dorm spot
+**Network:** Enterprise Wi-Fi 2.4 GHz, RSSI -77 to -81 at bench spot
 **Firmware:** current `main` (commit `5d8ad66`)
 **Device state at end of session:** baseline firmware reflashed; back to commit-`5d8ad66`-equivalent
 
 ## TL;DR
 
 1. **Verdict:** audio corruption is **firmware-side**, not network-side.
-   16.5% of mic frames are recycled by the producer over 20 turns at the
-   dorm. Same network sustained **0 errors / 750 frames** in the
+   16.5% of mic frames are recycled by the producer over 20 turns on
+   the test bench. Same network sustained **0 errors / 750 frames** in the
    synthetic throughput test (commit `b0da8ef`), so transit is fine.
 2. **Root cause (localized this session):** **the per-frame OLED VU-bar
    redraw in `cb_frame` is the dominant source of producer-side

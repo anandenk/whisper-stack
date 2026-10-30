@@ -1,5 +1,11 @@
 """Flask app: /transcribe, /chat, /converse, /speak, /health, / (web client).
 
+HISTORICAL / UNSUPPORTED (May 2026 Prototype):
+Preserved for reference. Known limitations include disabled authentication
+by default when API_KEY is unset, in-memory audio body buffering on /converse
+and /listen, unhandled exception tracebacks in error responses, and unescaped
+innerHTML rendering in web/index.html. For current work, see experiments/agents-mem0/.
+
 Run from repo root:
     python -m server.app
 """

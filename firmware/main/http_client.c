@@ -1,4 +1,9 @@
 // /converse client — see header.
+//
+// HISTORICAL / UNSUPPORTED (May 2026 Prototype):
+// Communicates over unencrypted HTTP, transmitting audio streams and
+// API keys in plaintext. Suitable for isolated LAN testing only; does
+// not implement TLS encryption.
 
 #include "http_client.h"
 

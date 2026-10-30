@@ -53,7 +53,7 @@ chip port, on-device wake word ("Hey Kira" via esp-sr WakeNet),
 and AFE-driven mic-quality pipeline. **v2-M3/M4/M5 deferred** until
 the MAX98357A DAC is soldered up (those add on-device audio out,
 LiPo battery, and AEC respectively).
-**Built by:** Anand Enkhjin .
+**Built by:** Anand Enkhjin.
 **v3 prototyping** in tree (Kconfig-gated): RoboEyes face renderer,
 SG90 head servo with eye-leads / head-follows gaze coupling. v3
 custom-PCB hardware not yet ordered.
@@ -374,8 +374,8 @@ the AFE mic-quality pipeline.
 
 - **M1** — module skeleton: SSD1306 OLED via
   `esp_lcd_panel_ssd1306` + embedded 6×8 font, WiFi STA with
-  WPA2-PSK or WPA2-Enterprise (Kconfig choice; verified on WPA2-Enterprise
-  College's 802.1X dorm network), INMP441 mic with RMS/peak
+  WPA2-PSK or WPA2-Enterprise (Kconfig choice; verified on an
+  802.1X campus network), INMP441 mic with RMS/peak
   response.
 - **M2** — BOOT button → 3 s recording → `/converse` round-trip.
 - **M3** — VAD-bounded recording over HTTP chunked-transfer.

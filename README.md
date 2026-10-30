@@ -15,6 +15,9 @@ and able to work with the development computer switched off.
 [How it works](#how-it-works) · [Run locally](#run-locally) ·
 [Verification](#verification) · [Next milestones](#next-milestones)
 
+> [!WARNING]
+> **Historical Implementation and Security Notice**: Code in `server/`, `firmware/`, and `tools/` represents an unsupported May 2026 prototype with known limitations: authentication is disabled by default when `API_KEY` is empty, unencrypted HTTP carries plaintext audio and keys, enterprise Wi-Fi skips server CA certificate validation, raw request bodies are buffered in memory, exceptions may be exposed in error responses, and the legacy web client uses unsafe `innerHTML` rendering. Root dependency manifests (`requirements.txt`) and historical scripts belong solely to that earlier prototype. The recommended and maintained setup is the local, single-owner browser backend in `experiments/agents-mem0/`, which is intended for private local use and is not ready for public hosting, tunnels, or multi-tenant deployment.
+
 ## What works
 
 - **Voice conversation:** speech recognition, spoken replies, natural

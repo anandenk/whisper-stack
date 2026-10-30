@@ -231,7 +231,7 @@ been caught at the source.
       — bypassed mic / VAD / wake / OLED entirely, opened one chunked
       POST to `/converse`, wrote silent 1280-sample int16 frames at
       80 ms intervals (= 32 KB/s) for 60 s. **Result: 750 frames sent,
-      0 errors, 34 KB/s avg at RSSI -77 on Enterprise Wi-Fi 2.4 GHz**;
+      0 errors, 34 KB/s avg at RSSI -77 on WPA2-Enterprise 2.4 GHz**;
       `finish` returned `ESP_OK status=200`. Two transient `last_write`
       stalls (730 ms, 1030 ms) fully recovered. So the WiFi link, TCP
       path, and our HTTP code are all fine in isolation.
@@ -786,7 +786,7 @@ network; revisit if MITM threat model changes.
 To switch auth modes: `idf.py menuconfig` → "Whisper Stack Device" →
 "WiFi auth mode".
 
-### enterprise Wi-Fi deployment recipe (verified 2026-05-05)
+### Enterprise Wi-Fi deployment recipe (historical reference)
 
 The dorm-WiFi-doesn't-work blocker is resolved. Recipe for connecting
 the device to an 802.1X enterprise network:
@@ -794,28 +794,28 @@ the device to an 802.1X enterprise network:
 1. **Auth mode:** WPA2-Enterprise. **Outer identity:** empty.
    **Username:** bare username (e.g. `username`), **NOT** `username@example.edu`.
    **Password:** network login password. **EAP method:** PEAP-MSCHAPv2
-   (IDF default — no extra config). **CA cert validation:** off (if local network policy omits certificate validation).
-2. **First boot will associate but DHCP stalls.** A device new to
-   enterprise Wi-Fi lands on a quarantine VLAN (`10.x.x.x`) with no
-   route to the workstation subnet (`10.x.x.x`). The first
+   (IDF default — no extra config). **CA cert validation:** off (if local
+   network policy omits certificate validation).
+2. **First boot will associate but DHCP may stall.** A device new to
+   the enterprise network lands on a quarantine VLAN (`10.x.x.x`) with no
+   route to the workstation subnet. The first
    `wifi_init_sta_blocking` may even time out before DHCP completes
    the second time around — bumped the timeout to 90 s (`wifi.c`)
-   to cover FortiNAC's reclassification window.
-3. **Register the device's MAC at**
-   [https://network-access.example.edu/registration/](https://network-access.example.edu/registration/)
+   to cover the network access controller (NAC) reclassification window.
+3. **Register the device's MAC at the local network registration portal**
+   (e.g., `https://network-access.example.edu/registration/`)
    (MAC printed at boot in serial log + by `esptool.py read_mac`).
-   Network policy may limit devices per user. **The device must have associated
-   to enterprise Wi-Fi once before** this page accepts the MAC — if you
-   try to pre-register, you'll get "Unable to locate client for
+   Many captive/NAC systems require the device to have associated
+   once before the portal accepts the MAC — if you
+   try to pre-register, you may see "Unable to locate client for
    Physical Address". Flash → boot → see WiFi assoc → THEN register.
-4. **After registration, reboot the ESP-32.** FortiNAC will issue a
-   `10.x.x.x` lease (same /16 as the workstation). The first wifi
-   attempt may still fail while FortiNAC reclassifies; the firmware's
+4. **After registration, reboot the ESP-32.** The NAC will issue a
+   standard workstation lease. The first wifi
+   attempt may still fail while the NAC reclassifies; the firmware's
    retry logic + 90 s timeout handle it.
-5. **There is also a `IoT-Network` SSID** for IoT devices (WPA2-PSK,
-   no netid, separate VLAN). Not used here — cross-VLAN reachability
-   to a workstation on enterprise Wi-Fi was unverified, and the same
-   netid-based 802.1X path was simpler. Documented for future devices.
+5. **Separate IoT SSID (WPA2-PSK):** If an institution offers a separate
+   IoT SSID (WPA2-PSK without 802.1X), check cross-subnet reachability
+   before using it. Documented for future devices.
 
 ### 🚧 Notes / gotchas
 

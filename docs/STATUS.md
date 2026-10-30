@@ -1,6 +1,96 @@
 # Whisper Stack: current status and session handoff
 
-Updated: 2026-10-28 (America/New_York).
+Updated: 2026-10-30 (America/New_York).
+
+## Public-release Phase 2 review and plan (2026-10-30)
+
+The user authorized critical review/planning and an eventual AGY Phase 3 handoff;
+**remediation has not started**. Owner selected the privacy target: retain
+project/author attribution while removing unnecessary personal/institutional
+context. This supersedes Phase 1's stop boundary for review/planning only.
+
+The private Phase 2 review and plan
+proposed a separate sanitized full-history candidate; active/original repository
+and remote remain untouched. Public-main-only cleanup is insufficient: read-only
+remote ref query confirms main, two other branches and an annotated tag.
+Archived deployment docs also contain a non-generic login identifier, beyond
+ordinary institutional comments. Reports omit its value. Legacy benchmark
+`/listen` buffers a body, correcting Phase 1's overly broad streaming description.
+
+**Verified now, without application execution:** current main/refs/source unchanged;
+137 commit messages pattern-scanned with zero matches; OSV checked 49 distinct
+pinned Python package/version pairs (including the overlooked 44-package current
+lockfile), zero advisory matches; PyPI confirms all versions exist with no
+reported advisories/yanked files. Direct installed METADATA matches all 44/28
+pins, excluding pip. These are bounded metadata checks, not runtime or package
+integrity proof. `samples/jfk.wav` is byte-identical to whisper.cpp's pinned
+initial-release artifact; exact upstream hash/source now recorded. Original
+recording rights remain unverified; retain-with-provenance versus omit is a
+release decision, not a reason to modernize historical tools.
+
+Proposed work: targeted all-ref privacy cleanup in a separate candidate,
+owner-local agent reference/example with minimal setup/test updates, concise
+legacy warnings and factual fixture/third-party provenance. No blanket dependency
+upgrades, current security redesign, legacy runtime fixes, provider changes or
+publication actions. Phase 3 permissions/acceptance criteria are prepared, not
+activated. Existing audit artifacts are preserved; new review/evidence and these
+records remain local/uncommitted/unpushed. No apps/tests/builds/services/providers,
+hardware, installations, history rewrites or AGY implementation session ran.
+
+**Next concrete step:** owner reviews/approves Phase 3 scope; Codex then prepares
+the isolated candidate and delegates to AGY. No blocker to reviewing the plan.
+Asset redistribution disposition remains an explicit later release gate.
+
+## Public-release Phase 1 audit (2026-10-29) — stopped before remediation
+
+User selected a five-phase publication workflow and authorized **Phase 1 only**,
+with Antigravity doing the investigation. Verified CLI model:
+`gemini-3.8-flash-high`. Two separate unattended sessions examined an isolated,
+read-only tracked-source/history copy; original source/history were protected.
+The private Phase 1 audit report
+records source ref `4331756`, 172 tracked paths, 137 reachable commits and 626
+blobs. Inventory/pattern coverage is broader than manual review; no exhaustive
+security or public-release clearance is claimed.
+
+**Results:** no usable credential leak found by bounded regex scans or exact
+matching of three locally configured credential values. Two npm lockfile audits
+reported zero advisories. Python and firmware advisory coverage remains incomplete;
+no app code/tests/builds, live provider/cloud checks or hardware work ran.
+Historical author/contact metadata and personal/institutional context require an
+intended-disclosure decision. Exact redistribution provenance of `samples/jfk.wav`
+remains unresolved. Tracked provider IDs are configuration/privacy choices; no
+ID-only access bypass was established. Draft current-CSRF and generic memory
+injection claims were not substantiated. Legacy auth/transport/certificate,
+resource/error and unsafe DOM observations remain separate static runtime findings;
+targeted unsupported/historical warnings are proposed for later approval.
+
+No fixes, warning insertions, config changes, credential rotation, deletion,
+history rewrite, commit, push or visibility change. Existing STATUS edits and
+2026-10-28 report/evidence were preserved. New report/evidence and this handoff
+are local and uncommitted. Raw CLI logs and superseded drafts stay outside the
+repository in private scratch.
+
+**Next concrete step:** Phase 2 critical review of privacy/provenance decisions,
+coverage gaps and the initial findings, then agree minimal remediation scope.
+Stop after Phase 1; no remediation authorized. No blocker to reviewing the report.
+
+## Independent security review (2026-10-28)
+
+Fresh source/history review requested by the user; no prior audit report or audit
+skill used. Findings and coverage in the private review include
+legacy enterprise-Wi-Fi certificate validation, plaintext device transport,
+legacy Flask access/resource/error risks, and public-release privacy review.
+Gitleaks found no reachable-history leaks; configured-key matching across all
+626 reachable blobs found none. Two intended ignored local credential files
+were detected; both are mode 0600. Two npm and two pinned Python advisory scans
+returned zero known advisories. 49 mocked selected-path checks passed; an
+isolated legacy route test confirmed cross-origin upload processing and raw
+exception disclosure. No provider/hardware operations or remediation.
+Audit report/evidence and this handoff remain local, uncommitted and unpushed.
+
+Next concrete step: review the public-release privacy findings, then select
+remediation scope. No blocker to reviewing the report; live/cloud/hardware
+security remains unverified as detailed there.
 
 ## Browser-backend milestone publication (D42)
 
@@ -433,8 +523,8 @@ links rebased. The saved project one-liner is retained verbatim.
 
 ### Current implementation
 
-- Separate agent **Whisper Stack - D23 Haiku 5.5 + Mem0 test**,
-  `agent_placeholder_000000000000000000`: native `claude-haiku-5-5`, low effort,
+- Separate agent **Whisper Stack - D23 Haiku 5.5 + Mem0 test**
+  (configured in `agent-reference.json`): native `claude-haiku-5-5`, low effort,
   4096-token thinking/answer cap, 10-second model wait, disabled alternate LLM
   fallback, required authentication, and
   response-returning `addMemories`/`retrieveMemories` client tools.

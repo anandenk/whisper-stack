@@ -75,15 +75,16 @@ facts and a fresh owner to investigate extraction/retrieval without changing the
 conversation tester. Its default command is offline; live runs consume Mem0
 allowance and require a current account/budget check (D29).
 
-- Agent `agent_placeholder_000000000000000000`, named
-  **Whisper Stack - D23 Haiku 5.5 + Mem0 test**.
+- Configured ElevenLabs Conversational AI Agent (configured via
+  `agent-reference.json`, template in `agent.json`).
 - Native `claude-haiku-5-5`, low effort, 4,096-token thinking/answer cap,
   10-second model wait, alternate LLM fallback
   disabled, concise answers. Authentication required.
 - George and `eleven_flash_v2`. The English Agents API rejected Flash v2.5;
   the working backend retains its approved Flash v2.5 default.
 - Tools: `addMemories` and `retrieveMemories`, both waiting for results.
-  `agent-reference.json` holds their existing IDs. Do not recreate on resume.
+  `agent-reference.json` holds your configured agent and tool IDs (copy from
+  `agent-reference.example.json`).
 - Hosted Mem0; stable local USER_ID `whisper-stack-d23-test` fixes both write and
   search scope. Tool arguments cannot select another user. SDK telemetry disabled.
 - Mem0 V3 saves may be PENDING; that means submitted, not confirmed available.
@@ -186,10 +187,10 @@ existing credential file. Python pins and npm lockfile are independent of the
 working backend. `web/dist/`, `.env`, environments, dependencies and `output/`
 are ignored. `agent.json` preserves the current selected remote configuration
 (including quiet waiting, the 4,096-token thinking/answer cap and 10-second
-model-response wait); `tools.json` preserves the tool definitions. The
-tool IDs in `agent-reference.json` were attached to the agent at creation. These
-IDs refer to existing resources in the user's account; checkout does not create
-or provision another agent automatically.
+model-response wait); `tools.json` preserves the tool definitions. To configure
+your private agent, copy `agent-reference.example.json` to `agent-reference.json`
+and supply your own ElevenLabs agent ID and tool IDs created using `agent.json`
+and `tools.json`. Checkout does not create or provision an agent automatically.
 
 ```sh
 experiments/agents-mem0/.venv/bin/python experiments/agents-mem0/run.py --verify

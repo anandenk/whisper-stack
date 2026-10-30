@@ -841,7 +841,7 @@ snooze (a meeting, then auto-resume), and a non-voice mid-turn cancel.
 | **4** | **`server/usage.py`** | ✅ **shipped** — `record_wake_detection()` + `wake_detections` field in `/health.usage`. |
 | **4** | **`tests/stage11_listen.py`** | ✅ **shipped** — wire-format negatives, EOF path, best-effort detection, in-process idle-timeout test. |
 | 4 | `firmware/main/listen_stream.c` | ✅ shipped — raw-socket chunked POST to /listen, 500 ms pre-roll ring, SO_LINGER l_linger=0, 30 s heartbeat. NOT esp_http_client (full-duplex pattern). |
-| **WPA2-Enterprise** | `firmware/main/wifi.c` + `Kconfig.projbuild` | ✅ shipped — Kconfig choice between PSK and WPA2-Enterprise (PEAP-MSCHAPv2 via `esp_eap_client_*`). enterprise Wi-Fi deployment recipe in CLAUDE.md. |
+| **WPA2-Enterprise** | `firmware/main/wifi.c` + `Kconfig.projbuild` | ✅ shipped — Kconfig choice between PSK and WPA2-Enterprise (PEAP-MSCHAPv2 via `esp_eap_client_*`). Enterprise Wi-Fi deployment recipe in docs. |
 | **Sessions** | `firmware/main/Kconfig.projbuild` + `http_client.c` | ✅ shipped — `WS_SESSION_ID` Kconfig (default `"esp32"`); appended to /converse URL as `?session_id=...` for multi-turn memory. |
 | 5 | `firmware/main/main.c` + `vad.h`/`vad.c` | ✅ shipped — `do_one_turn()` helper + continuous-mode loop in `do_round_trip_streaming_with_preroll()`; `vad_record()` gained `initial_timeout_ms` param; `WS_CONVERSATION_TIMEOUT_MS = 30000`. Drop back to /listen on `VAD_STOP_NO_SPEECH` after the 30 s window. Also lowered `VAD_PEAK_THRESHOLD` 300 → 200 based on bench data from continuous-chat sessions. |
 | 6 | `firmware/main/oled.{c,h}` | ✅ shipped — added `oled_draw_bar(line, fill_px, marker_px)` + `oled_flush_row(line)` for partial-row updates. |
@@ -861,7 +861,7 @@ snooze (a meeting, then auto-resume), and a non-voice mid-turn cancel.
 | 8 | `firmware/main/Kconfig.projbuild` | Extended — "M8 — IR remote (mute / snooze / cancel)" submenu with six configs (enabled, GPIO, three hex button codes, snooze duration). |
 | - | `firmware/sdkconfig.defaults` | ✅ shipped — committed defaults with placeholders; user fills via menuconfig. |
 | - | `firmware/CMakeLists.txt` | ✅ shipped — ESP-IDF project file with all components in REQUIRES. |
-| - | `CLAUDE.md` | ✅ shipped — "Firmware" section, M4 gotchas, VAD tuning, enterprise Wi-Fi recipe. |
+| - | `CLAUDE.md` | ✅ shipped — "Firmware" section, M4 gotchas, VAD tuning, Enterprise Wi-Fi recipe. |
 | - | `notes/esp32-firmware-plan.md` | this file |
 
 ---

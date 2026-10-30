@@ -34,14 +34,14 @@ def configuration():
     try:
         reference = json.loads((HERE / "agent-reference.json").read_text())
     except OSError:
-        raise ConfigurationError("Cannot read agent-reference.json; restore the existing agent reference.") from None
+        raise ConfigurationError("Cannot read agent-reference.json; copy agent-reference.example.json to agent-reference.json and configure your agent.") from None
     except (ValueError, UnicodeError):
-        raise ConfigurationError("Invalid agent-reference.json; restore the existing agent reference.") from None
+        raise ConfigurationError("Invalid agent-reference.json; see agent-reference.example.json for required schema.") from None
     if (not isinstance(reference, dict)
             or not isinstance(reference.get("agent_id"), str) or not reference["agent_id"].strip()
             or not isinstance(reference.get("tool_ids"), list) or len(reference["tool_ids"]) != 2
             or any(not isinstance(item, str) or not item.strip() for item in reference["tool_ids"])):
-        raise ConfigurationError("agent-reference.json must identify the existing agent and two memory tools.")
+        raise ConfigurationError("agent-reference.json must identify the agent and two memory tools; see agent-reference.example.json.")
     return values, reference
 
 

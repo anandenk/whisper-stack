@@ -117,19 +117,27 @@ class AnswerEvaluationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_snapshot_accepts_selected_cap_and_rejects_old_or_unselected_caps(self):
         local = json.loads((HERE / "agent.json").read_text())
-        reference = json.loads((HERE / "agent-reference.json").read_text())
+        reference = {"agent_id": "test-agent", "tool_ids": ["save-tool", "recall-tool"]}
         local["conversation_config"]["agent"]["prompt"]["tool_ids"] = reference["tool_ids"]
         local["platform_settings"]["overrides"] = {"conversation_config_override": {"conversation": {"text_only": True}}}
         self.runner.request = AsyncMock(return_value=local)
-        greeting, digest = await self.runner.agent_snapshot()
-        self.assertEqual(greeting, local["conversation_config"]["agent"]["first_message"])
-        self.assertEqual(len(digest), 64)
-        for cap in (1024, 8192):
-            changed = copy.deepcopy(local)
-            changed["conversation_config"]["agent"]["prompt"]["max_tokens"] = cap
-            self.runner.request = AsyncMock(return_value=changed)
-            with self.assertRaises(EvaluationStopped):
-                await self.runner.agent_snapshot()
+        orig_read_text = Path.read_text
+
+        def fake_read_text(path_self, *args, **kwargs):
+            if path_self.name == "agent-reference.json":
+                return json.dumps(reference)
+            return orig_read_text(path_self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", fake_read_text):
+            greeting, digest = await self.runner.agent_snapshot()
+            self.assertEqual(greeting, local["conversation_config"]["agent"]["first_message"])
+            self.assertEqual(len(digest), 64)
+            for cap in (1024, 8192):
+                changed = copy.deepcopy(local)
+                changed["conversation_config"]["agent"]["prompt"]["max_tokens"] = cap
+                self.runner.request = AsyncMock(return_value=changed)
+                with self.assertRaises(EvaluationStopped):
+                    await self.runner.agent_snapshot()
 
 
 if __name__ == "__main__":

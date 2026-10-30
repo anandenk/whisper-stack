@@ -1,5 +1,10 @@
 // WiFi STA — minimal blocking-connect bring-up for M1.
 //
+// HISTORICAL / UNSUPPORTED (May 2026 Prototype):
+// Server certificate validation is deliberately omitted in WPA2-Enterprise
+// mode, exposing credentials to rogue access points. Intended for personal
+// bench testing on trusted networks only.
+//
 // Why blocking: the device's whole purpose is to talk to the server; if
 // there's no network there's nothing useful to do. Failure here is
 // terminal — log loudly and let the watchdog reset us, the next boot
