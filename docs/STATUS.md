@@ -2,6 +2,35 @@
 
 Updated: 2026-10-30 (America/New_York).
 
+## Public-source verification and release preparation (2026-10-30)
+
+The scoped public-source review and remediation are verified for the existing
+local, single-owner prototype. Independent checks preserve historical topology,
+authorship and legacy runtime logic while removing selected personal/institutional
+identifiers from the intended branch/tag histories. Provider keys and raw local
+output remain excluded; personal agent references are owner-local configuration.
+
+Fresh mocked verification passed 49 Python and 10 browser tests on macOS using
+dummy credentials, blocked private files/external networking, bounded scratch
+storage and scoped local fixture traffic. The owner explicitly accepted this
+practical test boundary without a finite memory limit or isolated loopback namespace.
+These results do not establish live provider/account controls, acoustic or device
+behavior, portability to other systems, multi-user safety or public-hosting readiness.
+
+The historical audio fixture is retained with its documented upstream attribution
+and rights caveat. Legacy source is historical/unsupported; root and directory
+warnings describe known limitations. The working architecture and next device
+milestone remain unchanged. No new backend feature, deployment or provider change
+was selected by source-publication work.
+
+The fresh-repository release plan preserves the canonical project URL while the
+original history remains private. Upload and visibility changes require a separate
+final owner approval. Earlier sections below are dated historical records; their
+pending-verification or asset-decision statements are superseded by this section.
+
+**Next concrete step:** approve the concrete publication plan, then verify only
+the intended sanitized refs on the new remote before changing its visibility.
+
 ## Public-release Phase 3 implementation (2026-10-30)
 
 The user approved Phase 3. AGY implemented the scoped remediation in a separate

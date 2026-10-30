@@ -45,4 +45,4 @@ SOFTWARE.
 
 ### Disposition
 
-The sample bytes are currently retained with factual provenance. The final disposition (retain with upstream attribution vs. omit binary from public release) is flagged as an owner decision for Phase 5.
+The owner selected retaining the existing sample bytes for public redistribution with the upstream attribution and caveat above (2026-10-30). This records the accepted provenance basis; it does not add an independent assurance about original recording rights.
